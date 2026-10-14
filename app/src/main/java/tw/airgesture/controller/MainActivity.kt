@@ -43,7 +43,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val root = ScrollView(this).apply { fillViewport = true }
+        val root = ScrollView(this).apply { isFillViewport = true }
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             val p = dip(22)
@@ -94,7 +94,7 @@ class MainActivity : ComponentActivity() {
         cooldownText = label("操作冷卻時間", 17f)
         cooldown = SeekBar(this).apply {
             max = 11
-            progress = ((Settings.cooldown(this) - 500) / 100).toInt()
+            progress = ((Settings.cooldown(this@MainActivity) - 500) / 100).toInt()
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
                     cooldownText.text = "操作冷卻時間：${500 + value * 100} 毫秒"
