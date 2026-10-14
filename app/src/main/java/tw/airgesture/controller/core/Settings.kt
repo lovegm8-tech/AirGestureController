@@ -8,6 +8,7 @@ object Settings {
     private const val KEY_COOLDOWN = "cooldown"
     private const val KEY_PERFORMANCE = "performance_mode"
     private const val KEY_CURSOR_RANGE = "cursor_range"
+    private const val KEY_TILTED_PALM_ASSIST = "tilted_palm_assist"
 
     fun sensitivity(context: Context): Int = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         .getInt(KEY_SENSITIVITY, 1).coerceIn(0, 2)
@@ -23,18 +24,25 @@ object Settings {
     fun cursorRange(context: Context): Int = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         .getInt(KEY_CURSOR_RANGE, 2).coerceIn(0, 3)
 
+    /** Opt-in: preserve v0.2.3 original behavior until users enable angle support. */
+    fun tiltedPalmAssist(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_TILTED_PALM_ASSIST, false)
+
     fun save(
         context: Context,
         sensitivity: Int,
         cooldown: Long,
         mode: Int = performanceMode(context),
-        cursorRange: Int = cursorRange(context)
+        cursorRange: Int = cursorRange(context),
+        tiltedPalmAssist: Boolean = tiltedPalmAssist(context)
     ) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putInt(KEY_SENSITIVITY, sensitivity.coerceIn(0, 2))
             .putLong(KEY_COOLDOWN, cooldown.coerceIn(500L, 1600L))
             .putInt(KEY_PERFORMANCE, mode.coerceIn(0, 2))
             .putInt(KEY_CURSOR_RANGE, cursorRange.coerceIn(0, 3))
+            .putBoolean(KEY_TILTED_PALM_ASSIST, tiltedPalmAssist)
             .apply()
     }
 
