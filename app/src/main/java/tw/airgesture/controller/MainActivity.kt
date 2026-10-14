@@ -31,6 +31,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var startButton: Button
     private lateinit var accessButton: Button
     private lateinit var sensitivity: Spinner
+    private lateinit var performance: Spinner
     private lateinit var cooldown: SeekBar
     private lateinit var cooldownText: TextView
     private val handler = Handler(Looper.getMainLooper())
@@ -84,6 +85,16 @@ class MainActivity : ComponentActivity() {
         label("重複操作：手掌停穩約 0.5 秒即可準備下一次手勢，不必移出鏡頭。", 13f)
         label("懸浮辨識燈：灰色＝未看到張掌、綠色＝已抓到張掌、藍色閃一下＝已觸發操作。指示燈不會擋住點擊。", 13f)
 
+        label("辨識效能模式", 19f, true)
+        performance = Spinner(this)
+        performance.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
+            listOf("省電（待命約 3 次／秒、手勢約 7 次／秒）",
+                "智慧平衡（待命約 5 次／秒、手勢約 10 次／秒）",
+                "高反應（待命約 9 次／秒、手勢約 12 次／秒）"))
+        performance.setSelection(Settings.performanceMode(this))
+        content.addView(performance, LinearLayout.LayoutParams(-1, dip(54)))
+        label("預設為智慧平衡。變更後請停止並重新啟動辨識才會生效。", 13f)
+
         label("手勢靈敏度", 19f, true)
         sensitivity = Spinner(this)
         sensitivity.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
@@ -106,7 +117,7 @@ class MainActivity : ComponentActivity() {
         cooldownText.text = "操作冷卻時間：${500 + cooldown.progress * 100} 毫秒"
         content.addView(cooldown, LinearLayout.LayoutParams(-1, dip(48)))
         button("儲存設定") {
-            Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong())
+            Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition)
             toast("已儲存；重新啟動辨識後生效")
         }
         label("隱私：App 不要求網路權限，影像只在本機暫時分析，不會錄影或上傳。\n啟動後可從通知列隨時停止前鏡頭。", 13f)
@@ -134,7 +145,7 @@ class MainActivity : ComponentActivity() {
 
     private fun startControl() {
         if (!GestureAccessibilityService.isReady()) { toast("無障礙服務尚未啟用"); return }
-        Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong())
+        Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition)
         val intent = Intent(this, CameraGestureService::class.java).setAction(CameraGestureService.START)
         try {
             ContextCompat.startForegroundService(this, intent)
