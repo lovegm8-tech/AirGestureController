@@ -9,6 +9,7 @@ object Settings {
     private const val KEY_PERFORMANCE = "performance_mode"
     private const val KEY_CURSOR_RANGE = "cursor_range"
     private const val KEY_TILTED_PALM_ASSIST = "tilted_palm_assist"
+    private const val KEY_FAST_SWIPE_ASSIST = "fast_swipe_assist"
 
     fun sensitivity(context: Context): Int = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         .getInt(KEY_SENSITIVITY, 1).coerceIn(0, 2)
@@ -29,13 +30,19 @@ object Settings {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getBoolean(KEY_TILTED_PALM_ASSIST, false)
 
+    /** Experimental, independently switchable fast-swipe tracking. Defaults OFF. */
+    fun fastSwipeAssist(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_FAST_SWIPE_ASSIST, false)
+
     fun save(
         context: Context,
         sensitivity: Int,
         cooldown: Long,
         mode: Int = performanceMode(context),
         cursorRange: Int = cursorRange(context),
-        tiltedPalmAssist: Boolean = tiltedPalmAssist(context)
+        tiltedPalmAssist: Boolean = tiltedPalmAssist(context),
+        fastSwipeAssist: Boolean = fastSwipeAssist(context)
     ) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putInt(KEY_SENSITIVITY, sensitivity.coerceIn(0, 2))
@@ -43,12 +50,14 @@ object Settings {
             .putInt(KEY_PERFORMANCE, mode.coerceIn(0, 2))
             .putInt(KEY_CURSOR_RANGE, cursorRange.coerceIn(0, 3))
             .putBoolean(KEY_TILTED_PALM_ASSIST, tiltedPalmAssist)
+            .putBoolean(KEY_FAST_SWIPE_ASSIST, fastSwipeAssist)
             .apply()
     }
 
     fun engineOptions(context: Context): GestureDecisionEngine.Options = GestureDecisionEngine.Options(
         swipeDistance = when (sensitivity(context)) { 0 -> .18f; 2 -> .09f; else -> .13f },
         cooldownMs = cooldown(context),
-        stillToRearmMs = 500L
+        stillToRearmMs = 500L,
+        fastSwipeAssistEnabled = fastSwipeAssist(context)
     )
 }
