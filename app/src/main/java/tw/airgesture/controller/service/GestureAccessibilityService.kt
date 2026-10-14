@@ -2,6 +2,8 @@ package tw.airgesture.controller.service
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.app.KeyguardManager
+import android.os.PowerManager
 import android.graphics.Path
 import android.graphics.Point
 import android.os.Handler
@@ -70,6 +72,10 @@ class GestureAccessibilityService : AccessibilityService() {
 
     @Suppress("DEPRECATION")
     private fun execute(action: GestureDecisionEngine.Action) {
+        // Do not interact with the lock screen or a turned-off screen.
+        val keyguard = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
+        val power = getSystemService(POWER_SERVICE) as PowerManager
+        if (keyguard.isKeyguardLocked || !power.isInteractive) return
         // Avoid tapping this controller's own settings UI.
         if (activePackage == packageName) return
         val manager = getSystemService(WINDOW_SERVICE) as WindowManager
