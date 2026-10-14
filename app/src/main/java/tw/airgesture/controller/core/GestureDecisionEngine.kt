@@ -153,7 +153,13 @@ class GestureDecisionEngine(private val options: Options = Options()) {
         // CLOSED_FIST: deliberately require a recent open palm rather than any arbitrary fist.
         if (shape == Shape.CLOSED_FIST) {
             openFrames = 0
-            if (anchorY == null || (options.fastSwipeAssistEnabled && !fistArmed) || lastOpenTime == Long.MIN_VALUE || nowMs - lastOpenTime > options.fistWindowMs) {
+            if (options.fastSwipeAssistEnabled && !fistArmed) {
+                // An unconfirmed palm followed by a fist must not leave a stale
+                // swipe origin for the next pointing/open-palm sequence.
+                disarm()
+                return null
+            }
+            if (anchorY == null || lastOpenTime == Long.MIN_VALUE || nowMs - lastOpenTime > options.fistWindowMs) {
                 fistFrames = 0
                 return null
             }
