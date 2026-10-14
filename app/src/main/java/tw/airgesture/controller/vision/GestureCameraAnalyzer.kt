@@ -85,9 +85,15 @@ class GestureCameraAnalyzer(
             val angleResult = tiltAssist.resolve(categoryName, score, xy, now)
             onPalmDetection(angleResult.showPalmIndicator)
             scheduler.onAnalyzed(now, foundHand)
-            val shape = if (angleResult.useLandmarkFallback) {
-                GestureDecisionEngine.Shape.OPEN_PALM
-            } else originalShape
+            val shape = when {
+                angleResult.useLandmarkFallback -> GestureDecisionEngine.Shape.OPEN_PALM
+                // The MediaPipe "None" label can appear during motion blur while
+                // hand landmarks are still available. In experimental fast mode,
+                // treat this as a short gap, not as a confirmed different gesture.
+                options.fastSwipeAssistEnabled && categoryName == "None" ->
+                    GestureDecisionEngine.Shape.NO_HAND
+                else -> originalShape
+            }
             // Geometric evidence is not the classifier's score. Use the existing
             // minimum only after conservative two-frame geometric confirmation.
             val effectiveConfidence = if (angleResult.useLandmarkFallback) .65f else score
