@@ -11,12 +11,14 @@ import android.os.Looper
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import tw.airgesture.controller.core.GestureDecisionEngine
+import tw.airgesture.controller.core.PointerDwellEngine
 
 /** Injects only user-requested touch gestures; it never reads view contents. */
 class GestureAccessibilityService : AccessibilityService() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var activePackage: String? = null
     private var indicator: HandIndicator? = null
+    private var cursor: PointerOverlay? = null
 
     companion object {
         @Volatile private var current: GestureAccessibilityService? = null
@@ -36,7 +38,26 @@ class GestureAccessibilityService : AccessibilityService() {
         }
         fun hideIndicator() {
             current?.let { service -> service.mainHandler.post {
-                if (current === service) service.indicator?.hide()
+                if (current === service) {
+                    service.indicator?.hide()
+                    service.cursor?.hide()
+                }
+            } }
+        }
+
+        fun pointerUpdated(result: PointerDwellEngine.Result?) {
+            current?.let { service -> service.mainHandler.post {
+                if (current !== service) return@post
+                if (result == null) {
+                    service.cursor?.hide()
+                } else {
+                    if (service.cursor == null) service.cursor = PointerOverlay(service)
+                    val position = service.cursor?.update(result.x, result.y, result.progress, result.click)
+                    if (result.click && position != null) {
+                        service.tapAt(position.first, position.second)
+                        service.indicator?.flashAction()
+                    }
+                }
             } }
         }
         fun send(action: GestureDecisionEngine.Action) {
@@ -66,6 +87,8 @@ class GestureAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         indicator?.hide()
         indicator = null
+        cursor?.hide()
+        cursor = null
         if (current === this) current = null
         super.onDestroy()
     }
@@ -100,9 +123,26 @@ class GestureAccessibilityService : AccessibilityService() {
                 path.moveTo(x, y)
                 duration = 80L
             }
+            GestureDecisionEngine.Action.SWIPE_BACK -> {
+                // Android back-gesture edge: from the extreme left toward the right.
+                path.moveTo(size.x * .015f, y)
+                path.lineTo(size.x * .60f, y)
+                duration = 310L
+            }
         }
         val stroke = GestureDescription.StrokeDescription(path, 0L, duration)
         val gesture = GestureDescription.Builder().addStroke(stroke).build()
+        dispatchGesture(gesture, null, null)
+    }
+
+    private fun tapAt(x: Float, y: Float) {
+        // One-finger dwell never taps the locked screen or our own settings page.
+        val keyguard = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
+        val power = getSystemService(POWER_SERVICE) as PowerManager
+        if (keyguard.isKeyguardLocked || !power.isInteractive || activePackage == packageName) return
+        val path = Path().apply { moveTo(x, y) }
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0L, 80L)).build()
         dispatchGesture(gesture, null, null)
     }
 }
