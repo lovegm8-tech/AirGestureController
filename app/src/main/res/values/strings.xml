@@ -1,4 +1,4 @@
 <resources>
     <string name="app_name">隔空手勢控制器</string>
-    <string name="accessibility_description">使用本機前鏡頭辨識手勢，在其他 App 執行上滑、下滑及點擊螢幕中央，不讀取視窗內容。</string>
+    <string name="accessibility_description">僅在您開啟控制後，依照前鏡頭辨識到的手勢模擬上下滑動或點擊畫面中央。不讀取網頁文字，也不儲存攝影畫面。</string>
 </resources>

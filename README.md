@@ -1,6 +1,6 @@
-# 隔空手勢控制器 AirGestureController v0.1.1（原始碼預覽）
+# 隔空手勢控制器 AirGestureController v0.2.0（原始碼預覽）
 
-目標手機：Samsung S26 Ultra（Android 16），可延伸至 Android 10 以上。**目前只有原始碼及純 JVM 邏輯測試，尚未編譯 APK，也沒有做手機實測。**
+目標手機：Samsung S26 Ultra 與 Samsung S25 系列，其他相容 Android 10（API 29）以上且具前鏡頭的手機也可嘗試。不同機型須實測驗證。**目前只有原始碼及純 JVM 邏輯測試，尚未編譯 APK，也沒有做手機實測。**
 
 ## 核心操作
 
@@ -17,9 +17,10 @@
 - **無廣告、無訂閱、無 `INTERNET` 權限**；相機畫面僅在手機本機以 MediaPipe 辨識，不錄影、不上傳。
 - 使用 **CameraX + Camera 前景服務**，從 App 可見時按「啟動」，再切換到其他 App。相機使用狀態會出現在 Android 系統提示與持續通知。
 - **Android AccessibilityService** 對螢幕發出真實觸控等效的 `dispatchGesture()` 操作；不讀取頁面文字（`canRetrieveWindowContent=false`）。
-- **誤觸保護**：需連續辨識張掌；滑動需達距離門檻；握拳必須發生於張掌之後；每次觸發後必須手暫時移出辨識區／放鬆，並遵守冷卻時間。
+- **誤觸保護（A 方案）**：需連續辨識張掌；滑動需達距離門檻；握拳必須發生於張掌之後；操作後手掌停穩約 500ms 且冷卻結束即可重新使用，不必移出鏡頭。
 - **可調整設定**：低／標準／高靈敏度、冷卻時間 500~1600ms。
 - **資源控制**：640×480 輸入、約 9fps 推論、CPU 推論。
+- **右上角懸浮指示燈**：灰色＝尚未辨識張掌；綠色＝張掌辨識成功；藍色閃光＝觸發手勢。不新增 SYSTEM_ALERT_WINDOW 權限，也不攔截觸控。
 - **停止方式**：App 首頁「停止」或通知列「停止辨識」。
 
 ## 重要使用限制
@@ -38,17 +39,30 @@
 - `app/src/main/java/tw/airgesture/controller/vision/GestureCameraAnalyzer.kt`：CameraX RGBA 影格 + MediaPipe 模型。
 - `app/src/main/java/tw/airgesture/controller/service/CameraGestureService.kt`：前鏡頭前景服務與常駐通知。
 - `app/src/main/java/tw/airgesture/controller/service/GestureAccessibilityService.kt`：全域模擬滑動／點擊。
+- `app/src/main/java/tw/airgesture/controller/service/HandIndicator.kt`：跨 App 懸浮辨識燈。
 - `app/src/test/`：JVM 單元測試；`dev/SmokeTest.kt`：可用 `kotlinc` 獨立執行的快速測試。
 
-## 未來編譯步驟（GitHub Actions 額度恢復後才做）
+## 公開儲存庫與 APK 編譯
 
-1. 將整個專案放進新的 GitHub 儲存庫；建議私有儲存庫以便日後管理版本。
-2. 在 GitHub Actions 手動觸發 **Build test APK (manual only)**。該 workflow **只接受 `workflow_dispatch`，不會因為 push 自動消耗額度**。
-3. Workflow 使用 Java 17、Gradle 8.9、Android SDK 35 建置 `assembleDebug`，上傳 debug APK 作為 artifact。
-4. Gradle `preBuild` 會從 Google 官方模型位置下載 `gesture_recognizer.task` 至資源檔後打包；**執行中的 App 不下載模型，也不需要網路權限**。
-5. 手機安裝並授權無障礙和相機，從 App 內啟動後切換至瀏覽器／影音 App 進行實測。
+1. 使用者在自己的 GitHub 建立一個**新的公開儲存庫**，名稱可用 `AirGestureController`。不要將其他私人 App 的程式碼或簽章檔案一起上傳。
+2. 此版本 `.github/workflows/build-apk.yml` 只允許 **手動執行**，沒有 push 或 PR 自動編譯。僅准許 `main` 分支執行，以避免讓不可信任程式碼接觸簽章 Secrets。
+3. 第一次測試可選 `debug`，但 **GitHub 每次的新 runner 可能使用不同的 Debug 簽章**，所以測試 APK 不保證可覆蓋安裝。
+4. 正式版本請先在可信任的本機環境建立一個**專屬** Android release keystore，安全備份檔案與密碼，再手動在 GitHub → Settings → Secrets and variables → Actions 設定：
+   - `AIRGESTURE_KEYSTORE_BASE64`：keystore 的 base64 內容，**不是私鑰文字直接貼在工作流程中**。
+   - `AIRGESTURE_STORE_PASSWORD`：keystore 密碼。
+   - `AIRGESTURE_KEY_ALIAS`：簽章別名。
+   - `AIRGESTURE_KEY_PASSWORD`：該別名的私鑰密碼。
+5. 設定完後手動選 `signed-release`；若任何 Secrets 缺失，該流程**直接失敗**，不會悄悄以臨時金鑰簽章。
+6. CI 會驗證 APK 沒有 `INTERNET` 權限，並用 `apksigner` 驗證 APK 簽名，再提供產物下載。需要保留同一份 keystore，後續更新才能維持簽章一致。
 
-> 目前 Actions 的 debug keystore 通常每個新的 CI runner 生成不同簽名。後續要長期直接覆蓋更新 APK 時，應先設置**固定簽章金鑰**，並以 GitHub Secrets 保存，不要把金鑰放入儲存庫。此處暫不宣稱可以直接覆蓋更新。
+### 安全承諾與未完成驗證
+
+- **目前沒有建立或收集任何簽章金鑰**。不要把 keystore、密碼、base64 值、截圖傳到聊天或放進公開 GitHub 儲存庫。
+- 程式不宣告 Android `INTERNET` 權限，且沒有加入廣告或分析 SDK；但仍需等首次 Android 完整編譯，確認合併後 Manifest 與 APK 權限檢查結果。
+- 下載 Google 官方 MediaPipe `.task` 模型是在 **CI 編譯期**，不是手機執行時。這個模型目前使用版本化 HTTPS 來源，但**尚未建立模型檔案的固定 SHA-256 雜湊驗證**；首次正式發佈前建議補齊供應鏈驗證。
+- CI 依賴第三方 GitHub Actions 和 Maven 依賴。公開發布正式版前應進一步鎖定 GitHub Actions 版本雜湊並做依賴審查。
+- 使用者仍須親自在 GitHub 建立儲存庫並將其授權給 ChatGPT GitHub 連線；目前沒有自動建立儲存庫與設定 Secrets 的工具權限。
+
 
 ## 官方依據與模型來源
 
@@ -64,3 +78,4 @@
 - 張掌握拳點擊畫面中心，長時間握拳不連點。
 - 手遮擋、低光線、手部潮濕、手機直橫切換時的穩定性。
 - 20~30 分鐘使用期間的電量、發熱與溫度限制。
+

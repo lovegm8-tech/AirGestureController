@@ -13,10 +13,11 @@ android {
         applicationId = "tw.airgesture.controller"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.1"
+        versionCode = 2
+        versionName = "0.2.0"
     }
-    // Release signing material is never committed to this repository.
+    // Signing secrets are supplied only by the trusted, manually triggered CI run.
+    // There is NO signing key or password in the repository.
     signingConfigs {
         val keystoreFile = System.getenv("AIRGESTURE_KEYSTORE_FILE")
         if (!keystoreFile.isNullOrBlank()) {
@@ -56,8 +57,8 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
 }
 
-// The model is bundled during build time; the installed App requires no Internet.
-// TODO: pin the downloaded model SHA-256 before producing a final signed release.
+// The model is bundled into the APK at build time; no runtime network access is needed.
+// Source: official MediaPipe gesture recognizer model URL used by its Android sample.
 val modelFile = layout.projectDirectory.file("src/main/assets/gesture_recognizer.task")
 val downloadModel by tasks.registering {
     outputs.file(modelFile)
@@ -72,8 +73,8 @@ val downloadModel by tasks.registering {
                     connectTimeout = 30_000
                     readTimeout = 120_000
                 }.getInputStream().use { input -> temp.outputStream().use { output -> input.copyTo(output) } }
-                check(temp.length() > 100_000L) { "手勢模型下載不完整" }
-                check(temp.renameTo(dest)) { "手勢模型儲存失敗" }
+                check(temp.length() > 100_000L) { "下載的手勢模型不完整" }
+                check(temp.renameTo(dest)) { "無法儲存手勢模型" }
             } finally { temp.delete() }
         }
     }

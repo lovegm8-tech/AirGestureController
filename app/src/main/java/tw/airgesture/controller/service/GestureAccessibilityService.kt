@@ -14,13 +14,37 @@ import tw.airgesture.controller.core.GestureDecisionEngine
 class GestureAccessibilityService : AccessibilityService() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var activePackage: String? = null
+    private var indicator: HandIndicator? = null
 
     companion object {
         @Volatile private var current: GestureAccessibilityService? = null
         fun isReady(): Boolean = current != null
+        fun showIndicator() {
+            current?.let { service -> service.mainHandler.post {
+                if (current === service) {
+                    if (service.indicator == null) service.indicator = HandIndicator(service)
+                    service.indicator?.show()
+                }
+            } }
+        }
+        fun handDetected(open: Boolean) {
+            current?.let { service -> service.mainHandler.post {
+                if (current === service) service.indicator?.update(open)
+            } }
+        }
+        fun hideIndicator() {
+            current?.let { service -> service.mainHandler.post {
+                if (current === service) service.indicator?.hide()
+            } }
+        }
         fun send(action: GestureDecisionEngine.Action) {
             val instance = current ?: return
-            instance.mainHandler.post { if (current === instance) instance.execute(action) }
+            instance.mainHandler.post {
+                if (current === instance) {
+                    instance.execute(action)
+                    instance.indicator?.flashAction()
+                }
+            }
         }
     }
 
@@ -38,6 +62,8 @@ class GestureAccessibilityService : AccessibilityService() {
     override fun onInterrupt() = Unit
 
     override fun onDestroy() {
+        indicator?.hide()
+        indicator = null
         if (current === this) current = null
         super.onDestroy()
     }

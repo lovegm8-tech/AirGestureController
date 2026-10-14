@@ -2,7 +2,7 @@ package tw.airgesture.controller.core
 
 import kotlin.math.abs
 
-/** Android-independent state machine so behaviour can be tested without an APK. */
+/** Android-independent state machine: steady-palm rearm can be tested on the JVM. */
 class GestureDecisionEngine(private val options: Options = Options()) {
     enum class Shape { OPEN_PALM, CLOSED_FIST, OTHER, NO_HAND }
     enum class Action { SWIPE_UP, SWIPE_DOWN, TAP_CENTER }
@@ -14,7 +14,9 @@ class GestureDecisionEngine(private val options: Options = Options()) {
         val maximumSwipeDurationMs: Long = 1_500L,
         val minimumSwipeDurationMs: Long = 100L,
         val handLostResetMs: Long = 350L,
-        val fistWindowMs: Long = 950L
+        val fistWindowMs: Long = 950L,
+        val stillToRearmMs: Long = 500L,
+        val stillTolerance: Float = .035f
     )
 
     private var anchorY: Float? = null
@@ -27,18 +29,17 @@ class GestureDecisionEngine(private val options: Options = Options()) {
     private var blocked = false
     private var cooldownUntil = Long.MIN_VALUE
     private var otherStart = Long.MIN_VALUE
+    private var settleY: Float? = null
+    private var settleSince = Long.MIN_VALUE
 
     fun reset() {
-        anchorY = null
-        anchorTime = 0
-        lastOpenTime = Long.MIN_VALUE
+        disarm()
         lastHandTime = Long.MIN_VALUE
         lastTime = Long.MIN_VALUE
-        openFrames = 0
-        fistFrames = 0
         blocked = false
         cooldownUntil = Long.MIN_VALUE
         otherStart = Long.MIN_VALUE
+        clearSettling()
     }
 
     fun accept(frame: Frame, nowMs: Long): Action? {
@@ -46,34 +47,52 @@ class GestureDecisionEngine(private val options: Options = Options()) {
         lastTime = nowMs
         val shape = if (frame.confidence < options.minimumConfidence) Shape.NO_HAND else frame.shape
         if (shape == Shape.NO_HAND) {
-            openFrames = 0
-            fistFrames = 0
+            disarm()
+            clearSettling()
             if (lastHandTime != Long.MIN_VALUE && nowMs - lastHandTime >= options.handLostResetMs) {
-                disarm()
                 blocked = false
             }
             return null
         }
         lastHandTime = nowMs
         if (shape == Shape.OTHER) {
-            openFrames = 0
-            fistFrames = 0
+            disarm()
+            clearSettling()
             if (otherStart == Long.MIN_VALUE) otherStart = nowMs
-            if (nowMs - otherStart >= options.handLostResetMs) {
-                disarm()
-                blocked = false
-            }
+            if (nowMs - otherStart >= options.handLostResetMs) blocked = false
             return null
         }
         otherStart = Long.MIN_VALUE
-        if (blocked || nowMs < cooldownUntil) return null
+        // Rearm once the open palm is steady for 0.5s and the cooldown has ended.
+        if (blocked) {
+            if (shape != Shape.OPEN_PALM || frame.palmY == null || frame.palmY !in 0f..1f) {
+                clearSettling()
+                return null
+            }
+            val y = frame.palmY
+            if (settleY == null || abs(y - settleY!!) > options.stillTolerance) {
+                settleY = y
+                settleSince = nowMs
+                return null
+            }
+            if (nowMs - settleSince < options.stillToRearmMs || nowMs < cooldownUntil) return null
+            blocked = false
+            clearSettling()
+            anchorY = y // New origin prevents continued travel from duplicating swipes.
+            anchorTime = nowMs
+            lastOpenTime = nowMs
+            openFrames = 2
+            fistFrames = 0
+            return null
+        }
+        if (nowMs < cooldownUntil) return null
 
         if (shape == Shape.OPEN_PALM) {
             fistFrames = 0
             openFrames++
             lastOpenTime = nowMs
             val y = frame.palmY ?: return null
-            if (y < 0f || y > 1f) return null
+            if (y !in 0f..1f) return null
             if (openFrames < 2) return null
             val anchor = anchorY
             if (anchor == null) {
@@ -90,7 +109,7 @@ class GestureDecisionEngine(private val options: Options = Options()) {
             if (age < options.minimumSwipeDurationMs || abs(y - anchor) < options.swipeDistance) return null
             return fire(if (y < anchor) Action.SWIPE_UP else Action.SWIPE_DOWN, nowMs)
         }
-        // CLOSED_FIST deliberately requires a recent open palm.
+        // CLOSED_FIST: deliberately require a recent open palm rather than any arbitrary fist.
         if (shape == Shape.CLOSED_FIST) {
             openFrames = 0
             if (anchorY == null || lastOpenTime == Long.MIN_VALUE || nowMs - lastOpenTime > options.fistWindowMs) {
@@ -104,14 +123,21 @@ class GestureDecisionEngine(private val options: Options = Options()) {
     }
 
     private fun fire(action: Action, nowMs: Long): Action {
-        blocked = true // Hand must leave the frame or relax before another action.
+        blocked = true
         cooldownUntil = nowMs + options.cooldownMs
         disarm()
+        clearSettling()
         return action
+    }
+
+    private fun clearSettling() {
+        settleY = null
+        settleSince = Long.MIN_VALUE
     }
 
     private fun disarm() {
         anchorY = null
+        anchorTime = 0L
         lastOpenTime = Long.MIN_VALUE
         openFrames = 0
         fistFrames = 0
