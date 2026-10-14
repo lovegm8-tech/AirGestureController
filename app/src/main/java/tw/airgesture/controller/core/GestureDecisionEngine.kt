@@ -17,7 +17,10 @@ class GestureDecisionEngine(private val options: Options = Options()) {
         val handLostResetMs: Long = 350L,
         val fistWindowMs: Long = 950L,
         val stillToRearmMs: Long = 500L,
-        val stillTolerance: Float = .035f
+        val stillTolerance: Float = .035f,
+        // Opt-in: capture the first valid palm position and bridge brief detection gaps.
+        val fastSwipeAssistEnabled: Boolean = false,
+        val fastPalmGapMs: Long = 260L
     )
 
     private var anchorY: Float? = null
@@ -28,6 +31,7 @@ class GestureDecisionEngine(private val options: Options = Options()) {
     private var lastTime = Long.MIN_VALUE
     private var openFrames = 0
     private var fistFrames = 0
+    private var fistArmed = false
     private var blocked = false
     private var cooldownUntil = Long.MIN_VALUE
     private var otherStart = Long.MIN_VALUE
@@ -49,8 +53,18 @@ class GestureDecisionEngine(private val options: Options = Options()) {
         lastTime = nowMs
         val shape = if (frame.confidence < options.minimumConfidence) Shape.NO_HAND else frame.shape
         if (shape == Shape.NO_HAND) {
-            disarm()
-            clearSettling()
+            // A single blurry frame during a fast swipe must not erase the
+            // already verified origin. We never create an action on a lost frame:
+            // a new, valid open palm endpoint is still required.
+            val bridge = options.fastSwipeAssistEnabled && !blocked &&
+                anchorY != null && lastOpenTime != Long.MIN_VALUE &&
+                nowMs >= lastOpenTime && nowMs - lastOpenTime <= options.fastPalmGapMs
+            if (!bridge) {
+                disarm()
+                clearSettling()
+            } else {
+                fistFrames = 0
+            }
             if (lastHandTime != Long.MIN_VALUE && nowMs - lastHandTime >= options.handLostResetMs) {
                 blocked = false
             }
@@ -86,16 +100,31 @@ class GestureDecisionEngine(private val options: Options = Options()) {
             lastOpenTime = nowMs
             openFrames = 2
             fistFrames = 0
+            fistArmed = true
             return null
         }
         if (nowMs < cooldownUntil) return null
 
         if (shape == Shape.OPEN_PALM) {
             fistFrames = 0
-            openFrames++
-            lastOpenTime = nowMs
             val y = frame.palmY ?: return null
             if (y !in 0f..1f) return null
+            if (options.fastSwipeAssistEnabled && lastOpenTime != Long.MIN_VALUE &&
+                (nowMs < lastOpenTime || nowMs - lastOpenTime > options.fastPalmGapMs)) {
+                // Do not connect separate appearances of a hand into one swipe.
+                disarm()
+            }
+            openFrames++
+            lastOpenTime = nowMs
+            if (options.fastSwipeAssistEnabled && anchorY == null) {
+                // Start at the FIRST confirmed palm frame, not the second.
+                // Action and fist still require at least two valid palm frames.
+                anchorY = y
+                anchorX = frame.palmX
+                anchorTime = nowMs
+                return null
+            }
+            if (openFrames >= 2) fistArmed = true
             if (openFrames < 2) return null
             val anchor = anchorY
             if (anchor == null) {
@@ -124,7 +153,7 @@ class GestureDecisionEngine(private val options: Options = Options()) {
         // CLOSED_FIST: deliberately require a recent open palm rather than any arbitrary fist.
         if (shape == Shape.CLOSED_FIST) {
             openFrames = 0
-            if (anchorY == null || lastOpenTime == Long.MIN_VALUE || nowMs - lastOpenTime > options.fistWindowMs) {
+            if (anchorY == null || (options.fastSwipeAssistEnabled && !fistArmed) || lastOpenTime == Long.MIN_VALUE || nowMs - lastOpenTime > options.fistWindowMs) {
                 fistFrames = 0
                 return null
             }
@@ -154,5 +183,6 @@ class GestureDecisionEngine(private val options: Options = Options()) {
         lastOpenTime = Long.MIN_VALUE
         openFrames = 0
         fistFrames = 0
+        fistArmed = false
     }
 }
