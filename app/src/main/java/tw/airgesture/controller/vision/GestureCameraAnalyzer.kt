@@ -12,16 +12,20 @@ import com.google.mediapipe.tasks.vision.gesturerecognizer.GestureRecognizer
 import tw.airgesture.controller.core.AdaptiveFrameScheduler
 import tw.airgesture.controller.core.GestureDecisionEngine
 import tw.airgesture.controller.core.PointerDwellEngine
+import tw.airgesture.controller.core.TiltedPalmAssist
 import java.nio.ByteBuffer
 
 /** CameraX feeds a single analysis executor. Inference is local and throttled. */
 class GestureCameraAnalyzer(
     context: Context,
     options: GestureDecisionEngine.Options,
-    performanceMode: Int = 1
+    performanceMode: Int = 1,
+    angleAssistEnabled: Boolean = false
 ) : AutoCloseable {
     private val decision = GestureDecisionEngine(options)
     private val pointer = PointerDwellEngine()
+    private val tiltAssist = TiltedPalmAssist(angleAssistEnabled)
+    private val useAngleAssist = angleAssistEnabled
     private val scheduler = AdaptiveFrameScheduler(AdaptiveFrameScheduler.Mode.fromIndex(performanceMode))
     private val converter = ReusableFrameConverter()
     private val recognizer: GestureRecognizer
@@ -56,7 +60,7 @@ class GestureCameraAnalyzer(
             val landmarks = result.landmarks().firstOrNull()
             val foundHand = landmarks != null && landmarks.isNotEmpty()
             val categoryName = category?.categoryName()
-            val shape = when (categoryName) {
+            val originalShape = when (categoryName) {
                 "Open_Palm" -> GestureDecisionEngine.Shape.OPEN_PALM
                 "Closed_Fist" -> GestureDecisionEngine.Shape.CLOSED_FIST
                 null -> GestureDecisionEngine.Shape.NO_HAND
@@ -68,8 +72,25 @@ class GestureCameraAnalyzer(
                     landmarks[13].y() + landmarks[17].y()) / 5f
             } else null
             val score = category?.score() ?: 0f
-            onPalmDetection(shape == GestureDecisionEngine.Shape.OPEN_PALM && score >= .65f)
+            // Only when opted in, derive roll-independent geometry from 21 landmarks.
+            // High-confidence model results keep precedence; no secondary inference pass.
+            val xy = if (useAngleAssist && landmarks != null && landmarks.size >= 21) {
+                FloatArray(42).also { coordinates ->
+                    for (i in 0 until 21) {
+                        coordinates[i * 2] = landmarks[i].x()
+                        coordinates[i * 2 + 1] = landmarks[i].y()
+                    }
+                }
+            } else null
+            val angleResult = tiltAssist.resolve(categoryName, score, xy, now)
+            onPalmDetection(angleResult.showPalmIndicator)
             scheduler.onAnalyzed(now, foundHand)
+            val shape = if (angleResult.useLandmarkFallback) {
+                GestureDecisionEngine.Shape.OPEN_PALM
+            } else originalShape
+            // Geometric evidence is not the classifier's score. Use the existing
+            // minimum only after conservative two-frame geometric confirmation.
+            val effectiveConfidence = if (angleResult.useLandmarkFallback) .65f else score
 
             // The camera analyzer is not a mirrored Preview; make screen-right
             // movement screen-right for the front-facing camera.
@@ -88,7 +109,7 @@ class GestureCameraAnalyzer(
                 onPointer(null)
             }
 
-            decision.accept(GestureDecisionEngine.Frame(shape, palmY, score, palmX), now)?.let(onAction)
+            decision.accept(GestureDecisionEngine.Frame(shape, palmY, effectiveConfidence, palmX), now)?.let(onAction)
         } finally {
             converter.release(frame)
         }
