@@ -82,5 +82,33 @@ class GestureDecisionEngineTest {
         assertNull(e.accept(GestureDecisionEngine.Frame(fist),2830))
         assertEquals(GestureDecisionEngine.Action.TAP_CENTER,e.accept(GestureDecisionEngine.Frame(fist),2920))
     }
+
+    @Test fun `rightward palm invokes back without vertical scroll`() {
+        val e = GestureDecisionEngine()
+        e.accept(GestureDecisionEngine.Frame(open, .55f, palmX = .20f), 0)
+        e.accept(GestureDecisionEngine.Frame(open, .55f, palmX = .23f), 100)
+        assertEquals(GestureDecisionEngine.Action.SWIPE_BACK,
+            e.accept(GestureDecisionEngine.Frame(open, .57f, palmX = .46f), 270))
+        assertNull(e.accept(GestureDecisionEngine.Frame(open, .57f, palmX = .70f), 350))
+    }
+
+    @Test fun `diagonal and leftward gestures must not invoke back`() {
+        val diagonal = GestureDecisionEngine()
+        diagonal.accept(GestureDecisionEngine.Frame(open, .20f, palmX = .20f), 0)
+        diagonal.accept(GestureDecisionEngine.Frame(open, .20f, palmX = .22f), 100)
+        assertNull(diagonal.accept(GestureDecisionEngine.Frame(open, .40f, palmX = .41f), 300))
+        val leftward = GestureDecisionEngine()
+        leftward.accept(GestureDecisionEngine.Frame(open, .50f, palmX = .70f), 0)
+        leftward.accept(GestureDecisionEngine.Frame(open, .50f, palmX = .68f), 100)
+        assertNull(leftward.accept(GestureDecisionEngine.Frame(open, .50f, palmX = .30f), 300))
+    }
+
+    @Test fun `vertical gesture still works when palm x available`() {
+        val e = GestureDecisionEngine()
+        e.accept(GestureDecisionEngine.Frame(open, .75f, palmX = .48f), 0)
+        e.accept(GestureDecisionEngine.Frame(open, .74f, palmX = .49f), 100)
+        assertEquals(GestureDecisionEngine.Action.SWIPE_UP,
+            e.accept(GestureDecisionEngine.Frame(open, .50f, palmX = .51f), 260))
+    }
 }
 
