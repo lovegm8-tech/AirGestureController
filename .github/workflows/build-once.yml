@@ -84,3 +84,5 @@ jobs:
           name: AirGesture-v0.2.0-permanent-signed
           path: app/build/outputs/apk/release/app-release.apk
           retention-days: 14
+
+# Retry after Kotlin UI compile fixes; this file remains a one-time build trigger.
