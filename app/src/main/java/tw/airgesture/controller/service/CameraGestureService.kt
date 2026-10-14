@@ -101,7 +101,7 @@ class CameraGestureService : LifecycleService() {
         cameraRequested = true
         executor.execute {
             try {
-                val engine = GestureCameraAnalyzer(this, Settings.engineOptions(this))
+                val engine = GestureCameraAnalyzer(this, Settings.engineOptions(this), Settings.performanceMode(this))
                 analyzer = engine
                 main.post {
                     if (!running) return@post
