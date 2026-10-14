@@ -26,6 +26,7 @@ class GestureCameraAnalyzer(
     private val pointer = PointerDwellEngine()
     private val tiltAssist = TiltedPalmAssist(angleAssistEnabled)
     private val useAngleAssist = angleAssistEnabled
+    private val useFastSwipeAssist = options.fastSwipeAssistEnabled
     private val scheduler = AdaptiveFrameScheduler(AdaptiveFrameScheduler.Mode.fromIndex(performanceMode))
     private val converter = ReusableFrameConverter()
     private val recognizer: GestureRecognizer
@@ -90,7 +91,7 @@ class GestureCameraAnalyzer(
                 // The MediaPipe "None" label can appear during motion blur while
                 // hand landmarks are still available. In experimental fast mode,
                 // treat this as a short gap, not as a confirmed different gesture.
-                options.fastSwipeAssistEnabled && categoryName == "None" ->
+                useFastSwipeAssist && categoryName == "None" ->
                     GestureDecisionEngine.Shape.NO_HAND
                 else -> originalShape
             }
