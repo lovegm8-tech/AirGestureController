@@ -51,9 +51,11 @@ internal class PointerOverlay(private val context: Context) {
         // Use the display's true pixel range, not the narrower camera fingertip range.
         val x = mapped.x * (screen.x - 1)
         val y = mapped.y * (screen.y - 1)
-        params.x = (x - size * .5f).roundToInt()
-        params.y = (y - size * .5f).roundToInt()
-        cursor.update(progress, clicked)
+        // Keep the overlay window onscreen, but draw the hotspot at the exact
+        // mapped touch pixel. The visible dot and the actual tap now agree at edges.
+        params.x = (x - size * .5f).roundToInt().coerceIn(0, (screen.x - size).coerceAtLeast(0))
+        params.y = (y - size * .5f).roundToInt().coerceIn(0, (screen.y - size).coerceAtLeast(0))
+        cursor.update(progress, clicked, x - params.x, y - params.y)
         try {
             if (!showing) {
                 window.addView(cursor, params)
@@ -77,22 +79,26 @@ internal class PointerOverlay(private val context: Context) {
     private class CursorView(context: Context) : View(context) {
         private val p = Paint(Paint.ANTI_ALIAS_FLAG)
         private var progress = 0f
+        private var hotspotX = 0f
+        private var hotspotY = 0f
         private var clickFlashUntil = 0L
 
         init {
             importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         }
 
-        fun update(progress: Float, clicked: Boolean) {
+        fun update(progress: Float, clicked: Boolean, x: Float, y: Float) {
             this.progress = progress.coerceIn(0f, 1f)
+            hotspotX = x
+            hotspotY = y
             if (clicked) clickFlashUntil = SystemClock.uptimeMillis() + 550L
             invalidate()
         }
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-            val cx = width * .5f
-            val cy = height * .5f
+            val cx = hotspotX
+            val cy = hotspotY
             val r = minOf(width, height) * .19f
             val flashing = SystemClock.uptimeMillis() < clickFlashUntil
 
