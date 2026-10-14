@@ -81,8 +81,8 @@ class MainActivity : ComponentActivity() {
             if (CameraGestureService.running) stopControl() else checkAndStart()
         }
         label("操作對照", 19f, true)
-        label("✋ 張掌向上移動 → 螢幕向上滑\n✋ 張掌向下移動 → 螢幕向下滑\n✊ 張掌後握拳 → 點擊螢幕中央", 16f)
-        label("重複操作：手掌停穩約 0.5 秒即可準備下一次手勢，不必移出鏡頭。", 13f)
+        label("✋ 張掌向上移動 → 螢幕向上滑\n✋ 張掌向下移動 → 螢幕向下滑\n✋ 張掌向右移動 → 左邊緣右滑返回\n☝️ 只伸食指 → 控制懸浮游標，停穩 3 秒點擊\n✊ 張掌後握拳 → 點擊螢幕中央", 16f)
+        label("重複操作：手掌停穩約 0.5 秒即可準備下一次手勢。食指點擊後需移動到新位置，避免停留時連點。", 13f)
         label("懸浮辨識燈：灰色＝未看到張掌、綠色＝已抓到張掌、藍色閃一下＝已觸發操作。指示燈不會擋住點擊。", 13f)
 
         label("辨識效能模式", 19f, true)
