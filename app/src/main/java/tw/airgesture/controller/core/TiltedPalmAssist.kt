@@ -48,7 +48,7 @@ class TiltedPalmAssist(private val enabled: Boolean = false) {
 
         // Protect fist taps, finger cursor, and explicit non-palm gestures.
         val confidentOther = score >= PROTECTED_GESTURE_THRESHOLD &&
-            category in PROTECTED_GESTURES
+            category != null && PROTECTED_GESTURES.contains(category)
         if (confidentOther) {
             consecutiveGeometryFrames = 0
             return Decision(false, false, false)
