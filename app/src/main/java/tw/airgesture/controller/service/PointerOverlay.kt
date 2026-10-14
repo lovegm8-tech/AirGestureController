@@ -12,6 +12,8 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import kotlin.math.roundToInt
+import tw.airgesture.controller.core.CursorCoordinateMapper
+import tw.airgesture.controller.core.Settings
 
 /**
  * Visual-only cursor, deliberately not touchable or focusable.
@@ -33,14 +35,22 @@ internal class PointerOverlay(private val context: Context) {
         title = "AirGesture finger cursor"
     }
     private var showing = false
+    private var lastRange = Settings.cursorRange(context)
+    private var mapper = CursorCoordinateMapper(lastRange)
 
     @Suppress("DEPRECATION")
     fun update(normX: Float, normY: Float, progress: Float, clicked: Boolean): Pair<Float, Float>? {
-        if (normX !in 0f..1f || normY !in 0f..1f) return null
+        val selectedRange = Settings.cursorRange(context)
+        if (selectedRange != lastRange) {
+            lastRange = selectedRange
+            mapper = CursorCoordinateMapper(selectedRange)
+        }
+        val mapped = mapper.map(normX, normY) ?: return null
         window.defaultDisplay.getRealSize(screen)
         if (screen.x < 1 || screen.y < 1) return null
-        val x = (normX.coerceIn(.035f, .965f) * screen.x)
-        val y = (normY.coerceIn(.055f, .945f) * screen.y)
+        // Use the display's true pixel range, not the narrower camera fingertip range.
+        val x = mapped.x * (screen.x - 1)
+        val y = mapped.y * (screen.y - 1)
         params.x = (x - size * .5f).roundToInt()
         params.y = (y - size * .5f).roundToInt()
         cursor.update(progress, clicked)
