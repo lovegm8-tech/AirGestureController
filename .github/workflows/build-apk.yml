@@ -1,26 +1,24 @@
-name: Android APK - manual build only
-
+name: Android APK - permanently signed release
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "Debug tests (temporary signature), or signed release (stable signature from repository secrets)"
+        description: "Stable signed APK for installation and updates"
         type: choice
         required: true
-        default: debug
+        default: signed-release
         options:
-          - debug
           - signed-release
+          - debug
 
 permissions:
   contents: read
 
 jobs:
   build:
-    # This workflow is ONLY manually triggered. Never build unreviewed PR code with signing secrets.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,46 +28,46 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
-      - name: Install Android SDK 35
+      - name: Install Android SDK
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-
-      - name: Debug build and unit tests
+      - name: Debug build (temporary signature)
         if: inputs.mode == 'debug'
         run: gradle :app:testDebugUnitTest :app:assembleDebug --no-daemon
-
-      - name: Validate presence of release signing secrets
+      - name: Signed release build
         if: inputs.mode == 'signed-release'
         shell: bash
         env:
-          KEYSTORE_B64: ${{ secrets.AIRGESTURE_KEYSTORE_BASE64 }}
-          STORE_PASSWORD: ${{ secrets.AIRGESTURE_STORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.AIRGESTURE_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.AIRGESTURE_KEY_PASSWORD }}
+          SIGNING_BUNDLE_B64: ${{ secrets.AIRGESTURE_SIGNING_BUNDLE_B64 }}
         run: |
           set -euo pipefail
-          for name in KEYSTORE_B64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
-            if [[ -z "${!name}" ]]; then
-              echo "Missing required release signing secret: $name" >&2
-              exit 1
-            fi
-          done
+          if [[ -z "${SIGNING_BUNDLE_B64}" ]]; then
+            echo "Missing required encrypted repository secret: AIRGESTURE_SIGNING_BUNDLE_B64" >&2
+            exit 1
+          fi
           umask 077
-          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/airgesture-release.jks"
-          test -s "$RUNNER_TEMP/airgesture-release.jks"
-
-      - name: Signed release build and unit tests
-        if: inputs.mode == 'signed-release'
-        env:
-          AIRGESTURE_KEYSTORE_FILE: ${{ runner.temp }}/airgesture-release.jks
-          AIRGESTURE_STORE_PASSWORD: ${{ secrets.AIRGESTURE_STORE_PASSWORD }}
-          AIRGESTURE_KEY_ALIAS: ${{ secrets.AIRGESTURE_KEY_ALIAS }}
-          AIRGESTURE_KEY_PASSWORD: ${{ secrets.AIRGESTURE_KEY_PASSWORD }}
-        run: gradle :app:testDebugUnitTest :app:assembleRelease --no-daemon
-
-      - name: Safety gate - no runtime internet permission
+          python3 - <<'PY'
+          import base64, json, os, pathlib, subprocess
+          encoded = os.environ.pop('SIGNING_BUNDLE_B64')
+          keyfile = pathlib.Path(os.environ['RUNNER_TEMP']) / 'airgesture-release.jks'
+          try:
+              bundle = json.loads(base64.b64decode(encoded, validate=True))
+              assert bundle['key_alias'] == 'airgesture'
+              keyfile.write_bytes(base64.b64decode(bundle['keystore_base64'], validate=True))
+              build_env = os.environ.copy()
+              build_env.update({
+                  'AIRGESTURE_KEYSTORE_FILE': str(keyfile),
+                  'AIRGESTURE_STORE_PASSWORD': bundle['store_password'],
+                  'AIRGESTURE_KEY_ALIAS': bundle['key_alias'],
+                  'AIRGESTURE_KEY_PASSWORD': bundle['key_password'],
+              })
+              subprocess.run(['gradle', ':app:testDebugUnitTest', ':app:assembleRelease', '--no-daemon'], env=build_env, check=True)
+          finally:
+              keyfile.unlink(missing_ok=True)
+          PY
+      - name: Verify permissions and certificate
         shell: bash
         run: |
           set -euo pipefail
@@ -79,31 +77,30 @@ jobs:
             APK="app/build/outputs/apk/debug/app-debug.apk"
           fi
           test -s "$APK"
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" > "$RUNNER_TEMP/apk-permissions.txt"
-          if grep -F 'android.permission.INTERNET' "$RUNNER_TEMP/apk-permissions.txt"; then
-            echo 'SECURITY CHECK FAILED: APK unexpectedly requests internet access' >&2
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" > "$RUNNER_TEMP/permissions.txt"
+          if grep -F 'android.permission.INTERNET' "$RUNNER_TEMP/permissions.txt"; then
+            echo 'Unexpected INTERNET permission; refusing to release.' >&2
             exit 1
           fi
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
-          echo 'Security checks passed: no INTERNET permission, APK signature verifies.'
-
-      - name: Upload debug APK (temporary signature, do not use for permanent updates)
-        if: inputs.mode == 'debug'
-        uses: actions/upload-artifact@v4
-        with:
-          name: AirGesture-debug-ephemeral
-          path: app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 7
-
-      - name: Upload signed release APK (stable signature)
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" > "$RUNNER_TEMP/apk-certificate.txt"
+          if [[ "${{ inputs.mode }}" == "signed-release" ]]; then
+            if ! grep -qiF '05e77197d2ad73ac4a255e4c40b868a5c26c539b9aea3c1abd53100ff484f19e' "$RUNNER_TEMP/apk-certificate.txt"; then
+              echo 'Wrong APK signing certificate; refusing to release.' >&2
+              exit 1
+            fi
+          fi
+          echo 'Security checks passed.'
+      - name: Upload permanently signed APK
         if: inputs.mode == 'signed-release'
         uses: actions/upload-artifact@v4
         with:
-          name: AirGesture-release-signed
+          name: AirGesture-v0.2.0-permanent-signed
           path: app/build/outputs/apk/release/app-release.apk
           retention-days: 14
-
-      - name: Remove ephemeral copy of signing material
-        if: always() && inputs.mode == 'signed-release'
-        shell: bash
-        run: rm -f "$RUNNER_TEMP/airgesture-release.jks"
+      - name: Upload debug APK (non-updatable)
+        if: inputs.mode == 'debug'
+        uses: actions/upload-artifact@v4
+        with:
+          name: AirGesture-debug-temp-signature
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7
