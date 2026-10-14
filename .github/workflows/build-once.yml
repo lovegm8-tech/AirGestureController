@@ -43,7 +43,24 @@ jobs:
           umask 077
           python3 - <<'PY'
           import base64, json, os, pathlib, subprocess
-          bundle = json.loads(base64.b64decode(os.environ.pop("SIGNING_BUNDLE_B64"), validate=True))
+          import re
+          encoded = os.environ.pop("SIGNING_BUNDLE_B64").strip().lstrip("\ufeff")
+          if encoded.startswith("AIRGESTURE_SIGNING_BUNDLE_B64="):
+              encoded = encoded.split("=", 1)[1]
+          encoded = encoded.strip().strip("'\"")
+          encoded = "".join(encoded.split())
+          candidates = [encoded] + re.findall(r"[A-Za-z0-9+/=]{2000,}", encoded)
+          bundle = None
+          for candidate in candidates:
+              try:
+                  decoded = json.loads(base64.b64decode(candidate, validate=True))
+                  if isinstance(decoded, dict) and decoded.get("key_alias") == "airgesture":
+                      bundle = decoded
+                      break
+              except (ValueError, KeyError, json.JSONDecodeError):
+                  pass
+          if bundle is None:
+              raise SystemExit("Invalid signing Secret format. Re-copy the entire Base64 text file into AIRGESTURE_SIGNING_BUNDLE_B64.")
           assert bundle["key_alias"] == "airgesture"
           keyfile = pathlib.Path(os.environ["RUNNER_TEMP"]) / "release-signing.jks"
           output = pathlib.Path("app/build/outputs/apk/release/app-release.apk")
