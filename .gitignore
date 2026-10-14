@@ -19,3 +19,15 @@ signing.properties
 signing*.properties
 *secret*.json
 app/src/main/assets/gesture_recognizer.task
+
+# Private app signing credentials (NEVER publish)
+*.p12
+*.pfx
+*.pem
+*.key
+*.jks
+*.keystore
+*SIGNING*BACKUP*
+*SIGNING_RECOVERY*
+*SIGNING_BUNDLE*
+airgesture_private_signing/
