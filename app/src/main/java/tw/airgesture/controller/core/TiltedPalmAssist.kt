@@ -51,6 +51,7 @@ class TiltedPalmAssist(private val enabled: Boolean = false) {
             category != null && PROTECTED_GESTURES.contains(category)
         if (confidentOther) {
             consecutiveGeometryFrames = 0
+            lastAcceptedPalmMs = Long.MIN_VALUE
             return Decision(false, false, false)
         }
 
