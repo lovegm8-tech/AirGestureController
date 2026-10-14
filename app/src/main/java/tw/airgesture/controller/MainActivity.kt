@@ -14,6 +14,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.Spinner
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -33,6 +34,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var sensitivity: Spinner
     private lateinit var performance: Spinner
     private lateinit var cursorRange: Spinner
+    private lateinit var tiltedPalmAssist: Switch
     private lateinit var cooldown: SeekBar
     private lateinit var cooldownText: TextView
     private val handler = Handler(Looper.getMainLooper())
@@ -86,6 +88,15 @@ class MainActivity : ComponentActivity() {
         label("重複操作：手掌停穩約 0.5 秒即可準備下一次手勢。食指點擊後需移動到新位置，避免停留時連點。", 13f)
         label("懸浮辨識燈：灰色＝未看到張掌、綠色＝已抓到張掌、藍色閃一下＝已觸發操作。指示燈不會擋住點擊。", 13f)
 
+        label("斜角手掌辨識（實驗性）", 19f, true)
+        tiltedPalmAssist = Switch(this).apply {
+            text = "啟用斜角張掌輔助判斷"
+            isChecked = Settings.tiltedPalmAssist(this@MainActivity)
+            textSize = 16f
+        }
+        content.addView(tiltedPalmAssist, LinearLayout.LayoutParams(-1, dip(54)))
+        label("預設關閉，保持原本正面辨識。開啟後僅在 AI 無法確認張掌時，嘗試使用手指關節判斷；不改變食指游標及握拳點擊。", 13f)
+
         label("辨識效能模式", 19f, true)
         performance = Spinner(this)
         performance.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
@@ -129,7 +140,7 @@ class MainActivity : ComponentActivity() {
         cooldownText.text = "操作冷卻時間：${500 + cooldown.progress * 100} 毫秒"
         content.addView(cooldown, LinearLayout.LayoutParams(-1, dip(48)))
         button("儲存設定") {
-            Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition, cursorRange.selectedItemPosition)
+            Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition, cursorRange.selectedItemPosition, tiltedPalmAssist.isChecked)
             toast("已儲存；重新啟動辨識後生效")
         }
         label("隱私：App 不要求網路權限，影像只在本機暫時分析，不會錄影或上傳。\n啟動後可從通知列隨時停止前鏡頭。", 13f)
@@ -157,7 +168,7 @@ class MainActivity : ComponentActivity() {
 
     private fun startControl() {
         if (!GestureAccessibilityService.isReady()) { toast("無障礙服務尚未啟用"); return }
-        Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition, cursorRange.selectedItemPosition)
+        Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition, cursorRange.selectedItemPosition, tiltedPalmAssist.isChecked)
         val intent = Intent(this, CameraGestureService::class.java).setAction(CameraGestureService.START)
         try {
             ContextCompat.startForegroundService(this, intent)
