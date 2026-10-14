@@ -9,15 +9,20 @@ import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.gesturerecognizer.GestureRecognizer
+import tw.airgesture.controller.core.AdaptiveFrameScheduler
 import tw.airgesture.controller.core.GestureDecisionEngine
 import java.nio.ByteBuffer
 
-/** Called on one CameraX analysis thread; model inference is entirely on-device. */
-class GestureCameraAnalyzer(context: Context, options: GestureDecisionEngine.Options) : AutoCloseable {
+/** CameraX feeds a single analysis executor. Inference is local and throttled. */
+class GestureCameraAnalyzer(
+    context: Context,
+    options: GestureDecisionEngine.Options,
+    performanceMode: Int = 1
+) : AutoCloseable {
     private val decision = GestureDecisionEngine(options)
+    private val scheduler = AdaptiveFrameScheduler(AdaptiveFrameScheduler.Mode.fromIndex(performanceMode))
+    private val converter = ReusableFrameConverter()
     private val recognizer: GestureRecognizer
-    private var lastFrameMs: Long = 0
-    private val inferencePeriodMs = 110L // ~9 fps to reduce battery and thermal load.
 
     init {
         val base = BaseOptions.builder().setModelAssetPath("gesture_recognizer.task").build()
@@ -38,59 +43,88 @@ class GestureCameraAnalyzer(context: Context, options: GestureDecisionEngine.Opt
         onPalmDetection: (Boolean) -> Unit
     ) {
         val now = SystemClock.uptimeMillis()
-        if (now - lastFrameMs < inferencePeriodMs) return
-        lastFrameMs = now
-        val frame = proxy.toRotatedRgbaBitmap()
+        if (!scheduler.shouldAnalyze(now)) return
+
+        // Do not allocate/copy a Bitmap at all when a frame is skipped.
+        val frame = converter.convert(proxy)
         try {
             val result = recognizer.recognizeForVideo(BitmapImageBuilder(frame).build(), now)
             val category = result.gestures().firstOrNull()?.maxByOrNull { it.score() }
             val landmarks = result.landmarks().firstOrNull()
+            val foundHand = landmarks != null && landmarks.isNotEmpty()
             val shape = when (category?.categoryName()) {
                 "Open_Palm" -> GestureDecisionEngine.Shape.OPEN_PALM
                 "Closed_Fist" -> GestureDecisionEngine.Shape.CLOSED_FIST
                 null -> GestureDecisionEngine.Shape.NO_HAND
                 else -> GestureDecisionEngine.Shape.OTHER
             }
-            // Wrist + four knuckles; more stable than finger tips while closing a fist.
+            // Wrist + four knuckles, avoiding per-frame list allocations.
             val palmY = if (landmarks != null && landmarks.size > 17) {
-                listOf(0, 5, 9, 13, 17).map { landmarks[it].y() }.average().toFloat()
+                (landmarks[0].y() + landmarks[5].y() + landmarks[9].y() +
+                    landmarks[13].y() + landmarks[17].y()) / 5f
             } else null
             val score = category?.score() ?: 0f
             onPalmDetection(shape == GestureDecisionEngine.Shape.OPEN_PALM && score >= .65f)
+            scheduler.onAnalyzed(now, foundHand)
             decision.accept(GestureDecisionEngine.Frame(shape, palmY, score), now)?.let(onAction)
         } finally {
-            frame.recycle()
+            converter.release(frame)
         }
     }
 
-    override fun close() { recognizer.close() }
+    override fun close() {
+        try { recognizer.close() } finally { converter.close() }
+    }
 }
 
-/** CameraX RGBA_8888, respecting row stride and camera rotation. */
-private fun ImageProxy.toRotatedRgbaBitmap(): Bitmap {
-    val plane = planes[0]
-    val width = width
-    val height = height
-    val rowBytes = width * 4
-    require(plane.pixelStride == 4) { "CameraX analyzer requires RGBA_8888" }
-    val source = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-    val buffer: ByteBuffer = plane.buffer.duplicate()
-    buffer.rewind()
-    if (plane.rowStride == rowBytes) {
-        source.copyPixelsFromBuffer(buffer)
-    } else {
-        // Some cameras pad each row; remove padding without assuming contiguous pixels.
-        val pixels = ByteArray(rowBytes * height)
-        for (row in 0 until height) {
-            buffer.position(row * plane.rowStride)
-            buffer.get(pixels, row * rowBytes, rowBytes)
+/**
+ * CameraX RGBA_8888 -> Bitmap. Reuse the source Bitmap and row-padding buffer.
+ * MediaPipe VIDEO processing is synchronous, so the temporary rotated Bitmap
+ * can be released immediately after recognizeForVideo returns.
+ */
+private class ReusableFrameConverter : AutoCloseable {
+    private var source: Bitmap? = null
+    private var rowBuffer: ByteArray? = null
+    private val rotateMatrix = Matrix()
+
+    fun convert(proxy: ImageProxy): Bitmap {
+        val width = proxy.width
+        val height = proxy.height
+        val plane = proxy.planes[0]
+        require(plane.pixelStride == 4) { "CameraX analyzer requires RGBA_8888" }
+        val src = source?.takeIf { !it.isRecycled && it.width == width && it.height == height }
+            ?: Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also {
+                source?.recycle()
+                source = it
+            }
+        val rowBytes = width * 4
+        val buffer = plane.buffer.duplicate().apply { rewind() }
+        if (plane.rowStride == rowBytes) {
+            src.copyPixelsFromBuffer(buffer)
+        } else {
+            val needed = rowBytes * height
+            val storage = rowBuffer?.takeIf { it.size == needed }
+                ?: ByteArray(needed).also { rowBuffer = it }
+            for (row in 0 until height) {
+                buffer.position(row * plane.rowStride)
+                buffer.get(storage, row * rowBytes, rowBytes)
+            }
+            src.copyPixelsFromBuffer(ByteBuffer.wrap(storage))
         }
-        source.copyPixelsFromBuffer(ByteBuffer.wrap(pixels))
+        val rotation = proxy.imageInfo.rotationDegrees
+        if (rotation == 0) return src
+        rotateMatrix.reset()
+        rotateMatrix.postRotate(rotation.toFloat())
+        return Bitmap.createBitmap(src, 0, 0, width, height, rotateMatrix, true)
     }
-    val rotation = imageInfo.rotationDegrees
-    if (rotation == 0) return source
-    val rotated = Bitmap.createBitmap(source, 0, 0, width, height,
-        Matrix().apply { postRotate(rotation.toFloat()) }, true)
-    source.recycle()
-    return rotated
+
+    fun release(frame: Bitmap) {
+        if (frame !== source && !frame.isRecycled) frame.recycle()
+    }
+
+    override fun close() {
+        source?.recycle()
+        source = null
+        rowBuffer = null
+    }
 }
