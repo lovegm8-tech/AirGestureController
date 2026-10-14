@@ -1,4 +1,5 @@
 name: AirGesture v0.2.4 one-time signed build
+# Second run includes analyzer constructor-settings compile fix.
 
 on:
   push:
