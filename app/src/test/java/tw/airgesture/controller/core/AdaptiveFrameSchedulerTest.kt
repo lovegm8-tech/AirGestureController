@@ -30,12 +30,10 @@ class AdaptiveFrameSchedulerTest {
         val scheduler = AdaptiveFrameScheduler()
         scheduler.onAnalyzed(0L, true)
         assertTrue(scheduler.shouldAnalyze(100L))
-        scheduler.onAnalyzed(100L, false)
-        assertTrue(scheduler.shouldAnalyze(200L))
-        scheduler.onAnalyzed(200L, false)
-        // The hand was last present at 0ms, so after 1.2s use the idle rate.
-        assertFalse(scheduler.shouldAnalyze(300L))
-        assertTrue(scheduler.shouldAnalyze(400L))
+        scheduler.onAnalyzed(1100L, false)
+        // Hand was last seen at 0ms. At 1200ms the slower idle period is restored.
+        assertFalse(scheduler.shouldAnalyze(1200L))
+        assertTrue(scheduler.shouldAnalyze(1300L))
     }
 
     @Test fun modeSelectionAndIdleRates() {
