@@ -13,8 +13,8 @@ android {
         applicationId = "tw.airgesture.controller"
         minSdk = 29
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.2.1"
     }
     // Signing secrets are supplied only by the trusted, manually triggered CI run.
     // There is NO signing key or password in the repository.
