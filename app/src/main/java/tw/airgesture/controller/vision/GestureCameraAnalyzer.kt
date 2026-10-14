@@ -11,6 +11,7 @@ import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.gesturerecognizer.GestureRecognizer
 import tw.airgesture.controller.core.AdaptiveFrameScheduler
 import tw.airgesture.controller.core.GestureDecisionEngine
+import tw.airgesture.controller.core.PointerDwellEngine
 import java.nio.ByteBuffer
 
 /** CameraX feeds a single analysis executor. Inference is local and throttled. */
@@ -20,6 +21,7 @@ class GestureCameraAnalyzer(
     performanceMode: Int = 1
 ) : AutoCloseable {
     private val decision = GestureDecisionEngine(options)
+    private val pointer = PointerDwellEngine()
     private val scheduler = AdaptiveFrameScheduler(AdaptiveFrameScheduler.Mode.fromIndex(performanceMode))
     private val converter = ReusableFrameConverter()
     private val recognizer: GestureRecognizer
@@ -40,7 +42,8 @@ class GestureCameraAnalyzer(
     fun process(
         proxy: ImageProxy,
         onAction: (GestureDecisionEngine.Action) -> Unit,
-        onPalmDetection: (Boolean) -> Unit
+        onPalmDetection: (Boolean) -> Unit,
+        onPointer: (PointerDwellEngine.Result?) -> Unit
     ) {
         val now = SystemClock.uptimeMillis()
         if (!scheduler.shouldAnalyze(now)) return
@@ -52,7 +55,8 @@ class GestureCameraAnalyzer(
             val category = result.gestures().firstOrNull()?.maxByOrNull { it.score() }
             val landmarks = result.landmarks().firstOrNull()
             val foundHand = landmarks != null && landmarks.isNotEmpty()
-            val shape = when (category?.categoryName()) {
+            val categoryName = category?.categoryName()
+            val shape = when (categoryName) {
                 "Open_Palm" -> GestureDecisionEngine.Shape.OPEN_PALM
                 "Closed_Fist" -> GestureDecisionEngine.Shape.CLOSED_FIST
                 null -> GestureDecisionEngine.Shape.NO_HAND
@@ -66,7 +70,25 @@ class GestureCameraAnalyzer(
             val score = category?.score() ?: 0f
             onPalmDetection(shape == GestureDecisionEngine.Shape.OPEN_PALM && score >= .65f)
             scheduler.onAnalyzed(now, foundHand)
-            decision.accept(GestureDecisionEngine.Frame(shape, palmY, score), now)?.let(onAction)
+
+            // The camera analyzer is not a mirrored Preview; make screen-right
+            // movement screen-right for the front-facing camera.
+            val palmX = if (landmarks != null && landmarks.size > 17) {
+                1f - (landmarks[0].x() + landmarks[5].x() + landmarks[9].x() +
+                    landmarks[13].x() + landmarks[17].x()) / 5f
+            } else null
+
+            // Pointing_Up is a built-in MediaPipe Gesture Recognizer category.
+            // Never infer a click from a weak/occluded classification.
+            if (categoryName == "Pointing_Up" && score >= .65f && landmarks != null && landmarks.size > 8) {
+                val index = landmarks[8]
+                onPointer(pointer.accept(1f - index.x(), index.y(), now))
+            } else {
+                pointer.reset()
+                onPointer(null)
+            }
+
+            decision.accept(GestureDecisionEngine.Frame(shape, palmY, score, palmX), now)?.let(onAction)
         } finally {
             converter.release(frame)
         }
