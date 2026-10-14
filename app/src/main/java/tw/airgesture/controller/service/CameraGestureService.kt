@@ -120,7 +120,8 @@ class CameraGestureService : LifecycleService() {
                                 try {
                                     if (running) engine.process(image,
                                         onAction = { action -> GestureAccessibilityService.send(action) },
-                                        onPalmDetection = { open -> GestureAccessibilityService.handDetected(open) }
+                                        onPalmDetection = { open -> GestureAccessibilityService.handDetected(open) },
+                                        onPointer = { result -> GestureAccessibilityService.pointerUpdated(result) }
                                     )
                                 } catch (error: Exception) {
                                     Log.e("AirGesture", "Frame recognition failed", error)
