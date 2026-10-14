@@ -5,11 +5,12 @@ import kotlin.math.abs
 /** Android-independent state machine: steady-palm rearm can be tested on the JVM. */
 class GestureDecisionEngine(private val options: Options = Options()) {
     enum class Shape { OPEN_PALM, CLOSED_FIST, OTHER, NO_HAND }
-    enum class Action { SWIPE_UP, SWIPE_DOWN, TAP_CENTER }
-    data class Frame(val shape: Shape, val palmY: Float? = null, val confidence: Float = 1f)
+    enum class Action { SWIPE_UP, SWIPE_DOWN, SWIPE_BACK, TAP_CENTER }
+    data class Frame(val shape: Shape, val palmY: Float? = null, val confidence: Float = 1f, val palmX: Float? = null)
     data class Options(
         val minimumConfidence: Float = .65f,
         val swipeDistance: Float = .13f,
+        val backSwipeDistance: Float = .17f,
         val cooldownMs: Long = 850L,
         val maximumSwipeDurationMs: Long = 1_500L,
         val minimumSwipeDurationMs: Long = 100L,
@@ -20,6 +21,7 @@ class GestureDecisionEngine(private val options: Options = Options()) {
     )
 
     private var anchorY: Float? = null
+    private var anchorX: Float? = null
     private var anchorTime = 0L
     private var lastOpenTime = Long.MIN_VALUE
     private var lastHandTime = Long.MIN_VALUE
@@ -79,6 +81,7 @@ class GestureDecisionEngine(private val options: Options = Options()) {
             blocked = false
             clearSettling()
             anchorY = y // New origin prevents continued travel from duplicating swipes.
+            anchorX = frame.palmX
             anchorTime = nowMs
             lastOpenTime = nowMs
             openFrames = 2
@@ -97,17 +100,26 @@ class GestureDecisionEngine(private val options: Options = Options()) {
             val anchor = anchorY
             if (anchor == null) {
                 anchorY = y
+                anchorX = frame.palmX
                 anchorTime = nowMs
                 return null
             }
             val age = nowMs - anchorTime
             if (age > options.maximumSwipeDurationMs) {
                 anchorY = y
+                anchorX = frame.palmX
                 anchorTime = nowMs
                 return null
             }
-            if (age < options.minimumSwipeDurationMs || abs(y - anchor) < options.swipeDistance) return null
-            return fire(if (y < anchor) Action.SWIPE_UP else Action.SWIPE_DOWN, nowMs)
+            if (age < options.minimumSwipeDurationMs) return null
+            val dy = y - anchor
+            val dx = if (frame.palmX != null && anchorX != null) frame.palmX - anchorX!! else 0f
+            // Only a clear user-right motion can invoke Android edge-back.
+            if (dx >= options.backSwipeDistance && dx > abs(dy) * 1.45f) {
+                return fire(Action.SWIPE_BACK, nowMs)
+            }
+            if (abs(dy) < options.swipeDistance || abs(dy) < abs(dx) * 1.10f) return null
+            return fire(if (dy < 0f) Action.SWIPE_UP else Action.SWIPE_DOWN, nowMs)
         }
         // CLOSED_FIST: deliberately require a recent open palm rather than any arbitrary fist.
         if (shape == Shape.CLOSED_FIST) {
@@ -137,6 +149,7 @@ class GestureDecisionEngine(private val options: Options = Options()) {
 
     private fun disarm() {
         anchorY = null
+        anchorX = null
         anchorTime = 0L
         lastOpenTime = Long.MIN_VALUE
         openFrames = 0
