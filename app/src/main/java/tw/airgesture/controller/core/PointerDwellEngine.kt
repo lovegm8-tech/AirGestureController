@@ -46,27 +46,27 @@ class PointerDwellEngine(
         smoothY = py
 
         if (locked) {
-            if (abs(px - clickX) > rearmDistance || abs(py - clickY) > rearmDistance) {
+            if (abs(x - clickX) > rearmDistance || abs(y - clickY) > rearmDistance) {
                 locked = false
-                anchorX = px
-                anchorY = py
+                anchorX = x
+                anchorY = y
                 anchorTime = nowMs
             } else return Result(px, py, 0f, false)
         }
 
         val ax = anchorX
         val ay = anchorY
-        if (ax == null || ay == null || abs(px - ax) > holdRadius || abs(py - ay) > holdRadius) {
-            anchorX = px
-            anchorY = py
+        if (ax == null || ay == null || abs(x - ax) > holdRadius || abs(y - ay) > holdRadius) {
+            anchorX = x
+            anchorY = y
             anchorTime = nowMs
             return Result(px, py, 0f, false)
         }
         val elapsed = (nowMs - anchorTime).coerceAtLeast(0L)
         if (elapsed >= dwellMs) {
             locked = true
-            clickX = px
-            clickY = py
+            clickX = x
+            clickY = y
             return Result(px, py, 1f, true)
         }
         return Result(px, py, elapsed.toFloat() / dwellMs, false)
