@@ -1,81 +1,28 @@
-# 隔空手勢控制器 AirGestureController v0.2.0（原始碼預覽）
+# AirGestureController 隔空手勢控制器 v0.2.1
 
-目標手機：Samsung S26 Ultra 與 Samsung S25 系列，其他相容 Android 10（API 29）以上且具前鏡頭的手機也可嘗試。不同機型須實測驗證。**目前只有原始碼及純 JVM 邏輯測試，尚未編譯 APK，也沒有做手機實測。**
+Android 10+ 前鏡頭隔空控制。已在 Samsung S26 Ultra 實機驗證 v0.2.0 的手勢功能；v0.2.1 將降低待命 AI 推論頻率、重複使用影格緩衝區，省電效果仍須實測。
 
-## 核心操作
+## 主要操作
+- 張開手掌向上揮：螢幕向上滑動。
+- 張開手掌向下揮：螢幕向下滑動。
+- 張開手掌後握拳：點擊螢幕中央一次。
+- 觸發後手掌停穩約 0.5 秒即可再次操作，無須移開手。
 
-| 前鏡頭手勢 | 手機觸控模擬 |
-| --- | --- |
-| 張開手掌向上移 | 從螢幕下方滑向上方 |
-| 張開手掌向下移 | 從螢幕上方滑向下方 |
-| 張掌後握拳 | 點擊螢幕中央 |
+## v0.2.1 新功能
+- **智慧平衡（預設）**：沒偵測到手時 AI 最多約 5 次／秒，偵測到手及短暫消失後約 10 次／秒。
+- **省電模式**：待命約 3 次／秒、操作約 7 次／秒。
+- **高反應模式**：待命約 9 次／秒、操作約 12 次／秒。
+- 沿用 CameraX 640×480 的 RGBA 影像，**只減少 AI 推論次數**，並快取 Bitmap 及緩衝區；不宣稱鏡頭本身已降至相同 fps。
+- 延續灰／綠／藍懸浮指示燈（未看到張掌／張掌成功／動作觸發）與固定中央點擊。
+- 原有靈敏度及冷卻時間設定保留，新增效能模式，須重啟辨識服務才會生效。
+- 不需要網路權限、無廣告、不錄影、不上傳影像。無障礙服務使用者須自行授權。
+- `applicationId` 不變，`versionCode` 自 2 升至 3；正式版沿用相同固定簽章才能直接覆蓋更新。
 
-不是影音專用 App；運作時可切換到瀏覽器或其他一般 App。部分安全保護畫面與系統介面不一定允許模擬手勢。
+## 安裝與驗證
+v0.2.1 先由 GitHub Actions 執行測試與正式簽章，並確認 APK 不含 `INTERNET` 權限，且簽章 SHA-256 與 v0.2.0 相同。**效能與續航改善須手機實測才可判定**；建議對照 v0.2.0 與 v0.2.1，各測同樣亮度、網路環境、室溫下 30 分鐘的電量下降及操作回應。實際相機 FPS、CPU 溫度、功耗可能因手機而不同。
 
-## 設計
-
-- **無廣告、無訂閱、無 `INTERNET` 權限**；相機畫面僅在手機本機以 MediaPipe 辨識，不錄影、不上傳。
-- 使用 **CameraX + Camera 前景服務**，從 App 可見時按「啟動」，再切換到其他 App。相機使用狀態會出現在 Android 系統提示與持續通知。
-- **Android AccessibilityService** 對螢幕發出真實觸控等效的 `dispatchGesture()` 操作；不讀取頁面文字（`canRetrieveWindowContent=false`）。
-- **誤觸保護（A 方案）**：需連續辨識張掌；滑動需達距離門檻；握拳必須發生於張掌之後；操作後手掌停穩約 500ms 且冷卻結束即可重新使用，不必移出鏡頭。
-- **可調整設定**：低／標準／高靈敏度、冷卻時間 500~1600ms。
-- **資源控制**：640×480 輸入、約 9fps 推論、CPU 推論。
-- **右上角懸浮指示燈**：灰色＝尚未辨識張掌；綠色＝張掌辨識成功；藍色閃光＝觸發手勢。不新增 SYSTEM_ALERT_WINDOW 權限，也不攔截觸控。
-- **停止方式**：App 首頁「停止」或通知列「停止辨識」。
-
-## 重要使用限制
-
-1. 啟動相機前景服務時 App 必須**可見**（符合 Android 14 以上相機權限的限制）；不能只靠背景排程偷偷重新打開鏡頭。
-2. 其他程式若正在使用前鏡頭，可能衝突。測試時請先把 Spatial Touch 完全停止，避免同時使用前鏡頭與無障礙手勢。
-3. 目前固定點擊位置為整個顯示區域中心；無虛擬游標、無自訂按鈕位置。
-4. 手勢辨識實際成功率、方向、延遲、效能和長時間背景運作尚未透過實機驗證。尤其前鏡頭視野與光線不同時可能誤判，需第一次 APK 測試後調整。
-5. 未啟動時不使用鏡頭；啟動狀態下會耗電發熱。鎖定螢幕／其他 App 同時佔用相機可能使辨識中斷。
-6. Android 13+ 如果拒絕通知權限，前景服務通知可能不在一般通知匣完整顯示，但系統任務管理仍可能顯示；建議允許通知。
-
-## 工程內容
-
-- `app/src/main/java/tw/airgesture/controller/MainActivity.kt`：設定與啟停操作。
-- `app/src/main/java/tw/airgesture/controller/core/GestureDecisionEngine.kt`：不依賴 Android 的手勢狀態機。
-- `app/src/main/java/tw/airgesture/controller/vision/GestureCameraAnalyzer.kt`：CameraX RGBA 影格 + MediaPipe 模型。
-- `app/src/main/java/tw/airgesture/controller/service/CameraGestureService.kt`：前鏡頭前景服務與常駐通知。
-- `app/src/main/java/tw/airgesture/controller/service/GestureAccessibilityService.kt`：全域模擬滑動／點擊。
-- `app/src/main/java/tw/airgesture/controller/service/HandIndicator.kt`：跨 App 懸浮辨識燈。
-- `app/src/test/`：JVM 單元測試；`dev/SmokeTest.kt`：可用 `kotlinc` 獨立執行的快速測試。
-
-## 公開儲存庫與 APK 編譯
-
-1. 使用者在自己的 GitHub 建立一個**新的公開儲存庫**，名稱可用 `AirGestureController`。不要將其他私人 App 的程式碼或簽章檔案一起上傳。
-2. 此版本 `.github/workflows/build-apk.yml` 只允許 **手動執行**，沒有 push 或 PR 自動編譯。僅准許 `main` 分支執行，以避免讓不可信任程式碼接觸簽章 Secrets。
-3. 第一次測試可選 `debug`，但 **GitHub 每次的新 runner 可能使用不同的 Debug 簽章**，所以測試 APK 不保證可覆蓋安裝。
-4. 正式版本請先在可信任的本機環境建立一個**專屬** Android release keystore，安全備份檔案與密碼，再手動在 GitHub → Settings → Secrets and variables → Actions 設定：
-   - `AIRGESTURE_KEYSTORE_BASE64`：keystore 的 base64 內容，**不是私鑰文字直接貼在工作流程中**。
-   - `AIRGESTURE_STORE_PASSWORD`：keystore 密碼。
-   - `AIRGESTURE_KEY_ALIAS`：簽章別名。
-   - `AIRGESTURE_KEY_PASSWORD`：該別名的私鑰密碼。
-5. 設定完後手動選 `signed-release`；若任何 Secrets 缺失，該流程**直接失敗**，不會悄悄以臨時金鑰簽章。
-6. CI 會驗證 APK 沒有 `INTERNET` 權限，並用 `apksigner` 驗證 APK 簽名，再提供產物下載。需要保留同一份 keystore，後續更新才能維持簽章一致。
-
-### 安全承諾與未完成驗證
-
-- **目前沒有建立或收集任何簽章金鑰**。不要把 keystore、密碼、base64 值、截圖傳到聊天或放進公開 GitHub 儲存庫。
-- 程式不宣告 Android `INTERNET` 權限，且沒有加入廣告或分析 SDK；但仍需等首次 Android 完整編譯，確認合併後 Manifest 與 APK 權限檢查結果。
-- 下載 Google 官方 MediaPipe `.task` 模型是在 **CI 編譯期**，不是手機執行時。這個模型目前使用版本化 HTTPS 來源，但**尚未建立模型檔案的固定 SHA-256 雜湊驗證**；首次正式發佈前建議補齊供應鏈驗證。
-- CI 依賴第三方 GitHub Actions 和 Maven 依賴。公開發布正式版前應進一步鎖定 GitHub Actions 版本雜湊並做依賴審查。
-- 使用者仍須親自在 GitHub 建立儲存庫並將其授權給 ChatGPT GitHub 連線；目前沒有自動建立儲存庫與設定 Secrets 的工具權限。
-
-
-## 官方依據與模型來源
-
-- Google MediaPipe Gesture Recognizer Android: https://ai.google.dev/edge/mediapipe/solutions/vision/gesture_recognizer/android
-- Google Android foreground camera services: https://developer.android.com/about/versions/14/changes/fgs-types-required
-- Google Android Accessibility gesture dispatch: https://developer.android.com/reference/android/accessibilityservice/AccessibilityService#dispatchGesture(android.accessibilityservice.GestureDescription,android.accessibilityservice.AccessibilityService.GestureResultCallback,android.os.Handler)
-- Model: https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task
-
-## 待實機測試的驗收項目
-
-- 開鏡頭後切換到 Chrome / TikTok / YouTube 可維持辨識（相機權限與背景限制）。
-- 張掌上移、下移每次只觸發一個滑動，不會因重新收手而意外反方向滑。
-- 張掌握拳點擊畫面中心，長時間握拳不連點。
-- 手遮擋、低光線、手部潮濕、手機直橫切換時的穩定性。
-- 20~30 分鐘使用期間的電量、發熱與溫度限制。
-
+## 安全
+- 正式金鑰密碼僅存放在使用者 GitHub Actions Secrets，不在公開原始碼或日志。
+- 使用者需另外安全備份專屬 keystore；更換金鑰會阻止覆蓋更新。
+- CI 測試、APK 簽章和 `INTERNET` 權限檢驗見 `.github/workflows/build-apk.yml`。
+- MediaPipe 手勢模型在編譯階段從官方來源下載；仍建議未來加入 SHA-256 固定驗證。
