@@ -103,3 +103,5 @@ jobs:
           retention-days: 14
 
 # Retry after Kotlin UI compile fixes; this file remains a one-time build trigger.
+
+# Retry after removing the transitive INTERNET permission.
