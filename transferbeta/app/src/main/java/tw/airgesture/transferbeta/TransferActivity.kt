@@ -6,7 +6,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.provider.Settings
-import android.provider.Settings
 import androidx.lifecycle.Lifecycle
 import tw.airgesture.transferbeta.core.GrabContentPolicy
 import android.app.AlertDialog
