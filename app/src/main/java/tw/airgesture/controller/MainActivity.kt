@@ -23,6 +23,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import tw.airgesture.controller.core.Settings
+import tw.airgesture.controller.core.WakeDiagnosticLog
 import tw.airgesture.controller.service.CameraGestureService
 import tw.airgesture.controller.service.GestureAccessibilityService
 
@@ -36,6 +37,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var cursorRange: Spinner
     private lateinit var tiltedPalmAssist: Switch
     private lateinit var fastSwipeAssist: Switch
+    private lateinit var screenWake: Switch
+    private lateinit var wakePowerMode: Spinner
     private lateinit var cooldown: SeekBar
     private lateinit var cooldownText: TextView
     private val handler = Handler(Looper.getMainLooper())
@@ -107,6 +110,29 @@ class MainActivity : ComponentActivity() {
         content.addView(fastSwipeAssist, LinearLayout.LayoutParams(-1, dip(54)))
         label("預設關閉。開啟後提早記錄張掌起點，容許約 0.26 秒的短暫辨識中斷；仍需有效張掌畫面才會執行滑動。", 13f)
 
+        label("熄屏張掌喚醒與省電（測試版）", 19f, true)
+        screenWake = Switch(this).apply {
+            text = "螢幕關閉時張掌約 1 秒，嘗試喚醒與三星臉部解鎖"
+            isChecked = Settings.screenWake(this@MainActivity)
+            textSize = 16f
+        }
+        content.addView(screenWake, LinearLayout.LayoutParams(-1, -2))
+        label("預設關閉：螢幕熄滅會關閉前鏡頭。開啟後會讓出鏡頭供三星臉部辨識；解鎖完成才恢復原本隔空手勢。", 13f)
+        wakePowerMode = Spinner(this)
+        wakePowerMode.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
+            listOf("省電優先：偵測 3 秒、關閉前鏡頭 5 秒（建議）",
+                   "連續偵測：等待較短、耗電較高"))
+        wakePowerMode.setSelection(Settings.wakePowerMode(this))
+        content.addView(wakePowerMode, LinearLayout.LayoutParams(-1, dip(54)))
+        label("熄屏喚醒最多待命 10 分鐘，自動停止鏡頭；省電模式需在鏡頭偵測時張掌，喚醒可能較慢。離線運作，不會錄影。", 13f)
+        label("熄屏喚醒診斷紀錄", 17f, true)
+        val wakeEvents = label(WakeDiagnosticLog.read(this), 12f)
+        button("重新整理喚醒紀錄") { wakeEvents.text = WakeDiagnosticLog.read(this) }
+        button("清除喚醒紀錄") {
+            WakeDiagnosticLog.clear(this)
+            wakeEvents.text = WakeDiagnosticLog.read(this)
+        }
+
         label("辨識效能模式", 19f, true)
         performance = Spinner(this)
         performance.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
@@ -150,7 +176,7 @@ class MainActivity : ComponentActivity() {
         cooldownText.text = "操作冷卻時間：${500 + cooldown.progress * 100} 毫秒"
         content.addView(cooldown, LinearLayout.LayoutParams(-1, dip(48)))
         button("儲存設定") {
-            Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition, cursorRange.selectedItemPosition, tiltedPalmAssist.isChecked, fastSwipeAssist.isChecked)
+            Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition, cursorRange.selectedItemPosition, tiltedPalmAssist.isChecked, fastSwipeAssist.isChecked, screenWake.isChecked, wakePowerMode.selectedItemPosition)
             toast("已儲存；重新啟動辨識後生效")
         }
         label("隱私：App 不要求網路權限，影像只在本機暫時分析，不會錄影或上傳。\n啟動後可從通知列隨時停止前鏡頭。", 13f)
@@ -178,7 +204,7 @@ class MainActivity : ComponentActivity() {
 
     private fun startControl() {
         if (!GestureAccessibilityService.isReady()) { toast("無障礙服務尚未啟用"); return }
-        Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition, cursorRange.selectedItemPosition, tiltedPalmAssist.isChecked, fastSwipeAssist.isChecked)
+        Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition, cursorRange.selectedItemPosition, tiltedPalmAssist.isChecked, fastSwipeAssist.isChecked, screenWake.isChecked, wakePowerMode.selectedItemPosition)
         val intent = Intent(this, CameraGestureService::class.java).setAction(CameraGestureService.START)
         try {
             ContextCompat.startForegroundService(this, intent)
