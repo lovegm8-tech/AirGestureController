@@ -20,7 +20,11 @@ class GestureDecisionEngine(private val options: Options = Options()) {
         val stillTolerance: Float = .035f,
         // Opt-in: capture the first valid palm position and bridge brief detection gaps.
         val fastSwipeAssistEnabled: Boolean = false,
-        val fastPalmGapMs: Long = 260L
+        val fastPalmGapMs: Long = 260L,
+        // A second click requires this much continuous confirmed fist hold
+        // AFTER the initial open-palm -> fist click.
+        val longFistSecondClickMs: Long = 700L,
+        val longFistMaximumFrameGapMs: Long = 550L
     )
 
     private var anchorY: Float? = null
@@ -32,6 +36,9 @@ class GestureDecisionEngine(private val options: Options = Options()) {
     private var openFrames = 0
     private var fistFrames = 0
     private var fistArmed = false
+    private var longFistPending = false
+    private var firstFistClickMs = Long.MIN_VALUE
+    private var lastConfirmedFistMs = Long.MIN_VALUE
     private var blocked = false
     private var cooldownUntil = Long.MIN_VALUE
     private var otherStart = Long.MIN_VALUE
@@ -46,6 +53,7 @@ class GestureDecisionEngine(private val options: Options = Options()) {
         cooldownUntil = Long.MIN_VALUE
         otherStart = Long.MIN_VALUE
         clearSettling()
+        clearLongFist()
     }
 
     fun accept(frame: Frame, nowMs: Long): Action? {
@@ -53,6 +61,10 @@ class GestureDecisionEngine(private val options: Options = Options()) {
         lastTime = nowMs
         val shape = if (frame.confidence < options.minimumConfidence) Shape.NO_HAND else frame.shape
         if (shape == Shape.NO_HAND) {
+            // Brief detection loss can happen while closing the fist; a valid
+            // FIST frame must still arrive within the maximum frame gap.
+            if (longFistPending && lastConfirmedFistMs != Long.MIN_VALUE &&
+                nowMs - lastConfirmedFistMs > options.longFistMaximumFrameGapMs) clearLongFist()
             // A single blurry frame during a fast swipe must not erase the
             // already verified origin. We never create an action on a lost frame:
             // a new, valid open palm endpoint is still required.
@@ -72,6 +84,7 @@ class GestureDecisionEngine(private val options: Options = Options()) {
         }
         lastHandTime = nowMs
         if (shape == Shape.OTHER) {
+            clearLongFist()
             disarm()
             clearSettling()
             if (otherStart == Long.MIN_VALUE) otherStart = nowMs
@@ -81,6 +94,24 @@ class GestureDecisionEngine(private val options: Options = Options()) {
         otherStart = Long.MIN_VALUE
         // Rearm once the open palm is steady for 0.5s and the cooldown has ended.
         if (blocked) {
+            if (shape == Shape.CLOSED_FIST) {
+                if (longFistPending) {
+                    val gap = nowMs - lastConfirmedFistMs
+                    if (lastConfirmedFistMs == Long.MIN_VALUE || gap < 0L ||
+                        gap > options.longFistMaximumFrameGapMs) {
+                        clearLongFist()
+                    } else {
+                        lastConfirmedFistMs = nowMs
+                        if (nowMs - firstFistClickMs >= options.longFistSecondClickMs) {
+                            // Exactly one extra tap; holding longer does not repeat.
+                            clearLongFist()
+                            return Action.TAP_CENTER
+                        }
+                    }
+                }
+                return null
+            }
+            clearLongFist()
             if (shape != Shape.OPEN_PALM || frame.palmY == null || frame.palmY !in 0f..1f) {
                 clearSettling()
                 return null
@@ -106,6 +137,7 @@ class GestureDecisionEngine(private val options: Options = Options()) {
         if (nowMs < cooldownUntil) return null
 
         if (shape == Shape.OPEN_PALM) {
+            clearLongFist()
             fistFrames = 0
             val y = frame.palmY ?: return null
             if (y !in 0f..1f) return null
@@ -172,9 +204,20 @@ class GestureDecisionEngine(private val options: Options = Options()) {
     private fun fire(action: Action, nowMs: Long): Action {
         blocked = true
         cooldownUntil = nowMs + options.cooldownMs
+        if (action == Action.TAP_CENTER) {
+            longFistPending = true
+            firstFistClickMs = nowMs
+            lastConfirmedFistMs = nowMs
+        } else clearLongFist()
         disarm()
         clearSettling()
         return action
+    }
+
+    private fun clearLongFist() {
+        longFistPending = false
+        firstFistClickMs = Long.MIN_VALUE
+        lastConfirmedFistMs = Long.MIN_VALUE
     }
 
     private fun clearSettling() {
