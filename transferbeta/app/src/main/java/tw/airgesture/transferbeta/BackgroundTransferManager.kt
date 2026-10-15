@@ -66,13 +66,18 @@ class BackgroundTransferManager(private val app: Context) {
     }
 
     /** Activity sets this while visible; all session data remains in this service. */
+    var onBackgroundStatus: ((String) -> Unit)? = null
     var onStatus: ((String) -> Unit)? = null
         set(value) { field = value; value?.invoke(status) }
     var onPairing: ((String) -> Unit)? = null
         set(value) { field = value; pendingDigits?.let { value?.invoke(it) } }
 
     private fun ui(msg: String) {
-        main.post { status = msg; onStatus?.invoke(msg) }
+        main.post {
+            status = msg
+            onBackgroundStatus?.invoke(msg)
+            onStatus?.invoke(msg)
+        }
     }
     private fun hash(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256")

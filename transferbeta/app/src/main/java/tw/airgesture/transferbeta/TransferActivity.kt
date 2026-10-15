@@ -186,6 +186,12 @@ class TransferActivity : ComponentActivity() {
         button("前往 Android 無障礙設定，啟用隔空抓取") {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
+        button("允許抓取動畫顯示在其他 App 上方") {
+            if (!Settings.canDrawOverlays(this)) {
+                startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + packageName)))
+            } else flash("懸浮動畫權限已開啟", true)
+        }
         button("啟動全域隔空抓取（持續前鏡頭）") {
             if (!hasPermissions()) {
                 permissionLauncher.launch(permissions())

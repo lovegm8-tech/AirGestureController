@@ -60,6 +60,7 @@ class GlobalGestureService : LifecycleService() {
 
     private val main = Handler(Looper.getMainLooper())
     private lateinit var connections: BackgroundTransferManager
+    private lateinit var overlay: GestureStatusOverlay
     private val power = AdaptivePowerPolicy()
     private val sequence = GestureSequence()
     private val cameraExecutor = Executors.newSingleThreadExecutor()
@@ -88,6 +89,14 @@ class GlobalGestureService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         connections = BackgroundTransferManager(applicationContext)
+        overlay = GestureStatusOverlay(applicationContext)
+        connections.onBackgroundStatus = { message ->
+            if (listOf("已抓取", "收到檔案", "收到影片", "已接收", "成功", "驗證失敗",
+                    "抓取失敗", "找不到", "正在傳送", "逾時").any { message.contains(it) }) {
+                overlay.show(message,
+                    message.contains("成功") || message.contains("已抓取") || message.contains("已接收"))
+            }
+        }
         registerReceiver(screen, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_SCREEN_ON)
@@ -257,7 +266,9 @@ class GlobalGestureService : LifecycleService() {
         transfer = null
         GlobalGrabBridge.onGrabResult = null
         GlobalGrabBridge.onReceiveGesture = null
+        connections.onBackgroundStatus = null
         connections.stop()
+        overlay.dismiss()
         power.stop()
         provider?.unbindAll()
         try { unregisterReceiver(screen) } catch (_: Exception) {}
