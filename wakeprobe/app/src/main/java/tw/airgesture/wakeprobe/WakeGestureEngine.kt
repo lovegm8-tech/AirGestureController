@@ -20,26 +20,26 @@ class WakeGestureEngine(
     private var fistSamples = 0
     private var lastOpen: Long = -1L
 
-    fun screenOff() {
+    @Synchronized fun screenOff() {
         state = State.WATCHING_PALM
         resetPalm()
         fistSamples = 0
         lastOpen = -1L
     }
 
-    fun unlocked() {
+    @Synchronized fun unlocked() {
         state = State.WAITING_RESUME_PALM
         resetPalm()
         fistSamples = 0
         lastOpen = -1L
     }
 
-    fun wakeAttempted() {
+    @Synchronized fun wakeAttempted() {
         state = State.AWAITING_UNLOCK
         resetPalm()
     }
 
-    fun accept(shape: Shape, nowMs: Long): Action? {
+    @Synchronized fun accept(shape: Shape, nowMs: Long): Action? {
         when (state) {
             State.WATCHING_PALM -> {
                 if (shape != Shape.PALM) {
