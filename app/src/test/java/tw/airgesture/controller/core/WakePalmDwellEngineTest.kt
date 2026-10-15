@@ -38,6 +38,7 @@ class WakePalmDwellEngineTest {
         val e = WakePalmDwellEngine()
         e.accept(true, 0)
         e.accept(true, 300)
+        assertFalse(e.accept(true, 650))
         assertTrue(e.accept(true, 900))
         e.reset()
         assertFalse(e.accept(true, 1200))
