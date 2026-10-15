@@ -32,6 +32,8 @@ import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.gesturerecognizer.GestureRecognizer
 import tw.airgesture.transferbeta.core.AdaptivePowerPolicy
+import tw.airgesture.transferbeta.core.VisualEvent
+import tw.airgesture.transferbeta.core.VisualPhase
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
 
@@ -91,13 +93,7 @@ class GlobalGestureService : LifecycleService() {
         super.onCreate()
         connections = BackgroundTransferManager(applicationContext)
         overlay = GestureStatusOverlay(applicationContext)
-        connections.onBackgroundStatus = { message ->
-            if (listOf("已抓取", "收到檔案", "收到影片", "已接收", "成功", "驗證失敗",
-                    "抓取失敗", "找不到", "正在傳送", "逾時").any { message.contains(it) }) {
-                overlay.show(message,
-                    message.contains("成功") || message.contains("已抓取") || message.contains("已接收"))
-            }
-        }
+        connections.onVisualEvent = { event -> overlay.showState(event) }
         registerReceiver(screen, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_SCREEN_ON)
@@ -133,7 +129,7 @@ class GlobalGestureService : LifecycleService() {
                     is GrabResult.Link -> connections.offerLink(result.url)
                     is GrabResult.ScreenSnapshot -> connections.offerFile(result.file,
                         "screen-capture-" + System.currentTimeMillis() + ".png")
-                    is GrabResult.ShareStarted -> connections.reportCaptureFailure(result.detail)
+                    is GrabResult.ShareStarted -> connections.reportShareStarted(result.detail)
                     is GrabResult.Unavailable -> connections.reportCaptureFailure(result.reason)
                 }
             }
@@ -245,7 +241,10 @@ class GlobalGestureService : LifecycleService() {
                 shape == "Open_Palm" || shape == "Closed_Fist"
             power.observeHand(handSeen, now)
             when (sequence.accept(shape, now)) {
-                GestureSequence.Result.SEND -> GlobalGrabBridge.onGrabGesture()
+                GestureSequence.Result.SEND -> {
+                    overlay.showState(VisualEvent(VisualPhase.CAPTURING, "正在抓取目前內容…"))
+                    GlobalGrabBridge.onGrabGesture()
+                }
                 GestureSequence.Result.RECEIVE -> GlobalGrabBridge.onReleaseGesture()
                 else -> Unit
             }
@@ -281,7 +280,7 @@ class GlobalGestureService : LifecycleService() {
         transfer = null
         GlobalGrabBridge.onGrabResult = null
         GlobalGrabBridge.onReceiveGesture = null
-        connections.onBackgroundStatus = null
+        connections.onVisualEvent = null
         connections.stop()
         overlay.dismiss()
         power.stop()

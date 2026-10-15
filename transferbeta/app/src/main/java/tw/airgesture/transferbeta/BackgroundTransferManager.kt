@@ -17,6 +17,8 @@ import com.google.android.gms.nearby.connection.*
 import org.json.JSONObject
 import tw.airgesture.transferbeta.core.GrabContentPolicy
 import tw.airgesture.transferbeta.core.TransferPolicy
+import tw.airgesture.transferbeta.core.VisualEvent
+import tw.airgesture.transferbeta.core.VisualPhase
 import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
@@ -69,6 +71,14 @@ class BackgroundTransferManager(private val app: Context) {
     }
 
     /** Activity sets this while visible; all session data remains in this service. */
+    var onVisualEvent: ((VisualEvent) -> Unit)? = null
+    private fun visual(phase: VisualPhase, label: String, progress: Int? = null) {
+        main.post { onVisualEvent?.invoke(VisualEvent(phase, label, progress)) }
+    }
+    fun reportShareStarted(detail: String) {
+        visual(VisualPhase.CAPTURING, detail)
+        ui(detail)
+    }
     var onBackgroundStatus: ((String) -> Unit)? = null
     var onStatus: ((String) -> Unit)? = null
         set(value) { field = value; value?.invoke(status) }
@@ -113,6 +123,7 @@ class BackgroundTransferManager(private val app: Context) {
         awaitingPair = null
         onStatus = null; onPairing = null
         worker.shutdown()
+        onVisualEvent = null
         ui("背景傳輸已停止")
     }
     private fun search() {
@@ -254,11 +265,13 @@ class BackgroundTransferManager(private val app: Context) {
         session = UUID.randomUUID().toString()
         control(JSONObject().put("type", "link_offer").put("sid", session).put("url", url))
         ui("已抓取網址，等待對方握拳張掌（30 秒）")
+        visual(VisualPhase.CONTENT_READY, "已抓取網址 · 等待接收")
         val key = ++generation
         main.postDelayed({
             if (generation == key && busy) {
                 busy = false
                 ui("網址分享逾時")
+                visual(VisualPhase.FAILURE, "對方未在 30 秒內接收")
             }
         }, TransferPolicy.OFFER_TIMEOUT_MS)
     }
@@ -282,10 +295,12 @@ class BackgroundTransferManager(private val app: Context) {
                     control(JSONObject().put("type", "file_offer").put("sid", session)
                         .put("name", name).put("size", candidate.length()).put("hash", sum))
                     ui("已抓取：" + name + "；等待對方接收")
+                    visual(VisualPhase.CONTENT_READY, "已抓取：" + name)
                     val key = ++generation
                     main.postDelayed({
                         if (generation == key && busy && payloadOutgoing < 0) {
                             busy = false; ui("檔案接收等待逾時")
+                            visual(VisualPhase.FAILURE, "等待接收逾時")
                         }
                     }, TransferPolicy.OFFER_TIMEOUT_MS)
                 }
@@ -304,11 +319,13 @@ class BackgroundTransferManager(private val app: Context) {
                 control(JSONObject().put("type", "link_ack").put("sid", current.sid))
                 ui("已接收網頁／影片網址，請由通知開啟")
                 notifyLink(current.url)
+                visual(VisualPhase.RECEIVE_COMPLETE, "已收到連結 · 點通知開啟")
                 busy = false; offered = null
             }
             is Offer.FileOffer -> {
                 control(JSONObject().put("type", "file_ready").put("sid", current.sid))
                 ui("準備接收原檔：" + current.name)
+                visual(VisualPhase.RECEIVING, "接收中：" + current.name, 0)
             }
         }
     }
@@ -375,10 +392,16 @@ class BackgroundTransferManager(private val app: Context) {
                     PayloadTransferUpdate.Status.CANCELED -> {
                         busy = false; incomingFile = null; offered = null
                         ui("傳輸取消或失敗")
+                        visual(VisualPhase.FAILURE, "傳輸中斷，未完成")
                     }
                     PayloadTransferUpdate.Status.IN_PROGRESS -> {
-                        if (u.totalBytes > 0) ui(
-                            "傳輸中 " + ((100 * u.bytesTransferred / u.totalBytes).toInt()).coerceIn(0,100) + "%")
+                        if (u.totalBytes > 0) {
+                            val percent = ((100 * u.bytesTransferred / u.totalBytes).toInt())
+                                .coerceIn(0, 100)
+                            ui("傳輸中 " + percent + "%")
+                            if (u.payloadId == payloadIncoming && (percent % 5 == 0 || percent == 100))
+                                visual(VisualPhase.RECEIVING, "正在接收 · " + percent + "%", percent)
+                        }
                     }
                 }
             }
@@ -397,6 +420,7 @@ class BackgroundTransferManager(private val app: Context) {
                 offered = Offer.FileOffer(sid, TransferPolicy.safeName(name)!!, count, sum)
                 incomingFile = null; incomingFinished = false; payloadIncoming = -1L
                 ui("收到檔案請求：" + name + "；握拳 → 張掌以接收")
+                visual(VisualPhase.OFFER_RECEIVED, "收到檔案 · 握拳張掌接收")
                 expireOffer(sid)
             }
             "link_offer" -> {
@@ -406,6 +430,7 @@ class BackgroundTransferManager(private val app: Context) {
                 }
                 offered = Offer.LinkOffer(sid, url)
                 ui("收到影片或網頁網址；握拳 → 張掌以接收")
+                visual(VisualPhase.OFFER_RECEIVED, "收到連結 · 握拳張掌接收")
                 expireOffer(sid)
             }
             "file_ready" -> {
@@ -422,17 +447,21 @@ class BackgroundTransferManager(private val app: Context) {
             "file_verified" -> if (busy && sid == session) {
                 busy = false; ++generation
                 ui("✓ 原檔 SHA-256 完整驗證，傳送成功")
+                visual(VisualPhase.SEND_COMPLETE, "傳送完成 · 對方已驗證")
             }
             "file_invalid" -> if (sid == session) {
                 busy = false; ui("接收端檔案完整性檢查失敗")
+                visual(VisualPhase.FAILURE, "接收端驗證失敗")
             }
             "link_ack" -> if (sid == session) {
                 busy = false; ++generation
                 ui("✓ 對方已接收網址")
+                visual(VisualPhase.SEND_COMPLETE, "網址已交給對方")
             }
             "busy" -> if (sid == session) {
                 busy = false; ++generation
                 ui("接收端忙碌或無法接收")
+                visual(VisualPhase.FAILURE, "接收端暫時無法接收")
             }
         }
     }
@@ -442,11 +471,13 @@ class BackgroundTransferManager(private val app: Context) {
             if (generation == key && offered?.sid == id && !busy) {
                 offered = null
                 ui("接收請求逾時")
+                visual(VisualPhase.FAILURE, "接收請求已逾時")
             }
         }, TransferPolicy.OFFER_TIMEOUT_MS)
     }
     private fun verifyFile() {
         val meta = offered as? Offer.FileOffer ?: return
+        visual(VisualPhase.VERIFYING, "接收完成，正在確認檔案完整性")
         val payload = incomingFile ?: return
         incomingFile = null // prevent double verification from duplicate callbacks
         worker.execute {
@@ -484,6 +515,7 @@ class BackgroundTransferManager(private val app: Context) {
                     control(JSONObject().put("type","file_verified").put("sid",meta.sid))
                     busy = false; offered = null; ++generation
                     ui("✓ 已接收原始檔案：" + meta.name)
+                    visual(VisualPhase.RECEIVE_COMPLETE, "接收成功：" + meta.name)
                 }
             } catch (e: Exception) {
                 try { target?.let { app.contentResolver.delete(it, null, null) } }
@@ -492,6 +524,7 @@ class BackgroundTransferManager(private val app: Context) {
                     control(JSONObject().put("type","file_invalid").put("sid",meta.sid))
                     busy = false; offered = null; ++generation
                     ui("接收檔案驗證失敗：" + e.message)
+                    visual(VisualPhase.FAILURE, "檔案檢查失敗，未儲存成功")
                 }
             }
         }
