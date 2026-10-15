@@ -1,3 +1,17 @@
+# AirGestureController v0.2.6 — 解鎖後保留原本影片畫面
+
+**修正 v0.2.5 已回報問題**：用「張掌→三星臉部解鎖」成功後，被帶回「隔空手勢控制器」設定頁，而不是原本看的影片。
+
+- 原因：解鎖暫時 Activity 用 `FLAG_ACTIVITY_NEW_TASK` 時，會重用控制器自己的既有 task，暫時 Activity 結束就露出控制器 `MainActivity`。
+- 修正：給 `FaceUnlockWakeActivity` 獨立的 `taskAffinity`；用 `FLAG_ACTIVITY_NEW_TASK | FLAG_ACTIVITY_MULTIPLE_TASK | FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS` 建立不列入最近使用程式的短暫 task。
+- Android 解鎖完成或 2.4 秒逾時後，若臉部驗證 Activity 是 task root，就呼叫 `finishAndRemoveTask()` 清除**僅該暫時 task**；不關掉原本的影片或控制器 service。若 ROM 非預期重用其他 task，則只關閉該 Activity，避免誤清空。
+- 避免 `onResume` 多次對 Samsung `requestDismissKeyguard` 重複請求。
+- 延用 v0.2.5 的全域隔空操作、獨立開關、預設熄屏間歇省電（3 秒開／5 秒關）、10 分鐘上限和固定簽章。
+- 真機驗收：啟動 AirGestureController 並切回 YouTube/原影片 App，關閉螢幕→張掌→三星臉部驗證→解鎖後應回到**原影片 App**（而非 AirGestureController）；待 2～3 秒確認張掌上下滑或食指游標仍可使用。
+- Android/OEM 仍控制背景 Activity 啟動、工作切換與臉部驗證，**尚需 S26 Ultra 實測**；若仍跳設定頁請回傳熄屏喚醒診斷紀錄以檢查 `taskId` / `isTaskRoot`。
+
+---
+
 # AirGestureController v0.2.5 — 熄屏張掌喚醒 + 省電模式
 
 與 v0.2.4 同一套件 `tw.airgesture.controller`、同一固定簽章，可直接覆蓋。保留所有已測試正常的張掌上下滑、右滑返回、握拳中央點擊、食指游標停穩 3 秒點擊、斜角手掌輔助及快速揮掌設定。
