@@ -12,6 +12,8 @@ object Settings {
     private const val KEY_FAST_SWIPE_ASSIST = "fast_swipe_assist"
     private const val KEY_SCREEN_WAKE = "screen_wake"
     private const val KEY_SCREEN_WAKE_POWER = "screen_wake_power"
+    private const val KEY_POINTER_DWELL = "pointer_dwell"
+    private const val KEY_LONG_FIST = "long_fist"
 
     fun sensitivity(context: Context): Int = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         .getInt(KEY_SENSITIVITY, 1).coerceIn(0, 2)
@@ -47,6 +49,22 @@ object Settings {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getInt(KEY_SCREEN_WAKE_POWER, 0).coerceIn(0, 1)
 
+    /** 0=1s, 1=2s (default), 2=3s. */
+    fun pointerDwellIndex(context: Context): Int =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getInt(KEY_POINTER_DWELL, 1).coerceIn(0, 2)
+
+    fun pointerDwellMs(context: Context): Long =
+        longArrayOf(1000L, 2000L, 3000L)[pointerDwellIndex(context)]
+
+    /** 0=0.5s, 1=0.7s (default), 2=1s. */
+    fun longFistIndex(context: Context): Int =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getInt(KEY_LONG_FIST, 1).coerceIn(0, 2)
+
+    fun longFistMs(context: Context): Long =
+        longArrayOf(500L, 700L, 1000L)[longFistIndex(context)]
+
     fun save(
         context: Context,
         sensitivity: Int,
@@ -56,7 +74,9 @@ object Settings {
         tiltedPalmAssist: Boolean = tiltedPalmAssist(context),
         fastSwipeAssist: Boolean = fastSwipeAssist(context),
         screenWake: Boolean = screenWake(context),
-        wakePowerMode: Int = wakePowerMode(context)
+        wakePowerMode: Int = wakePowerMode(context),
+        pointerDwellIndex: Int = pointerDwellIndex(context),
+        longFistIndex: Int = longFistIndex(context)
     ) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putInt(KEY_SENSITIVITY, sensitivity.coerceIn(0, 2))
@@ -67,6 +87,8 @@ object Settings {
             .putBoolean(KEY_FAST_SWIPE_ASSIST, fastSwipeAssist)
             .putBoolean(KEY_SCREEN_WAKE, screenWake)
             .putInt(KEY_SCREEN_WAKE_POWER, wakePowerMode.coerceIn(0, 1))
+            .putInt(KEY_POINTER_DWELL, pointerDwellIndex.coerceIn(0, 2))
+            .putInt(KEY_LONG_FIST, longFistIndex.coerceIn(0, 2))
             .apply()
     }
 
@@ -74,6 +96,7 @@ object Settings {
         swipeDistance = when (sensitivity(context)) { 0 -> .18f; 2 -> .09f; else -> .13f },
         cooldownMs = cooldown(context),
         stillToRearmMs = 500L,
-        fastSwipeAssistEnabled = fastSwipeAssist(context)
+        fastSwipeAssistEnabled = fastSwipeAssist(context),
+        longFistSecondClickMs = longFistMs(context)
     )
 }
