@@ -21,6 +21,7 @@ import android.os.SystemClock
 import android.util.Log
 import android.util.Size
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.CameraState
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -28,6 +29,8 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.Observer
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
@@ -64,11 +67,16 @@ class WakeProbeService : LifecycleService() {
     private var cpuWake: PowerManager.WakeLock? = null
     private var provider: ProcessCameraProvider? = null
     private var analysis: ImageAnalysis? = null
+    private var cameraStates: LiveData<CameraState>? = null
+    private var stateObserver: Observer<CameraState>? = null
+    private var lastCameraState: CameraState.Type? = null
+    private var releaseGeneration = 0
+    private var awaitingCameraClose = false
     private var recognizer: GestureRecognizer? = null
     private var converter = CameraBitmapConverter()
     private var previousAnalysisMs = -1L
     private var offFrames = 0
-    private var monitorEnabled = false
+    @Volatile private var monitorEnabled = false
     private var bound = false
     private var receiverRegistered = false
 
@@ -81,11 +89,18 @@ class WakeProbeService : LifecycleService() {
                     engine.screenOff()
                     offFrames = 0
                     monitorEnabled = true
+                    // On a repeated screen-off attempt after a failed face unlock,
+                    // the camera may be unbound. Try to resume the existing service.
+                    if (!bound && !awaitingCameraClose) main.post { if (running) bindCamera() }
                 }
                 Intent.ACTION_SCREEN_ON -> {
-                    ProbeLog.add(this@WakeProbeService, "偵測到螢幕亮起")
+                    ProbeLog.add(this@WakeProbeService, "偵測到螢幕亮起；立刻釋放前鏡頭供臉部辨識")
+                    // Unlike v0.1.0 this also works when the POWER BUTTON wakes
+                    // the phone, not just when our palm gesture wakes it.
+                    monitorEnabled = false
+                    releaseCameraForFaceUnlock(null)
                     if (!lock.isKeyguardLocked) afterUnlock()
-                    else status = "亮屏但尚未解鎖；等待三星臉部辨識"
+                    else status = "亮屏中；已要求釋放相機，等待三星臉部辨識"
                 }
                 Intent.ACTION_USER_PRESENT -> {
                     ProbeLog.add(this@WakeProbeService, "Android 回報已解鎖")
@@ -189,7 +204,11 @@ class WakeProbeService : LifecycleService() {
     }
 
     private fun bindCamera() {
-        if (!running || bound || recognizer == null) return
+        if (!running || bound || awaitingCameraClose || recognizer == null) return
+        if (power.isInteractive && lock.isKeyguardLocked) {
+            ProbeLog.add(this, "仍在鎖定畫面，延後相機啟動，避免干擾三星臉部辨識")
+            return
+        }
         try {
             val future = ProcessCameraProvider.getInstance(this)
             future.addListener({
@@ -212,8 +231,23 @@ class WakeProbeService : LifecycleService() {
                             image.close()
                         }
                     }
+                    // Remove a stale observer left by an earlier completed release.
+                    clearCameraObserver()
                     cameraProvider.unbindAll()
-                    cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_FRONT_CAMERA, imageAnalysis)
+                    val camera = cameraProvider.bindToLifecycle(
+                        this, CameraSelector.DEFAULT_FRONT_CAMERA, imageAnalysis
+                    )
+                    val states = camera.cameraInfo.cameraState
+                    cameraStates = states
+                    val observer = Observer<CameraState> { currentState ->
+                        if (currentState != null && currentState.type != lastCameraState) {
+                            lastCameraState = currentState.type
+                            ProbeLog.add(this, "CameraX 相機狀態：${currentState.type}")
+                        }
+                    }
+                    stateObserver = observer
+                    states.observe(this, observer)
+                    lastCameraState = states.value?.type
                     analysis = imageAnalysis
                     bound = true
                     status = if (power.isInteractive) "前鏡頭正常；請切回影片再熄屏" else "熄屏相機已要求啟動"
@@ -284,32 +318,41 @@ class WakeProbeService : LifecycleService() {
     private fun attemptWake() {
         if (!running || power.isInteractive) return
         monitorEnabled = false
-        status = "張掌成功！釋放前鏡頭後嘗試亮屏"
-        ProbeLog.add(this, "熄屏張掌持續達門檻；準備亮屏；先釋放鏡頭供臉部辨識")
-        unbindCamera()
-        main.postDelayed({
-            if (!running) return@postDelayed
-            val perm = ContextCompat.checkSelfPermission(this, "android.permission.TURN_SCREEN_ON")
-            ProbeLog.add(this, "亮屏特殊權限：${if (perm == PackageManager.PERMISSION_GRANTED) "已授權" else "未授權或不適用"}")
-            try {
-                // Deprecated wake flag is deliberately tested as a fallback:
-                // Android 14+ may require TURN_SCREEN_ON special access.
-                @Suppress("DEPRECATION")
-                val wake = power.newWakeLock(
-                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
-                    "WakeProbe:ScreenOnAttempt"
-                )
-                wake.acquire(2500L)
-                main.postDelayed({ if (wake.isHeld) wake.release() }, 2100L)
-                ProbeLog.add(this, "已送出 Android 亮屏喚醒請求")
-                main.postDelayed({
-                    ProbeLog.add(this, "亮屏結果：${if (power.isInteractive) "螢幕已亮" else "仍為熄屏（可能被系統拒絕）"}")
-                }, 1100L)
-            } catch (e: Exception) {
-                ProbeLog.add(this, "亮屏請求失敗：${e.javaClass.simpleName}")
-                status = "亮屏請求遭系統限制，請手動點亮查看紀錄"
+        status = "張掌成功！等待前鏡頭真正關閉再亮屏"
+        ProbeLog.add(this, "熄屏張掌成立；開始相機交接（不再採用固定等候 250 毫秒）")
+        releaseCameraForFaceUnlock { closed ->
+            if (!running || power.isInteractive) return@releaseCameraForFaceUnlock
+            if (!closed) {
+                status = "相機未確認關閉，為避免阻擋臉部辨識，本次未自動亮屏"
+                ProbeLog.add(this, "本次停止亮屏：CameraX 未確認 CLOSED；請手動亮屏並查看紀錄")
+                return@releaseCameraForFaceUnlock
             }
-        }, 250L)
+            // Give the Samsung camera service a short hand-off interval
+            // AFTER CameraX reports the camera device CLOSED.
+            ProbeLog.add(this, "CameraX 已確認 CLOSED；等待 400 毫秒交給三星臉部辨識")
+            main.postDelayed({ if (running && !power.isInteractive) requestScreenWake() }, 400L)
+        }
+    }
+
+    private fun requestScreenWake() {
+        val perm = ContextCompat.checkSelfPermission(this, "android.permission.TURN_SCREEN_ON")
+        ProbeLog.add(this, "亮屏特殊權限：${if (perm == PackageManager.PERMISSION_GRANTED) "已授權" else "未授權或不適用"}")
+        try {
+            @Suppress("DEPRECATION")
+            val wake = power.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                "WakeProbe:ScreenOnAttempt"
+            )
+            wake.acquire(2500L)
+            main.postDelayed({ if (wake.isHeld) wake.release() }, 2100L)
+            ProbeLog.add(this, "相機已關閉後才送出 Android 亮屏喚醒請求")
+            main.postDelayed({
+                ProbeLog.add(this, "亮屏結果：${if (power.isInteractive) "螢幕已亮" else "仍為熄屏（可能被系統拒絕）"}")
+            }, 1100L)
+        } catch (e: Exception) {
+            ProbeLog.add(this, "亮屏請求失敗：${e.javaClass.simpleName}")
+            status = "亮屏請求遭系統限制，請手動點亮查看紀錄"
+        }
     }
 
     private fun afterUnlock() {
@@ -322,10 +365,89 @@ class WakeProbeService : LifecycleService() {
         ProbeLog.add(this, "開始解鎖後手勢測試，等待張掌再握拳")
         monitorEnabled = true
         // Face unlock and CameraX can contend for the only front camera.
-        main.postDelayed({ if (running) bindCamera() }, 1300L)
+        main.postDelayed({
+            if (running && power.isInteractive && !lock.isKeyguardLocked) {
+                bindCamera()
+            }
+        }, 2000L)
+    }
+
+    /**
+     * CameraX unbindAll() starts asynchronous shutdown. The observed camera
+     * state is CLOSED only after CameraX closes its underlying camera device.
+     * Timeout deliberately fails closed: never wake with a camera still held.
+     */
+    private fun releaseCameraForFaceUnlock(onReleased: ((Boolean) -> Unit)?) {
+        val token = ++releaseGeneration
+        monitorEnabled = false
+        awaitingCameraClose = true
+        try {
+            analysis?.clearAnalyzer()
+            provider?.unbindAll()
+        } catch (e: Exception) {
+            ProbeLog.add(this, "相機卸載要求出錯：${e.javaClass.simpleName}")
+        }
+        analysis = null
+        bound = false
+
+        // No camera was ever bound: there is nothing to release.
+        val states = cameraStates
+        if (states == null) {
+            awaitingCameraClose = false
+            ProbeLog.add(this, "沒有 CameraX 實例需要釋放")
+            onReleased?.invoke(true)
+            return
+        }
+
+        fun finishRelease(success: Boolean) {
+            if (releaseGeneration != token || !awaitingCameraClose) return
+            awaitingCameraClose = false
+            if (success) {
+                ProbeLog.add(this, "CameraX 已確認前鏡頭 CLOSED，交接完成")
+            } else ProbeLog.add(this, "等待 3 秒仍未確認相機 CLOSED（目前狀態：${states.value?.type}）")
+            clearCameraObserver()
+            onReleased?.invoke(success)
+        }
+
+        val existingObserver = stateObserver
+        if (existingObserver != null) states.removeObserver(existingObserver)
+        val releaseObserver = Observer<CameraState> { newState ->
+            if (newState?.type == CameraState.Type.CLOSED) {
+                // Wait until a later main-loop pass, then verify latest state.
+                main.post {
+                    if (releaseGeneration == token && awaitingCameraClose) {
+                        finishRelease(states.value?.type == CameraState.Type.CLOSED)
+                    }
+                }
+            } else if (newState != null) {
+                ProbeLog.add(this, "等待相機關閉：${newState.type}")
+            }
+        }
+        stateObserver = releaseObserver
+        states.observe(this, releaseObserver)
+        if (states.value?.type == CameraState.Type.CLOSED) {
+            main.post { finishRelease(states.value?.type == CameraState.Type.CLOSED) }
+        }
+        main.postDelayed({
+            if (releaseGeneration == token && awaitingCameraClose) {
+                finishRelease(states.value?.type == CameraState.Type.CLOSED)
+            }
+        }, 3000L)
+    }
+
+    private fun clearCameraObserver() {
+        val existingObserver = stateObserver
+        val states = cameraStates
+        if (existingObserver != null && states != null) states.removeObserver(existingObserver)
+        stateObserver = null
+        cameraStates = null
+        lastCameraState = null
     }
 
     private fun unbindCamera() {
+        ++releaseGeneration
+        awaitingCameraClose = false
+        monitorEnabled = false
         try {
             analysis?.clearAnalyzer()
             provider?.unbindAll()
@@ -334,6 +456,7 @@ class WakeProbeService : LifecycleService() {
         }
         analysis = null
         bound = false
+        clearCameraObserver()
     }
 
     private fun reportError(prefix: String, error: Exception) {
