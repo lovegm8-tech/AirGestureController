@@ -5,7 +5,7 @@ import kotlin.math.abs
 /** Android-independent state machine: steady-palm rearm can be tested on the JVM. */
 class GestureDecisionEngine(private val options: Options = Options()) {
     enum class Shape { OPEN_PALM, CLOSED_FIST, OTHER, NO_HAND }
-    enum class Action { SWIPE_UP, SWIPE_DOWN, SWIPE_BACK, TAP_CENTER }
+    enum class Action { SWIPE_UP, SWIPE_DOWN, SWIPE_BACK, TAP_CENTER, MEDIA_PLAY_PAUSE }
     data class Frame(val shape: Shape, val palmY: Float? = null, val confidence: Float = 1f, val palmX: Float? = null)
     data class Options(
         val minimumConfidence: Float = .65f,
