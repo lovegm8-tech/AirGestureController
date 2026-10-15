@@ -1,5 +1,10 @@
-name: AirGrab Signed APK - MANUAL APPROVAL ONLY
+name: AirGrab Signed Test APK - Authorized Request
 on:
+  push:
+    branches:
+      - experiment/global-grab-code
+    paths:
+      - transferbeta/BUILD_REQUEST_AIRGRAB_V020.txt
   workflow_dispatch:
     inputs:
       approval:
@@ -11,7 +16,7 @@ permissions:
   contents: read
 jobs:
   build:
-    if: github.ref == 'refs/heads/experiment/global-grab-code' && inputs.approval == 'BUILD_AIRGRAB_APK'
+    if: github.ref == 'refs/heads/experiment/global-grab-code' && ((github.event_name == 'workflow_dispatch' && inputs.approval == 'BUILD_AIRGRAB_APK') || (github.event_name == 'push' && github.event.head_commit.message == 'AirGrab v0.2.0 authorized build request'))
     runs-on: ubuntu-latest
     timeout-minutes: 40
     defaults:
