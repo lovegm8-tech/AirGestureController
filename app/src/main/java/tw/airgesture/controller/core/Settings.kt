@@ -10,6 +10,8 @@ object Settings {
     private const val KEY_CURSOR_RANGE = "cursor_range"
     private const val KEY_TILTED_PALM_ASSIST = "tilted_palm_assist"
     private const val KEY_FAST_SWIPE_ASSIST = "fast_swipe_assist"
+    private const val KEY_SCREEN_WAKE = "screen_wake"
+    private const val KEY_SCREEN_WAKE_POWER = "screen_wake_power"
 
     fun sensitivity(context: Context): Int = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         .getInt(KEY_SENSITIVITY, 1).coerceIn(0, 2)
@@ -35,6 +37,16 @@ object Settings {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getBoolean(KEY_FAST_SWIPE_ASSIST, false)
 
+    /** Screen-off monitoring is opt-in and separately configurable. */
+    fun screenWake(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_SCREEN_WAKE, false)
+
+    /** 0 intermittent camera windows (default), 1 continuous camera (higher power). */
+    fun wakePowerMode(context: Context): Int =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getInt(KEY_SCREEN_WAKE_POWER, 0).coerceIn(0, 1)
+
     fun save(
         context: Context,
         sensitivity: Int,
@@ -42,7 +54,9 @@ object Settings {
         mode: Int = performanceMode(context),
         cursorRange: Int = cursorRange(context),
         tiltedPalmAssist: Boolean = tiltedPalmAssist(context),
-        fastSwipeAssist: Boolean = fastSwipeAssist(context)
+        fastSwipeAssist: Boolean = fastSwipeAssist(context),
+        screenWake: Boolean = screenWake(context),
+        wakePowerMode: Int = wakePowerMode(context)
     ) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putInt(KEY_SENSITIVITY, sensitivity.coerceIn(0, 2))
@@ -51,6 +65,8 @@ object Settings {
             .putInt(KEY_CURSOR_RANGE, cursorRange.coerceIn(0, 3))
             .putBoolean(KEY_TILTED_PALM_ASSIST, tiltedPalmAssist)
             .putBoolean(KEY_FAST_SWIPE_ASSIST, fastSwipeAssist)
+            .putBoolean(KEY_SCREEN_WAKE, screenWake)
+            .putInt(KEY_SCREEN_WAKE_POWER, wakePowerMode.coerceIn(0, 1))
             .apply()
     }
 
