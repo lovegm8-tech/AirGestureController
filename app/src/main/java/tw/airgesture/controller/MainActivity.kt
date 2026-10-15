@@ -90,7 +90,7 @@ class MainActivity : ComponentActivity() {
             if (CameraGestureService.running) stopControl() else checkAndStart()
         }
         label("操作對照", 19f, true)
-        label("✋ 張掌向上移動 → 螢幕向上滑\n✋ 張掌向下移動 → 螢幕向下滑\n✋ 張掌向右移動 → 左邊緣右滑返回\n☝️ 只伸食指 → 控制懸浮游標，停穩所選秒數點擊\n✊ 張掌後握拳 → 點擊螢幕中央；持續握拳達設定秒數再點一次", 16f)
+        label("✋ 張掌向上移動 → 螢幕向上滑\n✋ 張掌向下移動 → 螢幕向下滑\n✋ 張掌向右移動 → 左邊緣右滑返回\n☝️ 只伸食指 → 控制懸浮游標，停穩所選秒數點擊\n✊ 張掌後短握拳 → 單擊中央；YouTube 長握拳 → 播放／暫停", 16f)
         label("重複操作：手掌停穩約 0.5 秒即可準備下一次手勢。食指點擊後需移動到新位置，避免停留時連點。", 13f)
         label("懸浮辨識燈：灰色＝未看到張掌、綠色＝已抓到張掌、藍色閃一下＝已觸發操作。指示燈不會擋住點擊。", 13f)
 
@@ -102,13 +102,13 @@ class MainActivity : ComponentActivity() {
         content.addView(pointerDwell, LinearLayout.LayoutParams(-1, dip(54)))
         label("停穩達所選秒數自動點一次；再移動到新位置才會重新計時，避免連續誤點。", 13f)
 
-        label("長握拳觸發第二次點擊", 19f, true)
+        label("長握拳判定時間", 19f, true)
         longFistDuration = Spinner(this)
         longFistDuration.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
             listOf("0.5 秒（快速）", "0.7 秒（建議）", "1 秒（較慢）"))
         longFistDuration.setSelection(Settings.longFistIndex(this))
         content.addView(longFistDuration, LinearLayout.LayoutParams(-1, dip(54)))
-        label("張掌後握拳先點一次；持續保持握拳達所選秒數再點第二次，之後不會一直連點。影片播放器可能不把這種間隔視為快速雙擊。", 13f)
+        label("YouTube 官方 App：短握拳放開後單擊；持續握拳達所選秒數只發送一次媒體播放／暫停指令，不先點畫面。其他 App：沿用原本單擊與長握拳追加點擊。設定儲存後需重啟辨識。", 13f)
 
         label("斜角手掌辨識（實驗性）", 19f, true)
         tiltedPalmAssist = Switch(this).apply {
