@@ -20,10 +20,11 @@ class GestureCameraAnalyzer(
     context: Context,
     options: GestureDecisionEngine.Options,
     performanceMode: Int = 1,
-    angleAssistEnabled: Boolean = false
+    angleAssistEnabled: Boolean = false,
+    pointerDwellMs: Long = 2000L
 ) : AutoCloseable {
     private val decision = GestureDecisionEngine(options)
-    private val pointer = PointerDwellEngine()
+    private val pointer = PointerDwellEngine(pointerDwellMs)
     private val tiltAssist = TiltedPalmAssist(angleAssistEnabled)
     private val useAngleAssist = angleAssistEnabled
     private val useFastSwipeAssist = options.fastSwipeAssistEnabled
