@@ -13,7 +13,7 @@ android {
         minSdk = 29
         targetSdk = 35
         versionCode = 4
-        versionName = "0.2.0-code-review"
+        versionName = "0.2.0-beta"
     }
     buildTypes { release { isMinifyEnabled = false } }
     compileOptions {
