@@ -10,6 +10,8 @@ import android.os.Looper
 import android.provider.Settings
 import android.graphics.Typeface
 import android.widget.Button
+import android.widget.ArrayAdapter
+import android.widget.Spinner
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -24,6 +26,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var state: TextView
     private lateinit var timeline: TextView
     private lateinit var start: Button
+    private lateinit var wakeMode: Spinner
     private val refresher = object : Runnable {
         override fun run() {
             if (::state.isInitialized) {
@@ -75,6 +78,14 @@ class MainActivity : ComponentActivity() {
         label("測試操作", 18f, true)
         label("① 先讓影片停在原本的 App。\n② 授權無障礙點擊權限。\n③ 啟動實驗後，切回影片再關閉螢幕。\n④ 對前鏡頭張掌保持約 1 秒，觀察是否亮屏。\n⑤ 由三星原有臉部解鎖；回到影片後再張掌→握拳，嘗試點擊影片中央繼續播放。")
         label("關閉螢幕後是否還能使用相機、能否由 App 亮屏，皆取決於三星與 Android 限制。此實驗不會解除或繞過鎖定畫面。")
+        label("亮屏方式（A/B 比較）", 18f, true)
+        wakeMode = Spinner(this)
+        wakeMode.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
+            listOf("A：Activity 亮屏＋要求正常解鎖（新實驗）",
+                "B：PowerManager 亮屏（v0.1.1 對照組）"))
+        wakeMode.setSelection(WakeTrialConfig.selectedMode(this))
+        layout.addView(wakeMode, LinearLayout.LayoutParams(-1, dp(54)))
+        label("A 方案可能被 Android 的背景畫面啟動限制攔下，若無效可選 B 重測。選擇方案後按「啟動」，不需解除安裝。")
         button("① 設定實驗用無障礙服務") {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
@@ -102,6 +113,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun launchProbe() {
+        WakeTrialConfig.save(this, wakeMode.selectedItemPosition)
+        ProbeLog.add(this, "本次亮屏方案：${WakeTrialConfig.label(WakeTrialConfig.selectedMode(this))}")
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(
                 this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             askNotification.launch(Manifest.permission.POST_NOTIFICATIONS)
