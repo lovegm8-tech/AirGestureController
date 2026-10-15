@@ -360,9 +360,9 @@ class CameraGestureService : LifecycleService() {
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or
                                 Intent.FLAG_ACTIVITY_NO_ANIMATION or
                                 Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS or
-                                Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                                Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
                         })
-                        WakeDiagnosticLog.add(this, "已嘗試建立解鎖 Activity")
+                        WakeDiagnosticLog.add(this, "已嘗試建立獨立工作中的解鎖 Activity，不切換原本 App 工作")
                     } catch (e: Exception) {
                         WakeDiagnosticLog.add(this, "Activity 亮屏遭系統限制：${e.javaClass.simpleName}")
                         status = "系統不允許此方式亮屏"
