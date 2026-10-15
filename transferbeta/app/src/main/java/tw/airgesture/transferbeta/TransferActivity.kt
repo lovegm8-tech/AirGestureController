@@ -3,6 +3,7 @@ package tw.airgesture.transferbeta
 import android.Manifest
 import android.app.AlertDialog
 import android.content.ContentValues
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Matrix
@@ -59,7 +60,8 @@ class TransferActivity : ComponentActivity() {
     private lateinit var progress: ProgressBar
     private var provider: ProcessCameraProvider? = null
     private var recognizer: GestureRecognizer? = null
-    private val sequence = GestureSequence()
+    private val sequence = GestureSequence(holdMillis = 230L, unknownGraceMillis = 480L)
+    @Volatile private var enhancedMode = true
     private var endpoint: String? = null
     private var connected = false
     private var sending = false
@@ -120,12 +122,50 @@ class TransferActivity : ComponentActivity() {
         button("模擬張掌 → 握拳（發送）") { sendGesture() }
         button("模擬握拳 → 張掌（接收）") { receiveGesture() }
         root.addView(text("實際手勢：先維持第一個手勢約 0.3 秒，再維持第二個手勢約 0.3 秒。", 14f))
-        root.addView(text("目前只支援選檔器取得的原檔；每次連線皆需驗證數字。", 14f))
+        root.addView(text("可直接在三星相簿、Google 相簿或檔案管理員中按「分享」，選擇「隔空傳檔測試版」。", 14f))
+        val sensitivityButton = Button(this).apply {
+            text = "S25 辨識模式：靈敏（點選切換）"
+            setOnClickListener {
+                enhancedMode = !enhancedMode
+                text = if (enhancedMode) "S25 辨識模式：靈敏（點選切換）"
+                    else "辨識模式：標準（點選切換）"
+                getSharedPreferences("gesture", MODE_PRIVATE).edit()
+                    .putBoolean("enhanced", enhancedMode).apply()
+                flash(if (enhancedMode) "已切換靈敏模式：降低辨識門檻，觀察誤判率"
+                    else "已切換標準模式：較嚴格的手勢信心門檻")
+            }
+        }
+        root.addView(sensitivityButton)
+        root.addView(text("目前支援選檔或從其他 App 主動分享的原檔；每次重新配對都需驗證數字。", 14f))
         scroll.addView(root)
         setContentView(scroll)
+        enhancedMode = getSharedPreferences("gesture", MODE_PRIVATE).getBoolean("enhanced", true)
+        sensitivityButton.text = if (enhancedMode) "S25 辨識模式：靈敏（點選切換）"
+            else "辨識模式：標準（點選切換）"
         if (hasPermissions()) { startCamera(); findPeers() }
         else permissionLauncher.launch(permissions())
+        consumeSharedFile(intent)
     }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        consumeSharedFile(intent)
+    }
+
+    private fun consumeSharedFile(shared: Intent?) {
+        if (shared?.action != Intent.ACTION_SEND) return
+        @Suppress("DEPRECATION")
+        val uri = if (Build.VERSION.SDK_INT >= 33) {
+            shared.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        } else shared.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri
+        val source = uri ?: shared.clipData?.getItemAt(0)?.uri
+        if (source == null || (source.scheme != "content" && source.scheme != "file")) {
+            flash("分享內容不是可讀取的檔案；請改用系統檔案選取")
+            return
+        }
+        loadFile(source)
+    }
+
     private fun permissions(): Array<String> {
         val out = mutableListOf(Manifest.permission.CAMERA, Manifest.permission.ACCESS_FINE_LOCATION)
         if (Build.VERSION.SDK_INT >= 31) {
@@ -405,8 +445,9 @@ class TransferActivity : ComponentActivity() {
                         .setBaseOptions(BaseOptions.builder().setModelAssetPath("gesture_recognizer.task").build())
                         .setRunningMode(RunningMode.VIDEO)
                         .setNumHands(1)
-                        .setMinHandDetectionConfidence(0.65f)
-                        .setMinHandPresenceConfidence(0.65f)
+                        .setMinHandDetectionConfidence(0.52f)
+                        .setMinHandPresenceConfidence(0.52f)
+                        .setMinTrackingConfidence(0.50f)
                         .build())
                 val analysis = ImageAnalysis.Builder()
                     .setTargetResolution(android.util.Size(640, 480))
@@ -425,7 +466,7 @@ class TransferActivity : ComponentActivity() {
     private var lastFrame = 0L
     private fun analyze(frame: ImageProxy) {
         val now = SystemClock.uptimeMillis()
-        if (now - lastFrame < 110) return
+        if (now - lastFrame < 95) return
         lastFrame = now
         val w = frame.width; val h = frame.height; val plane = frame.planes[0]
         val buffer = plane.buffer.duplicate()
@@ -444,7 +485,9 @@ class TransferActivity : ComponentActivity() {
         try {
             val result = recognizer?.recognizeForVideo(BitmapImageBuilder(rotated).build(), now) ?: return
             val cat = result.gestures().firstOrNull()?.maxByOrNull { it.score() }
-            val pose = if ((cat?.score() ?: 0f) >= 0.70f) cat?.categoryName() ?: "" else ""
+            val score = cat?.score() ?: 0f
+            val threshold = if (enhancedMode) 0.58f else 0.70f
+            val pose = if (score >= threshold) cat?.categoryName() ?: "" else ""
             when (sequence.accept(pose, now)) {
                 GestureSequence.Result.SEND -> main.post { sendGesture() }
                 GestureSequence.Result.RECEIVE -> main.post { receiveGesture() }
@@ -453,7 +496,8 @@ class TransferActivity : ComponentActivity() {
             if (now % 330 < 110) main.post {
                 hand.text = "前鏡頭：" + when (pose) {
                     "Open_Palm" -> "張掌"; "Closed_Fist" -> "握拳"; else -> "等待手勢"
-                }
+                } + "（辨識分數 " + (score * 100).toInt() + "%，" +
+                    (if (enhancedMode) "靈敏" else "標準") + "）"
             }
         } finally {
             if (rotated !== image) rotated.recycle()
@@ -468,27 +512,56 @@ class TransferActivity : ComponentActivity() {
     }
 }
 
-class GestureSequence {
+/**
+ * A stable transition detector tolerant of brief missed frames.
+ * Unknown observations never synthesize a gesture; they only preserve an existing
+ * candidate briefly so a low-confidence frame does not restart the hold timer.
+ */
+class GestureSequence(
+    private val holdMillis: Long = 230L,
+    private val unknownGraceMillis: Long = 480L
+) {
     enum class Result { NONE, SEND, RECEIVE }
+
     private var candidate = ""
-    private var since = 0L
-    private var stable = ""
-    private var stableAt = 0L
+    private var candidateSince = 0L
+    private var candidateLastSeen = 0L
+    private var confirmed = ""
+    private var confirmedAt = 0L
     private var cooldownUntil = 0L
+
     fun accept(raw: String, now: Long): Result {
         val pose = if (raw == "Open_Palm" || raw == "Closed_Fist") raw else ""
-        if (pose != candidate) { candidate = pose; since = now; return Result.NONE }
-        if (pose.isEmpty() || now - since < 280 || now < cooldownUntil || pose == stable) return Result.NONE
-        val old = stable
-        val elapsed = now - stableAt
-        stable = pose; stableAt = now
-        if (old.isEmpty() || elapsed > 3000) return Result.NONE
-        val out = when {
-            old == "Open_Palm" && pose == "Closed_Fist" -> Result.SEND
-            old == "Closed_Fist" && pose == "Open_Palm" -> Result.RECEIVE
+        if (pose.isEmpty()) {
+            if (candidate.isNotEmpty() && now - candidateLastSeen > unknownGraceMillis) {
+                candidate = ""
+            }
+            if (confirmed.isNotEmpty() && now - confirmedAt > 3000L) confirmed = ""
+            return Result.NONE
+        }
+        if (pose != candidate || now - candidateLastSeen > unknownGraceMillis) {
+            candidate = pose
+            candidateSince = now
+        }
+        candidateLastSeen = now
+        if (now < cooldownUntil || now - candidateSince < holdMillis || pose == confirmed) {
+            return Result.NONE
+        }
+        val previous = confirmed
+        val gap = now - confirmedAt
+        confirmed = pose
+        confirmedAt = now
+        if (previous.isEmpty() || gap > 3000L) return Result.NONE
+        val result = when {
+            previous == "Open_Palm" && pose == "Closed_Fist" -> Result.SEND
+            previous == "Closed_Fist" && pose == "Open_Palm" -> Result.RECEIVE
             else -> Result.NONE
         }
-        if (out != Result.NONE) { cooldownUntil = now + 1800; stable = "" }
-        return out
+        if (result != Result.NONE) {
+            cooldownUntil = now + 1600L
+            candidate = ""
+            confirmed = ""
+        }
+        return result
     }
 }

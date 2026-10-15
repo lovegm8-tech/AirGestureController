@@ -1,4 +1,7 @@
 name: Gesture Transfer Beta APK
+concurrency:
+  group: transferbeta-${{ github.ref }}
+  cancel-in-progress: true
 on:
   push:
     branches: [ "experiment/gesture-transfer-beta" ]
@@ -37,6 +40,6 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | head -n1 | grep -F tw.airgesture.transferbeta
       - uses: actions/upload-artifact@v4
         with:
-          name: GestureTransferBeta-v0.1.1-debug-apk
+          name: GestureTransferBeta-v0.1.2-debug-apk
           path: transferbeta/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14
