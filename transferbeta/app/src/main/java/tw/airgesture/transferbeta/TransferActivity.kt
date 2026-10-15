@@ -144,7 +144,7 @@ class TransferActivity : ComponentActivity() {
             setTextColor(0xff1f3550.toInt())
             setPadding(0, 10, 0, 10)
         }
-        root.addView(text("隔空傳檔｜雙機測試 v0.1.1", 23f))
+        root.addView(text("AirGrab｜隔空抓取 v0.2.0", 23f))
         root.addView(text("兩支手機皆安裝此 App；第一次連線確認雙方驗證碼。", 15f))
         status = text("未連線"); root.addView(status)
         chosen = text("尚未選擇原檔"); root.addView(chosen)
