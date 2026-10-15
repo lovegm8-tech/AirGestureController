@@ -30,6 +30,9 @@ class GestureCameraAnalyzer(
     private val scheduler = AdaptiveFrameScheduler(AdaptiveFrameScheduler.Mode.fromIndex(performanceMode))
     private val converter = ReusableFrameConverter()
     private val recognizer: GestureRecognizer
+    private val wakeTiltAssist = TiltedPalmAssist(true)
+    private var lastWakeScanMs = Long.MIN_VALUE
+    private var lastWakeHandMs = Long.MIN_VALUE
 
     init {
         val base = BaseOptions.builder().setModelAssetPath("gesture_recognizer.task").build()
@@ -117,6 +120,46 @@ class GestureCameraAnalyzer(
             }
 
             decision.accept(GestureDecisionEngine.Frame(shape, palmY, effectiveConfidence, palmX), now)?.let(onAction)
+        } finally {
+            converter.release(frame)
+        }
+    }
+
+    /**
+     * Lightweight screen-off branch: no overlay, pointer, or touch injection.
+     * MediaPipe scans less often without a visible hand and speeds up for a hand.
+     * Actual sensor power savings are handled by CameraGestureService unbinding it.
+     */
+    fun processForWake(
+        proxy: ImageProxy,
+        onPalmObservation: (Boolean, Boolean, Long) -> Unit
+    ) {
+        val now = SystemClock.uptimeMillis()
+        val recentHand = lastWakeHandMs != Long.MIN_VALUE &&
+            now >= lastWakeHandMs && now - lastWakeHandMs <= 1100L
+        val period = if (recentHand) 140L else 440L
+        if (lastWakeScanMs != Long.MIN_VALUE && now >= lastWakeScanMs &&
+            now - lastWakeScanMs < period) return
+        lastWakeScanMs = now
+        val frame = converter.convert(proxy)
+        try {
+            val result = recognizer.recognizeForVideo(BitmapImageBuilder(frame).build(), now)
+            val category = result.gestures().firstOrNull()?.maxByOrNull { it.score() }
+            val name = category?.categoryName()
+            val score = category?.score() ?: 0f
+            val landmarks = result.landmarks().firstOrNull()
+            val hasHand = landmarks != null && landmarks.size >= 21
+            if (hasHand) lastWakeHandMs = now
+            val xy = if (hasHand) FloatArray(42).also { dst ->
+                for (i in 0 until 21) {
+                    dst[i * 2] = landmarks!![i].x()
+                    dst[i * 2 + 1] = landmarks[i].y()
+                }
+            } else null
+            val assist = wakeTiltAssist.resolve(name, score, xy, now)
+            val palm = (name == "Open_Palm" && score >= .65f) ||
+                assist.useLandmarkFallback
+            onPalmObservation(palm, hasHand, now)
         } finally {
             converter.release(frame)
         }
