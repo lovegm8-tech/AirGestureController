@@ -13,6 +13,7 @@ import tw.airgesture.controller.core.AdaptiveFrameScheduler
 import tw.airgesture.controller.core.GestureDecisionEngine
 import tw.airgesture.controller.core.PointerDwellEngine
 import tw.airgesture.controller.core.TiltedPalmAssist
+import tw.airgesture.controller.core.YouTubeGestureRouter
 import java.nio.ByteBuffer
 
 /** CameraX feeds a single analysis executor. Inference is local and throttled. */
@@ -24,6 +25,7 @@ class GestureCameraAnalyzer(
     pointerDwellMs: Long = 2000L
 ) : AutoCloseable {
     private val decision = GestureDecisionEngine(options)
+    private val youtubeRouter = YouTubeGestureRouter(options.longFistSecondClickMs, options.longFistMaximumFrameGapMs)
     private val pointer = PointerDwellEngine(pointerDwellMs)
     private val tiltAssist = TiltedPalmAssist(angleAssistEnabled)
     private val useAngleAssist = angleAssistEnabled
@@ -52,7 +54,8 @@ class GestureCameraAnalyzer(
         proxy: ImageProxy,
         onAction: (GestureDecisionEngine.Action) -> Unit,
         onPalmDetection: (Boolean) -> Unit,
-        onPointer: (PointerDwellEngine.Result?) -> Unit
+        onPointer: (PointerDwellEngine.Result?) -> Unit,
+        isYouTubeForeground: () -> Boolean = { false }
     ) {
         val now = SystemClock.uptimeMillis()
         if (!scheduler.shouldAnalyze(now)) return
@@ -120,7 +123,14 @@ class GestureCameraAnalyzer(
                 onPointer(null)
             }
 
-            decision.accept(GestureDecisionEngine.Frame(shape, palmY, effectiveConfidence, palmX), now)?.let(onAction)
+            val action = decision.accept(
+                GestureDecisionEngine.Frame(shape, palmY, effectiveConfidence, palmX), now
+            )
+            // Only media-player routing is special; normal swipe, hover and pointer
+            // recognition stays exactly as before. Never interpret a weak fist.
+            val confirmedShape = if (effectiveConfidence < .65f)
+                GestureDecisionEngine.Shape.NO_HAND else shape
+            youtubeRouter.route(confirmedShape, now, action, isYouTubeForeground())?.let(onAction)
         } finally {
             converter.release(frame)
         }
