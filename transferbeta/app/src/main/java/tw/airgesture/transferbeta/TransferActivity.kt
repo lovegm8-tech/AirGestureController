@@ -6,6 +6,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.provider.Settings
+import android.provider.Settings
 import androidx.lifecycle.Lifecycle
 import tw.airgesture.transferbeta.core.GrabContentPolicy
 import android.app.AlertDialog
@@ -100,6 +101,36 @@ class TransferActivity : ComponentActivity() {
         else show("缺少相機或附近裝置權限，請授權後重新開啟 App")
     }
 
+    private var shownPairCode: String? = null
+    private fun attachBackgroundSession() {
+        val active = GlobalGestureService.transfer ?: return
+        active.onStatus = { msg -> show("背景連線：" + msg) }
+        active.onPairing = { digits ->
+            if (shownPairCode != digits && !isFinishing) {
+                shownPairCode = digits
+                android.app.AlertDialog.Builder(this)
+                    .setTitle("雙手機安全驗證")
+                    .setMessage("只有兩支手機出現相同數字才可確認：\n\n" + digits)
+                    .setPositiveButton("數字相同") { _, _ ->
+                        active.acceptPairing(true)
+                        shownPairCode = null
+                    }
+                    .setNegativeButton("拒絕") { _, _ ->
+                        active.acceptPairing(false)
+                        shownPairCode = null
+                    }
+                    .setCancelable(false).show()
+            }
+        }
+    }
+    override fun onResume() {
+        super.onResume()
+        attachBackgroundSession()
+    }
+    override fun onPause() {
+        GlobalGestureService.transfer?.let { it.onStatus = null; it.onPairing = null }
+        super.onPause()
+    }
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         val scroll = ScrollView(this)
@@ -162,6 +193,11 @@ class TransferActivity : ComponentActivity() {
                 provider?.unbindAll()
                 recognizer?.close()
                 recognizer = null
+                nearby.stopAllEndpoints()
+                nearby.stopDiscovery()
+                nearby.stopAdvertising()
+                endpoint = null
+                connected = false
                 if (Build.VERSION.SDK_INT >= 33 &&
                     ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
                     PackageManager.PERMISSION_GRANTED) {
@@ -170,6 +206,7 @@ class TransferActivity : ComponentActivity() {
                 ContextCompat.startForegroundService(this,
                     Intent(this, GlobalGestureService::class.java)
                         .setAction(GlobalGestureService.ACTION_START))
+                main.postDelayed({ attachBackgroundSession() }, 600)
                 flash("已要求開始全域抓取；請切換至相簿或瀏覽器", true)
             }
         }
@@ -182,6 +219,10 @@ class TransferActivity : ComponentActivity() {
                 "；AI 推論：" + GlobalGestureService.inferences +
                 "；要求 FPS：" + GlobalGestureService.requestedSensorFps)
         }
+        button("明確要求畫面截圖（不是原檔）") {
+            GlobalGrabBridge.accessibility?.get()?.takeFallbackScreenshot()
+                ?: flash("請先啟用隔空抓取無障礙服務")
+        }
         button("開啟最近收到的影片／網頁連結") {
             lastReceivedLink?.let { openLink(it) } ?: flash("目前沒有收到網址")
         }
@@ -191,10 +232,12 @@ class TransferActivity : ComponentActivity() {
         enhancedMode = getSharedPreferences("gesture", MODE_PRIVATE).getBoolean("enhanced", true)
         sensitivityButton.text = if (enhancedMode) "S25 辨識模式：靈敏（點選切換）"
             else "辨識模式：標準（點選切換）"
-        GlobalGrabBridge.onGrabResult = { result ->
-            main.post { consumeGlobalGrab(result) }
+        if (!GlobalGestureService.isActive) {
+            GlobalGrabBridge.onGrabResult = { result ->
+                main.post { consumeGlobalGrab(result) }
+            }
+            GlobalGrabBridge.onReceiveGesture = { main.post { receiveGesture() } }
         }
-        GlobalGrabBridge.onReceiveGesture = { main.post { receiveGesture() } }
         if (hasPermissions()) {
             if (!GlobalGestureService.isActive) startCamera()
             findPeers()
@@ -215,7 +258,10 @@ class TransferActivity : ComponentActivity() {
         } else shared.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri
         val source = uri ?: shared.clipData?.getItemAt(0)?.uri
         if (source == null || (source.scheme != "content" && source.scheme != "file")) {
-            flash("分享內容不是可讀取的檔案；請改用系統檔案選取")
+            val url = tw.airgesture.transferbeta.core.SharedTextPolicy.onlyWebLink(
+                shared.getStringExtra(Intent.EXTRA_TEXT))
+            if (url != null) sendLink(url)
+            else flash("沒有收到唯一可信的網址或可讀取原檔")
             return
         }
         loadFile(source)
@@ -249,6 +295,10 @@ class TransferActivity : ComponentActivity() {
     }
 
     private fun sendLink(url: String) {
+        if (GlobalGestureService.isActive) {
+            GlobalGestureService.transfer?.offerLink(url)
+            return
+        }
         val checked = GrabContentPolicy.safeWebUrl(url)
             ?: run { flash("不支援此網址，已取消抓取"); return }
         if (!connected || sending || receiving || offer != null || linkOffer != null) {
@@ -345,7 +395,9 @@ class TransferActivity : ComponentActivity() {
                     file?.delete()
                     file = target; fileName = safeName(raw); fileHash = hash
                     chosen.text = "原檔：" + fileName + "（" + target.length() + " bytes）"
-                    flash("原檔準備完成", true)
+                    if (GlobalGestureService.isActive) {
+                        GlobalGestureService.transfer?.offerFile(target, fileName)
+                    } else flash("原檔準備完成", true)
                 }
             } catch (e: Exception) { show("選檔失敗：" + e.message) }
         }
@@ -353,6 +405,10 @@ class TransferActivity : ComponentActivity() {
 
     private fun findPeers() {
         if (!hasPermissions()) { permissionLauncher.launch(permissions()); return }
+        if (GlobalGestureService.isActive) {
+            GlobalGestureService.transfer?.refresh()
+            return
+        }
         if (sending || receiving) { flash("傳輸中不能重新配對"); return }
         nearby.stopAllEndpoints(); nearby.stopDiscovery(); nearby.stopAdvertising()
         endpoint = null; connected = false
@@ -507,6 +563,12 @@ class TransferActivity : ComponentActivity() {
         }
     }
     private fun sendGesture() {
+        if (GlobalGestureService.isActive) {
+            val selected = file
+            if (selected != null) GlobalGestureService.transfer?.offerFile(selected, fileName)
+            else flash("尚無可傳檔案")
+            return
+        }
         val toSend = file
         if (!connected) { flash("請先完成雙機配對"); return }
         if (toSend == null || !toSend.exists()) { flash("請先選擇原檔"); return }
@@ -525,6 +587,10 @@ class TransferActivity : ComponentActivity() {
         }, 30_000)
     }
     private fun receiveGesture() {
+        if (GlobalGestureService.isActive) {
+            GlobalGestureService.transfer?.confirmReceive()
+            return
+        }
         if (!connected) { flash("請先完成雙機配對"); return }
         if (receiving || sending) return
         linkOffer?.let { pending ->
@@ -660,11 +726,13 @@ class TransferActivity : ComponentActivity() {
         }
     }
     override fun onDestroy() {
-        if (!GlobalGestureService.isActive) provider?.unbindAll()
+        provider?.unbindAll()
         recognizer?.close()
-        GlobalGrabBridge.onGrabResult = null
-        GlobalGrabBridge.onReceiveGesture = null
-        nearby.stopAllEndpoints(); nearby.stopAdvertising(); nearby.stopDiscovery()
+        if (!GlobalGestureService.isActive) {
+            GlobalGrabBridge.onGrabResult = null
+            GlobalGrabBridge.onReceiveGesture = null
+            nearby.stopAllEndpoints(); nearby.stopAdvertising(); nearby.stopDiscovery()
+        }
         io.shutdown(); cameraExecutor.shutdown()
         super.onDestroy()
     }

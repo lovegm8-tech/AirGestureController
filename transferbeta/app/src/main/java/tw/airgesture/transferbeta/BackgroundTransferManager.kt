@@ -122,7 +122,9 @@ class BackgroundTransferManager(private val app: Context) {
     }
     fun refresh() {
         if (!busy && awaitingPair == null && !connected) search()
+        else ui(if (connected) "裝置已連線" else "配對或傳輸仍在進行")
     }
+    fun reportCaptureFailure(message: String) { ui(message) }
     private val discovery = object : EndpointDiscoveryCallback() {
         override fun onEndpointFound(id: String, peer: DiscoveredEndpointInfo) {
             val other = peer.endpointName.substringAfter('|', "")

@@ -17,6 +17,8 @@ import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
 import android.os.SystemClock
 import android.util.Range
+import android.os.Handler
+import android.os.Looper
 import android.util.Size
 import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.core.CameraSelector
@@ -46,6 +48,8 @@ class GlobalGestureService : LifecycleService() {
         private const val NOTIFICATION = 4108
         @Volatile var isActive = false
             private set
+        @Volatile var transfer: BackgroundTransferManager? = null
+            private set
         @Volatile var framesSeen = 0L
             private set
         @Volatile var inferences = 0L
@@ -54,6 +58,8 @@ class GlobalGestureService : LifecycleService() {
             private set
     }
 
+    private val main = Handler(Looper.getMainLooper())
+    private lateinit var connections: BackgroundTransferManager
     private val power = AdaptivePowerPolicy()
     private val sequence = GestureSequence()
     private val cameraExecutor = Executors.newSingleThreadExecutor()
@@ -81,6 +87,7 @@ class GlobalGestureService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
+        connections = BackgroundTransferManager(applicationContext)
         registerReceiver(screen, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_SCREEN_ON)
@@ -100,6 +107,20 @@ class GlobalGestureService : LifecycleService() {
         }
         foregroundNotification()
         isActive = true
+        transfer = connections
+        GlobalGrabBridge.onGrabResult = { result ->
+            main.post {
+                when (result) {
+                    is GrabResult.Link -> connections.offerLink(result.url)
+                    is GrabResult.ScreenSnapshot -> connections.offerFile(result.file,
+                        "screen-capture-" + System.currentTimeMillis() + ".png")
+                    is GrabResult.ShareStarted -> connections.reportCaptureFailure(result.detail)
+                    is GrabResult.Unavailable -> connections.reportCaptureFailure(result.reason)
+                }
+            }
+        }
+        GlobalGrabBridge.onReceiveGesture = { main.post { connections.confirmReceive() } }
+        connections.start()
         power.start()
         if (isScreenOn) bindCamera()
         return START_NOT_STICKY
@@ -233,6 +254,10 @@ class GlobalGestureService : LifecycleService() {
 
     override fun onDestroy() {
         isActive = false
+        transfer = null
+        GlobalGrabBridge.onGrabResult = null
+        GlobalGrabBridge.onReceiveGesture = null
+        connections.stop()
         power.stop()
         provider?.unbindAll()
         try { unregisterReceiver(screen) } catch (_: Exception) {}
