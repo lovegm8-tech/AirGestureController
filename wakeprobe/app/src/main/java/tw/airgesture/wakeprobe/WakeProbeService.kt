@@ -330,10 +330,45 @@ class WakeProbeService : LifecycleService() {
             // Give the Samsung camera service a short hand-off interval
             // AFTER CameraX reports the camera device CLOSED.
             ProbeLog.add(this, "CameraX 已確認 CLOSED；等待 400 毫秒交給三星臉部辨識")
-            main.postDelayed({ if (running && !power.isInteractive) requestScreenWake() }, 400L)
+            main.postDelayed({
+                if (running && !power.isInteractive) requestSelectedScreenWake()
+            }, 400L)
         }
     }
 
+    private fun requestSelectedScreenWake() {
+        val mode = WakeTrialConfig.selectedMode(this)
+        ProbeLog.add(this, "相機釋放完成；開始方案：${WakeTrialConfig.label(mode)}")
+        when (mode) {
+            WakeTrialConfig.ACTIVITY_WAKE -> requestActivityWake()
+            else -> requestScreenWake()
+        }
+    }
+
+    private fun requestActivityWake() {
+        // On Android 14+ foreground CAMERA service status alone does not grant
+        // permission to open arbitrary activities in the background.
+        // Log both the attempt here and Activity.onCreate() if the OS allows it.
+        try {
+            val intent = Intent(this, FaceUnlockWakeActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION or
+                    Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            }
+            ProbeLog.add(this, "送出 Activity.setTurnScreenOn 亮屏流程；等待系統是否建立 Activity")
+            startActivity(intent)
+            main.postDelayed({
+                if (running) {
+                    ProbeLog.add(this, "Activity 方案約 2 秒後：螢幕${if (power.isInteractive) "已亮" else "未亮"}，仍鎖定=${lock.isKeyguardLocked}")
+                    if (!power.isInteractive) status = "Activity 方案未亮屏；可能受到 Android 背景啟動限制"
+                }
+            }, 2200L)
+        } catch (e: Exception) {
+            ProbeLog.add(this, "Activity 背景啟動遭拒：${e.javaClass.simpleName}")
+            status = "Activity 亮屏被限制，可改選舊版 PowerManager 對照方案"
+        }
+    }
+
+    // v0.1.1 control branch retained unchanged so only the wake API differs.
     private fun requestScreenWake() {
         val perm = ContextCompat.checkSelfPermission(this, "android.permission.TURN_SCREEN_ON")
         ProbeLog.add(this, "亮屏特殊權限：${if (perm == PackageManager.PERMISSION_GRANTED) "已授權" else "未授權或不適用"}")
