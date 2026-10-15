@@ -76,11 +76,79 @@ class GestureDecisionEngineTest {
         e.accept(GestureDecisionEngine.Frame(open,.5f),90)
         e.accept(GestureDecisionEngine.Frame(fist),160)
         assertEquals(GestureDecisionEngine.Action.TAP_CENTER,e.accept(GestureDecisionEngine.Frame(fist),260))
-        for (t in listOf(350L,700L,1000L,2000L)) assertNull(e.accept(GestureDecisionEngine.Frame(fist),t))
+        for (t in listOf(350L,700L)) assertNull(e.accept(GestureDecisionEngine.Frame(fist),t))
+        assertEquals(GestureDecisionEngine.Action.TAP_CENTER, e.accept(GestureDecisionEngine.Frame(fist), 1000L))
+        assertNull(e.accept(GestureDecisionEngine.Frame(fist), 2000L))
         e.accept(GestureDecisionEngine.Frame(open,.5f),2200)
         e.accept(GestureDecisionEngine.Frame(open,.5f),2740)
         assertNull(e.accept(GestureDecisionEngine.Frame(fist),2830))
         assertEquals(GestureDecisionEngine.Action.TAP_CENTER,e.accept(GestureDecisionEngine.Frame(fist),2920))
+    }
+
+    @Test fun `selected long fist durations give exactly one extra click`() {
+        for (duration in listOf(500L, 700L, 1000L)) {
+            val e = GestureDecisionEngine(
+                GestureDecisionEngine.Options(cooldownMs = 1600L,
+                    longFistSecondClickMs = duration)
+            )
+            e.accept(GestureDecisionEngine.Frame(open, .5f), 0L)
+            e.accept(GestureDecisionEngine.Frame(open, .5f), 70L)
+            assertNull(e.accept(GestureDecisionEngine.Frame(fist), 130L))
+            assertEquals(GestureDecisionEngine.Action.TAP_CENTER,
+                e.accept(GestureDecisionEngine.Frame(fist), 200L))
+            var previous = 200L
+            var next = 400L
+            while (next < 200L + duration) {
+                assertNull("early click duration=$duration",
+                    e.accept(GestureDecisionEngine.Frame(fist), next))
+                previous = next
+                next += 200L
+            }
+            // Feed one last confirmed fist frame within the allowed frame gap.
+            if (200L + duration - previous > 550L) error("test failed to feed frame")
+            assertEquals("long fist duration=$duration", GestureDecisionEngine.Action.TAP_CENTER,
+                e.accept(GestureDecisionEngine.Frame(fist), 200L + duration))
+            assertNull(e.accept(GestureDecisionEngine.Frame(fist), 200L + duration + 200L))
+            assertNull(e.accept(GestureDecisionEngine.Frame(fist), 200L + duration + 500L))
+        }
+    }
+
+    @Test fun `long fist is cancelled by releasing or by a lengthy tracking gap`() {
+        fun clickOnce(e: GestureDecisionEngine) {
+            e.accept(GestureDecisionEngine.Frame(open, .5f), 0L)
+            e.accept(GestureDecisionEngine.Frame(open, .5f), 70L)
+            e.accept(GestureDecisionEngine.Frame(fist), 130L)
+            assertEquals(GestureDecisionEngine.Action.TAP_CENTER,
+                e.accept(GestureDecisionEngine.Frame(fist), 200L))
+        }
+        val released = GestureDecisionEngine()
+        clickOnce(released)
+        assertNull(released.accept(GestureDecisionEngine.Frame(open, .5f), 350L))
+        assertNull(released.accept(GestureDecisionEngine.Frame(fist), 950L))
+
+        val gap = GestureDecisionEngine()
+        clickOnce(gap)
+        assertNull(gap.accept(GestureDecisionEngine.Frame(none), 800L))
+        assertNull(gap.accept(GestureDecisionEngine.Frame(fist), 950L))
+
+        val noPalm = GestureDecisionEngine()
+        assertNull(noPalm.accept(GestureDecisionEngine.Frame(fist), 0L))
+        assertNull(noPalm.accept(GestureDecisionEngine.Frame(fist), 1500L))
+    }
+
+    @Test fun `brief one-frame loss during held fist keeps second tap safe`() {
+        val e = GestureDecisionEngine(GestureDecisionEngine.Options(longFistSecondClickMs = 700L))
+        e.accept(GestureDecisionEngine.Frame(open, .5f), 0L)
+        e.accept(GestureDecisionEngine.Frame(open, .5f), 70L)
+        e.accept(GestureDecisionEngine.Frame(fist), 130L)
+        assertEquals(GestureDecisionEngine.Action.TAP_CENTER,
+            e.accept(GestureDecisionEngine.Frame(fist), 200L))
+        assertNull(e.accept(GestureDecisionEngine.Frame(fist), 430L))
+        assertNull(e.accept(GestureDecisionEngine.Frame(none), 500L))
+        assertNull(e.accept(GestureDecisionEngine.Frame(fist), 750L))
+        assertEquals(GestureDecisionEngine.Action.TAP_CENTER,
+            e.accept(GestureDecisionEngine.Frame(fist), 920L))
+        assertNull(e.accept(GestureDecisionEngine.Frame(fist), 1250L))
     }
 
     @Test fun `rightward palm invokes back without vertical scroll`() {
