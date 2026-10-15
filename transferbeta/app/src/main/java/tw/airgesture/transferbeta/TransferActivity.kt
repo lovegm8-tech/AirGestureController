@@ -225,6 +225,7 @@ class TransferActivity : ComponentActivity() {
         if (!connected) { flash("目前無法抓取：請先完成雙手機配對"); return }
         when (result) {
             is GrabResult.Link -> sendLink(result.url)
+            is GrabResult.ShareStarted -> flash(result.detail, true)
             is GrabResult.ScreenSnapshot -> {
                 flash("已擷取畫面截圖，正在準備傳送（不是原始照片）", true)
                 io.execute {

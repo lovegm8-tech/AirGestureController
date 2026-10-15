@@ -8,6 +8,7 @@ import android.os.Looper
 /** In-process prototype bridge. App process and its original Nearby connection must stay alive. */
 sealed class GrabResult {
     data class Link(val url: String) : GrabResult()
+    data class ShareStarted(val detail: String) : GrabResult()
     data class ScreenSnapshot(val file: File) : GrabResult() // never an original
     data class Unavailable(val reason: String) : GrabResult()
 }
