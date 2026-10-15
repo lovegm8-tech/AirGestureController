@@ -29,7 +29,7 @@ class GlobalGrabCoreTest {
         assertEquals(GrabChoice.Link("https://youtube.com/watch?v=123ABC"), good)
         assertTrue(GrabContentPolicy.decide("com.google.android.youtube",
             listOf(VisibleText(id, "https://youtube.com/watch?v=123ABC")))
-            is GrabChoice.ScreenSnapshot)
+            is GrabChoice.Unavailable)
         assertTrue(GrabContentPolicy.decide("com.android.chrome",
             listOf(VisibleText(id, "javascript:alert(1)"))) is GrabChoice.ScreenSnapshot)
         assertTrue(GrabContentPolicy.decide("com.android.chrome",

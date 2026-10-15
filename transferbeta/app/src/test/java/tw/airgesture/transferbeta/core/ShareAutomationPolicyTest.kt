@@ -4,6 +4,11 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ShareAutomationPolicyTest {
+    @Test fun browserCanUseOfficialShareIfAddressBarNotReadable() {
+        val plan=ShareAutomationPolicy.plan("com.android.chrome")!!
+        assertEquals(GrabKind.BROWSER,plan.kind)
+        assertEquals(WantedResult.LINK,plan.expected)
+    }
     @Test fun officeUsesEditableCopy() {
         val p = ShareAutomationPolicy.plan("com.microsoft.office.excel")!!
         assertEquals(GrabKind.OFFICE, p.kind)

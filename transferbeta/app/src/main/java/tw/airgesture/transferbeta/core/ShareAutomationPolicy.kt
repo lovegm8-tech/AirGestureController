@@ -40,6 +40,11 @@ object ShareAutomationPolicy {
         ShareStep(words, ids.toList())
 
     fun plan(pkg: String?): SharePlan? = when(pkg) {
+        "com.android.chrome", "com.sec.android.app.sbrowser",
+        "com.brave.browser", "com.microsoft.emmx", "org.mozilla.firefox" ->
+            SharePlan(GrabKind.BROWSER, WantedResult.LINK,
+                listOf(step(shareWords, ":id/share", ":id/action_share")),
+                description = "網址欄不提供完整網址時，改由瀏覽器分享")
         "com.sec.android.gallery3d", "com.google.android.apps.photos" ->
             SharePlan(GrabKind.PHOTO, WantedResult.FILE,
                 listOf(step(shareWords, ":id/share", ":id/action_share")),
