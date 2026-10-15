@@ -35,6 +35,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var sensitivity: Spinner
     private lateinit var performance: Spinner
     private lateinit var cursorRange: Spinner
+    private lateinit var pointerDwell: Spinner
+    private lateinit var longFistDuration: Spinner
     private lateinit var tiltedPalmAssist: Switch
     private lateinit var fastSwipeAssist: Switch
     private lateinit var screenWake: Switch
@@ -88,9 +90,25 @@ class MainActivity : ComponentActivity() {
             if (CameraGestureService.running) stopControl() else checkAndStart()
         }
         label("操作對照", 19f, true)
-        label("✋ 張掌向上移動 → 螢幕向上滑\n✋ 張掌向下移動 → 螢幕向下滑\n✋ 張掌向右移動 → 左邊緣右滑返回\n☝️ 只伸食指 → 控制懸浮游標，停穩 3 秒點擊\n✊ 張掌後握拳 → 點擊螢幕中央", 16f)
+        label("✋ 張掌向上移動 → 螢幕向上滑\n✋ 張掌向下移動 → 螢幕向下滑\n✋ 張掌向右移動 → 左邊緣右滑返回\n☝️ 只伸食指 → 控制懸浮游標，停穩所選秒數點擊\n✊ 張掌後握拳 → 點擊螢幕中央；持續握拳達設定秒數再點一次", 16f)
         label("重複操作：手掌停穩約 0.5 秒即可準備下一次手勢。食指點擊後需移動到新位置，避免停留時連點。", 13f)
         label("懸浮辨識燈：灰色＝未看到張掌、綠色＝已抓到張掌、藍色閃一下＝已觸發操作。指示燈不會擋住點擊。", 13f)
+
+        label("食指游標停穩點擊時間", 19f, true)
+        pointerDwell = Spinner(this)
+        pointerDwell.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
+            listOf("1 秒（反應最快）", "2 秒（建議）", "3 秒（較不容易誤觸）"))
+        pointerDwell.setSelection(Settings.pointerDwellIndex(this))
+        content.addView(pointerDwell, LinearLayout.LayoutParams(-1, dip(54)))
+        label("停穩達所選秒數自動點一次；再移動到新位置才會重新計時，避免連續誤點。", 13f)
+
+        label("長握拳觸發第二次點擊", 19f, true)
+        longFistDuration = Spinner(this)
+        longFistDuration.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
+            listOf("0.5 秒（快速）", "0.7 秒（建議）", "1 秒（較慢）"))
+        longFistDuration.setSelection(Settings.longFistIndex(this))
+        content.addView(longFistDuration, LinearLayout.LayoutParams(-1, dip(54)))
+        label("張掌後握拳先點一次；持續保持握拳達所選秒數再點第二次，之後不會一直連點。影片播放器可能不把這種間隔視為快速雙擊。", 13f)
 
         label("斜角手掌辨識（實驗性）", 19f, true)
         tiltedPalmAssist = Switch(this).apply {
@@ -152,7 +170,7 @@ class MainActivity : ComponentActivity() {
                 "極大範圍 4 倍（手指活動範圍較小）"))
         cursorRange.setSelection(Settings.cursorRange(this))
         content.addView(cursorRange, LinearLayout.LayoutParams(-1, dip(54)))
-        label("改善食指難以移到螢幕四角的問題；如果游標太靈敏，可改選 2 倍。停穩 3 秒點擊的判定不變。", 13f)
+        label("改善食指難以移到螢幕四角的問題；如果游標太靈敏，可改選 2 倍。點擊倒數依上方時間設定。", 13f)
 
         label("手勢靈敏度", 19f, true)
         sensitivity = Spinner(this)
@@ -176,7 +194,7 @@ class MainActivity : ComponentActivity() {
         cooldownText.text = "操作冷卻時間：${500 + cooldown.progress * 100} 毫秒"
         content.addView(cooldown, LinearLayout.LayoutParams(-1, dip(48)))
         button("儲存設定") {
-            Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition, cursorRange.selectedItemPosition, tiltedPalmAssist.isChecked, fastSwipeAssist.isChecked, screenWake.isChecked, wakePowerMode.selectedItemPosition)
+            Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition, cursorRange.selectedItemPosition, tiltedPalmAssist.isChecked, fastSwipeAssist.isChecked, screenWake.isChecked, wakePowerMode.selectedItemPosition, pointerDwell.selectedItemPosition, longFistDuration.selectedItemPosition)
             toast("已儲存；重新啟動辨識後生效")
         }
         label("隱私：App 不要求網路權限，影像只在本機暫時分析，不會錄影或上傳。\n啟動後可從通知列隨時停止前鏡頭。", 13f)
@@ -204,7 +222,7 @@ class MainActivity : ComponentActivity() {
 
     private fun startControl() {
         if (!GestureAccessibilityService.isReady()) { toast("無障礙服務尚未啟用"); return }
-        Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition, cursorRange.selectedItemPosition, tiltedPalmAssist.isChecked, fastSwipeAssist.isChecked, screenWake.isChecked, wakePowerMode.selectedItemPosition)
+        Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition, cursorRange.selectedItemPosition, tiltedPalmAssist.isChecked, fastSwipeAssist.isChecked, screenWake.isChecked, wakePowerMode.selectedItemPosition, pointerDwell.selectedItemPosition, longFistDuration.selectedItemPosition)
         val intent = Intent(this, CameraGestureService::class.java).setAction(CameraGestureService.START)
         try {
             ContextCompat.startForegroundService(this, intent)
