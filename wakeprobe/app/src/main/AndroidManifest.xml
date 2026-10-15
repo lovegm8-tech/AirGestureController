@@ -18,6 +18,14 @@
         <category android:name="android.intent.category.LAUNCHER"/>
      </intent-filter>
    </activity>
+   <!-- Only for experimental Activity.setTurnScreenOn() verification; no recording. -->
+   <activity android:name=".FaceUnlockWakeActivity"
+       android:exported="false"
+       android:excludeFromRecents="true"
+       android:showWhenLocked="true"
+       android:turnScreenOn="true"
+       android:theme="@android:style/Theme.Translucent.NoTitleBar"
+       android:finishOnTaskLaunch="true" />
    <service android:name=".WakeProbeService" android:exported="false"
        android:foregroundServiceType="camera" android:stopWithTask="false"/>
    <service android:name=".MediaGestureAccessibilityService" android:exported="true"
