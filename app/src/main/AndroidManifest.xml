@@ -32,6 +32,7 @@
             android:name=".FaceUnlockWakeActivity"
             android:exported="false"
             android:excludeFromRecents="true"
+            android:taskAffinity="tw.airgesture.controller.wake"
             android:showWhenLocked="true"
             android:turnScreenOn="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
