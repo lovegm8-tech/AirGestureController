@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- AirGrab: dark tile, grasping outline, wireless arcs and photo/document payloads -->
+    <path android:fillColor="#07182E" android:pathData="M0,0h108v108h-108z"/>
+    <path android:fillColor="#0D3158" android:pathData="M54,14a40,40 0,1 1,-0.01 0z" android:fillAlpha=".52"/>
+    <path android:strokeColor="#1763CE" android:strokeWidth="4" android:strokeAlpha=".40"
+        android:strokeLineCap="round" android:fillColor="@android:color/transparent"
+        android:pathData="M43,77 C47,88 70,88 80,71"/>
+    <path android:strokeColor="#3B8FFF" android:strokeWidth="3.6"
+        android:strokeLineCap="round" android:fillColor="@android:color/transparent"
+        android:pathData="M46,26 C64,14 83,20 90,34"/>
+    <path android:strokeColor="#0DD7FF" android:strokeWidth="3.6"
+        android:strokeLineCap="round" android:fillColor="@android:color/transparent"
+        android:pathData="M53,34 C65,27 77,29 83,39"/>
+    <path android:strokeColor="#4DBDFF" android:strokeWidth="3.1"
+        android:strokeLineCap="round" android:fillColor="@android:color/transparent"
+        android:pathData="M61,42 C68,38 75,41 77,46"/>
+    <!-- open hand outlined at bottom-left, terminating near the glowing grasp point -->
+    <path android:fillColor="#0A2448" android:fillAlpha=".7"
+        android:pathData="M29,90 L25,78 L23,61 Q23,56 26,56 Q30,55 30,60 L32,68 L32,47 Q32,42 36,42 Q40,42 40,47 L40,63 L42,37 Q42,32 46,32 Q50,32 50,37 L50,62 L53,40 Q54,36 58,37 Q62,38 61,42 L59,67 Q64,60 70,63 Q75,67 69,73 L56,90Z"/>
+    <path android:strokeColor="#B5EFFF" android:strokeWidth="2.7"
+        android:strokeLineJoin="round" android:strokeLineCap="round"
+        android:fillColor="@android:color/transparent"
+        android:pathData="M25,96 L23,80 Q22,77 21,66 L21,61 Q22,56 26,56 Q30,55 31,61 L33,69 L33,47 Q33,42 37,42 Q41,42 41,47 L41,64 L43,36 Q43,32 47,32 Q51,32 51,36 L51,64 L54,41 Q55,37 59,38 Q62,39 61,43 L59,69 Q65,62 69,64 Q75,67 69,74 L57,85 L52,96"/>
+    <!-- grab glow -->
+    <path android:fillColor="#13D9FF" android:fillAlpha=".65"
+        android:pathData="M68,67a6,6 0,1 1,-0.01 0z"/>
+    <!-- photo tile: offset to top-right -->
+    <path android:fillColor="#123A87"
+        android:strokeColor="#B7D9FF" android:strokeWidth="2"
+        android:pathData="M65,44 L84,49 L80,66 L61,61Z"/>
+    <path android:fillColor="#27B5F5"
+        android:pathData="M64,58 L69,53 L73,57 L76,54 L81,62 L80,64Z"/>
+    <path android:fillColor="#E3F8FF"
+        android:pathData="M78,51a2,2 0,1 1,-0.01 0z"/>
+    <!-- document tile -->
+    <path android:fillColor="#1870DB"
+        android:pathData="M77,66 L90,66 L94,71 L94,88 L77,88Z"/>
+    <path android:fillColor="#80DDFF"
+        android:pathData="M90,66 L90,72 L94,72Z"/>
+    <path android:strokeColor="#EEF9FF" android:strokeLineCap="round"
+        android:strokeWidth="1.7" android:fillColor="@android:color/transparent"
+        android:pathData="M81,76 L90,76 M81,81 L90,81 M81,85 L87,85"/>
+</vector>

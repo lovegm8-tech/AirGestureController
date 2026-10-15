@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="airgrab_background">#07182E</color>
+    <color name="airgrab_sender">#0FBF76</color>
+    <color name="airgrab_receiver">#168BFF</color>
+</resources>

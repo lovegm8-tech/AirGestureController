@@ -46,6 +46,10 @@ class ShareAutomationPolicyTest {
         assertNull(ShareAutomationPolicy.onlyUniqueChooserTarget("com.fake.app", nodes))
         assertEquals(0, ShareAutomationPolicy.onlyUniqueChooserTarget("android", nodes))
     }
+    @Test fun brandedNameIsRecognizedOnSharesheet() {
+        val nodes=listOf(ActionNode(null, "AirGrab 隔空抓取", clickable=true))
+        assertEquals(0,ShareAutomationPolicy.onlyUniqueChooserTarget("android",nodes))
+    }
     @Test fun chooserAmbiguousMeansNoClick() {
         val n=ActionNode(null, "隔空傳檔測試版", clickable=true)
         assertNull(ShareAutomationPolicy.onlyUniqueChooserTarget("android", listOf(n,n)))

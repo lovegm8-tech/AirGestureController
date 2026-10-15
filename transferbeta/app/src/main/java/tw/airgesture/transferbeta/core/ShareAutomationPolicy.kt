@@ -104,7 +104,8 @@ object ShareAutomationPolicy {
         if (!isTrustedResolver(pkg)) return null
         val matches = nodes.withIndex().filter { (_, n) ->
             n.visible && n.clickable && !n.password &&
-                (n.label?.trim() == "隔空傳檔測試版" || n.hint?.trim() == "隔空傳檔測試版")
+                ((n.label?.trim() in setOf("AirGrab 隔空抓取", "隔空傳檔測試版")) ||
+                 (n.hint?.trim() in setOf("AirGrab 隔空抓取", "隔空傳檔測試版")))
         }
         return matches.singleOrNull()?.index
     }

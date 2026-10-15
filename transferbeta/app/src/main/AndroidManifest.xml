@@ -19,7 +19,9 @@
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"/>
     <uses-feature android:name="android.hardware.camera.front" android:required="true"/>
     <application
-        android:label="隔空傳檔測試版"
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:allowBackup="false"
         android:usesCleartextTraffic="false"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
