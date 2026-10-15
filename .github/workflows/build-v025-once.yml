@@ -1,5 +1,6 @@
 name: AirGesture v0.2.5 one-time signed integration build
 # Retry after correcting deterministic screen-off palm timing regression test.
+# Third run: include missing intermediate palm sample in reset test.
 
 on:
   push:
