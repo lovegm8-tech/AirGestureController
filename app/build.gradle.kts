@@ -14,7 +14,7 @@ android {
         minSdk = 29
         targetSdk = 35
         versionCode = 8
-        versionName = "0.2.6
+        versionName = "0.2.6"
     }
     // Signing secrets are supplied only by the trusted, manually triggered CI run.
     // There is NO signing key or password in the repository.
