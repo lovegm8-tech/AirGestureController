@@ -150,10 +150,12 @@ class GestureCameraAnalyzer(
             val landmarks = result.landmarks().firstOrNull()
             val hasHand = landmarks != null && landmarks.size >= 21
             if (hasHand) lastWakeHandMs = now
-            val xy = if (hasHand) FloatArray(42).also { dst ->
-                for (i in 0 until 21) {
-                    dst[i * 2] = landmarks!![i].x()
-                    dst[i * 2 + 1] = landmarks[i].y()
+            val xy = if (landmarks != null && landmarks.size >= 21) {
+                FloatArray(42).also { dst ->
+                    for (i in 0 until 21) {
+                        dst[i * 2] = landmarks[i].x()
+                        dst[i * 2 + 1] = landmarks[i].y()
+                    }
                 }
             } else null
             val assist = wakeTiltAssist.resolve(name, score, xy, now)
