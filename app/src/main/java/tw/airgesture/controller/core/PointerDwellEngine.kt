@@ -5,10 +5,10 @@ import kotlin.math.abs
 /**
  * Pure JVM cursor controller. Coordinates are normalized to the camera image, already
  * mirrored for front-facing hand movement. A click requires a continuously stable
- * pointing gesture for three seconds; holding after click never repeats the click.
+ * pointing gesture for the selected dwell time; holding after click never repeats the click.
  */
 class PointerDwellEngine(
-    private val dwellMs: Long = 3000L,
+    private val dwellMs: Long = 2000L,
     private val holdRadius: Float = .045f,
     private val rearmDistance: Float = .12f
 ) {
