@@ -1,0 +1,1 @@
+Authorized in conversation: build a signed AirGrab 0.2.0 beta APK for install testing. Do not merge to main. Preserve v0.1.2 certificate and applicationId. GitHub Actions trigger only for this request file.
