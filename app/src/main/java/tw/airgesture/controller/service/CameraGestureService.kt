@@ -152,7 +152,8 @@ class CameraGestureService : LifecycleService() {
             try {
                 val model = GestureCameraAnalyzer(
                     this, Settings.engineOptions(this),
-                    Settings.performanceMode(this), Settings.tiltedPalmAssist(this)
+                    Settings.performanceMode(this), Settings.tiltedPalmAssist(this),
+                    Settings.pointerDwellMs(this)
                 )
                 main.post {
                     if (running) {
