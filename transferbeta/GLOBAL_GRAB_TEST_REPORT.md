@@ -1,23 +1,20 @@
-# 程式碼檢查報告 — 不編譯 APK
+# 隔空抓取純程式碼測試報告
 
-檢查日期：2026-10-15
+**原始碼分支**：experiment/global-grab-code
 
-| 測試 | 狀態 |
-| --- | --- |
-| ECO 低頻推論節流 | 以純 Kotlin 本機測試通過 |
-| 偵測手掌進入 ACTIVE | 以純 Kotlin 本機測試通過 |
-| ACTIVE 逾時回到 ECO | 以純 Kotlin 本機測試通過 |
-| 熄屏停止推論 | 以純 Kotlin 本機測試通過 |
-| Chrome 已知網址欄擷取有效網址 | 以純 Kotlin 本機測試通過 |
-| 拒絕 javascript / file URL | 以純 Kotlin 本機測試通過 |
-| 拒絕密碼欄位偽裝成 URL | 以純 Kotlin 本機測試通過 |
-| YouTube 原生 App 不猜測影片 URL | 以純 Kotlin 本機測試通過 |
-| 相機前景服務是否可以在 Android 16 連續運行 | 未實機測試 |
-| AccessibilityService 截圖是否可行 | 尚未編譯與實機測試 |
-| 背景手勢觸發跨 App 傳檔 | 尚未編譯與實機測試 |
-| 手機 S25 真實待機耗電量 | 尚未量測 |
-| 手機 S26 Ultra 真實待機耗電量 | 尚未量測 |
-| 三星相簿取得其他 App 原始檔 | Android 無通用授權路徑，尚未實現 |
-| YouTube App 取得精確影片分享網址 | 尚未實現 |
+測試工作流程為 \`:app:testDebugUnitTest --no-daemon --stacktrace\`。它會編譯測試必需的 Android / Kotlin 類別，但不會呼叫 \`assembleDebug\`、\`assembleRelease\`、APK 簽章或發佈。
 
-本次僅完成**部分可脫離 Android 執行的核心邏輯測試**。通過這些測試不代表 Android 程式碼已經完成編譯或可用。
+**共 26 個 JUnit 測試，分成 5 個測試檔案：**
+
+| 測試組 | 案例數 | 檢查內容 |
+|---|---:|---|
+| GestureSequenceTest | 5 | 張掌握拳、握拳張掌、誤觸、單一手勢及漏幀 |
+| GlobalGrabCoreTest | 4 | ECO/ACTIVE、熄屏、瀏覽器網址、拒絕不安全 URL |
+| ShareAutomationPolicyTest | 10 | Office、Google 文件、影片社群、分享候選唯一性、可信分享選單 |
+| SharedTextPolicyTest | 3 | 分享文案提取唯一網址、拒絕多網址、拒絕根據標題猜測 |
+| TransferPolicyTest | 4 | 檔名安全、大小/雜湊驗證、拒絕非 HTTPS/HTTP 內容 |
+| **合計** | **26** | 純邏輯與 Android 程式碼編譯測試 |
+
+測試不涵蓋實體攝影機、前景服務在三星系統中的存活、Nearby 實際裝置連線與身分釘選、Android 分享選單實際點擊、每款 App 的檔案匯出，以及電池實測。這些仍是未驗證事項。
+
+GitHub Actions 限定在測試分支，原本的隔空操作專案和穩定版簽章均未更動。
