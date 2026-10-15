@@ -12,8 +12,8 @@ android {
         applicationId = "tw.airgesture.wakeprobe"
         minSdk = 29
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.1.1-experiment"
+        versionCode = 3
+        versionName = "0.1.2-experiment"
     }
     buildTypes { release { isMinifyEnabled = false } }
     compileOptions {
