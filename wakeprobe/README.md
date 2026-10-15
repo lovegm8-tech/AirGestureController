@@ -1,4 +1,4 @@
-# 張掌喚醒實驗版（WakeProbe v0.1.0）
+# 張掌喚醒實驗版（WakeProbe v0.1.1）
 
 **目的**：在 Samsung S26 Ultra 上實測「手機熄屏 → 張掌 → 亮屏 → 三星臉部解鎖 → 保留原影片畫面 → 張掌握拳模擬點擊影片中央」能否實現。特別要釐清熄屏後 CameraX 能否持續收到畫面、Android 是否允許喚醒，以及解鎖後能否重新取得前鏡頭。
 
@@ -32,3 +32,11 @@
 ## 編譯
 
 在 `wakeprobe/` 跑 `gradle :app:testDebugUnitTest :app:assembleRelease`；固定簽章在儲存在受信任 GitHub Actions Secret 的工作流程中產出，不寫入原始碼。只需要實驗 APK 時使用一次性 `.github/workflows/build-wakeprobe-once.yml`，完成後刪除自動觸發器。
+
+## v0.1.1 相機交接改善
+
+- 張掌成立後不再固定等待 250ms 即亮屏，而是先 `unbindAll`、監聽 CameraX 的 `cameraInfo.cameraState`，確認 `CLOSED` 後再等 400ms 才嘗試喚醒；最多等 3 秒，如果仍未確認完全關閉，當次不主動亮屏，避免干擾三星臉部辨識。
+- 即使使用電源鍵而不是張掌亮屏，收到 `ACTION_SCREEN_ON` 也會立即停止相機分析並釋放 CameraX，避免繼續占用相機。
+- 解鎖後延長至約 2 秒再重新啟動前鏡頭，讓三星先完成臉部辨識；仍遵守 Android 14+ 背景相機啟動限制。
+- 紀錄相機從 OPEN/CLOSING/CLOSED 的狀態轉換，有利於區分「釋放太慢」與「系統不主動觸發人臉辨識」。
+- 仍需 S26 Ultra 實機驗證；即使釋放成功，三星系統未必會重試因相機被占用而錯過的臉部辨識。
