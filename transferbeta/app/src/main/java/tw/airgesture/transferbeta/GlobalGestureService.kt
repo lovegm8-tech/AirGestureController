@@ -15,7 +15,6 @@ import android.graphics.Matrix
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
-import android.os.IBinder
 import android.os.SystemClock
 import android.util.Range
 import android.util.Size
@@ -83,6 +82,7 @@ class GlobalGestureService : LifecycleService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        super.onStartCommand(intent, flags, startId)
         if (intent?.action == ACTION_STOP) {
             stopSelf()
             return START_NOT_STICKY

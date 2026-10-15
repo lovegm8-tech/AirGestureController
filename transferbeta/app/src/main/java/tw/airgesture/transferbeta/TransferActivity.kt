@@ -1,6 +1,12 @@
 package tw.airgesture.transferbeta
 
 import android.Manifest
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import androidx.lifecycle.Lifecycle
+import tw.airgesture.transferbeta.core.GrabContentPolicy
 import android.app.AlertDialog
 import android.content.ContentValues
 import android.content.Intent
@@ -74,6 +80,9 @@ class TransferActivity : ComponentActivity() {
     private var incomingId = -1L
     private var incoming: Payload? = null
     private var offer: Offer? = null
+    private data class LinkOffer(val session: String, val url: String)
+    private var linkOffer: LinkOffer? = null
+    private var lastReceivedLink: String? = null
     private var offerEpoch = 0
     private data class Offer(val session: String, val name: String, val size: Long, val hash: String)
 
@@ -136,14 +145,41 @@ class TransferActivity : ComponentActivity() {
             }
         }
         root.addView(sensitivityButton)
-        root.addView(text("目前支援選檔或從其他 App 主動分享的原檔；每次重新配對都需驗證數字。", 14f))
+        root.addView(text("全域抓取模式：瀏覽器網址可直接傳送；其他 App 僅能嘗試傳送「畫面截圖」，不是照片／文件原檔。", 14f))
+        button("啟動全域隔空抓取（持續前鏡頭）") {
+            if (!hasPermissions()) {
+                permissionLauncher.launch(permissions())
+            } else {
+                provider?.unbindAll()
+                recognizer?.close()
+                recognizer = null
+                ContextCompat.startForegroundService(this,
+                    Intent(this, GlobalGestureService::class.java)
+                        .setAction(GlobalGestureService.ACTION_START))
+                flash("已要求開始全域抓取；請切換至相簿或瀏覽器", true)
+            }
+        }
+        button("停止全域模式，恢復 App 內手勢") {
+            stopService(Intent(this, GlobalGestureService::class.java))
+            startCamera()
+        }
+        button("開啟最近收到的影片／網頁連結") {
+            lastReceivedLink?.let { openLink(it) } ?: flash("目前沒有收到網址")
+        }
+        root.addView(text("請先到「設定 → 無障礙」手動開啟「隔空抓取」，並保持附近連線。待機仍需使用鏡頭，實際耗電待測。", 14f))
         scroll.addView(root)
         setContentView(scroll)
         enhancedMode = getSharedPreferences("gesture", MODE_PRIVATE).getBoolean("enhanced", true)
         sensitivityButton.text = if (enhancedMode) "S25 辨識模式：靈敏（點選切換）"
             else "辨識模式：標準（點選切換）"
-        if (hasPermissions()) { startCamera(); findPeers() }
-        else permissionLauncher.launch(permissions())
+        GlobalGrabBridge.onGrabResult = { result ->
+            main.post { consumeGlobalGrab(result) }
+        }
+        GlobalGrabBridge.onReceiveGesture = { main.post { receiveGesture() } }
+        if (hasPermissions()) {
+            if (!GlobalGestureService.isActive) startCamera()
+            findPeers()
+        } else permissionLauncher.launch(permissions())
         consumeSharedFile(intent)
     }
     override fun onNewIntent(intent: Intent) {
@@ -164,6 +200,78 @@ class TransferActivity : ComponentActivity() {
             return
         }
         loadFile(source)
+    }
+
+    private fun consumeGlobalGrab(result: GrabResult) {
+        if (!connected) { flash("目前無法抓取：請先完成雙手機配對"); return }
+        when (result) {
+            is GrabResult.Link -> sendLink(result.url)
+            is GrabResult.ScreenSnapshot -> {
+                flash("已擷取畫面截圖，正在準備傳送（不是原始照片）", true)
+                io.execute {
+                    try {
+                        val digest = sha256(result.file)
+                        main.post {
+                            file?.delete()
+                            file = result.file
+                            fileName = "screen-grab-" + System.currentTimeMillis() + ".png"
+                            fileHash = digest
+                            chosen.text = "畫面截圖（不是原檔）：" + fileName
+                            sendGesture()
+                        }
+                    } catch (e: Exception) {
+                        main.post { flash("畫面截圖處理失敗：" + e.message) }
+                    }
+                }
+            }
+            is GrabResult.Unavailable -> flash(result.reason)
+        }
+    }
+
+    private fun sendLink(url: String) {
+        val checked = GrabContentPolicy.safeWebUrl(url)
+            ?: run { flash("不支援此網址，已取消抓取"); return }
+        if (!connected || sending || receiving || offer != null || linkOffer != null) {
+            flash("尚未連線或已有傳輸請求"); return
+        }
+        session = UUID.randomUUID().toString()
+        sending = true
+        control(JSONObject().put("type", "link_offer").put("sid", session).put("url", checked))
+        flash("✓ 已抓取影片／網頁網址，等待另一支手機接收", true)
+        val key = session
+        main.postDelayed({
+            if (sending && session == key) {
+                sending = false; flash("網址接收等待逾時")
+            }
+        }, 30_000)
+    }
+
+    private fun openLink(url: String) {
+        val checked = GrabContentPolicy.safeWebUrl(url)
+            ?: run { flash("網址無效，已拒絕開啟"); return }
+        try {
+            if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(checked)))
+                flash("正在開啟已收到的網址", true)
+            } else {
+                val notifications = getSystemService(NotificationManager::class.java)
+                notifications.createNotificationChannel(NotificationChannel(
+                    "link_received", "隔空傳檔網址", NotificationManager.IMPORTANCE_DEFAULT))
+                val openIntent = Intent(Intent.ACTION_VIEW, Uri.parse(checked)).addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK)
+                val pending = PendingIntent.getActivity(
+                    this, 0, openIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                val notification = Notification.Builder(this, "link_received")
+                    .setSmallIcon(android.R.drawable.ic_menu_view)
+                    .setContentTitle("隔空傳檔：已收到網址")
+                    .setContentText("點擊開啟影片或網頁")
+                    .setAutoCancel(true)
+                    .setContentIntent(pending).build()
+                notifications.notify(4201, notification)
+                flash("已收到連結；請點通知開啟（系統限制背景自動跳轉）", true)
+            }
+        } catch (e: Exception) { flash("無法開啟連結：" + e.message) }
     }
 
     private fun permissions(): Array<String> {
@@ -324,6 +432,25 @@ class TransferActivity : ComponentActivity() {
     private fun onControl(obj: JSONObject) {
         val sid = obj.optString("sid")
         when (obj.optString("type")) {
+            "link_offer" -> {
+                val checked = GrabContentPolicy.safeWebUrl(obj.optString("url"))
+                if (!connected || sending || receiving || offer != null || linkOffer != null ||
+                    sid.isBlank() || checked == null) {
+                    control(JSONObject().put("type", "busy").put("sid", sid)); return
+                }
+                linkOffer = LinkOffer(sid, checked)
+                val current = ++offerEpoch
+                flash("收到網址：請握拳 → 張掌，開啟對方影片／網頁")
+                main.postDelayed({
+                    if (offerEpoch == current && linkOffer?.session == sid && !receiving) {
+                        linkOffer = null; flash("網址接收等待逾時")
+                    }
+                }, 30_000)
+            }
+            "link_ready" -> if (sending && sid == session) {
+                sending = false
+                flash("✓ 接收端已確認網址", true)
+            }
             "offer" -> {
                 val name = obj.optString("name")
                 val length = obj.optLong("size", -1)
@@ -379,8 +506,16 @@ class TransferActivity : ComponentActivity() {
     }
     private fun receiveGesture() {
         if (!connected) { flash("請先完成雙機配對"); return }
-        val request = offer ?: run { flash("沒有等待接收的檔案"); return }
         if (receiving || sending) return
+        linkOffer?.let { pending ->
+            lastReceivedLink = pending.url
+            linkOffer = null
+            offerEpoch++
+            control(JSONObject().put("type", "link_ready").put("sid", pending.session))
+            openLink(pending.url)
+            return
+        }
+        val request = offer ?: run { flash("沒有等待接收的檔案或網址"); return }
         receiving = true; offerEpoch++; incomingId = -1L
         progress.progress = 0
         flash("✓ 已放下！接收中：" + request.name, true)
@@ -505,7 +640,10 @@ class TransferActivity : ComponentActivity() {
         }
     }
     override fun onDestroy() {
-        provider?.unbindAll(); recognizer?.close()
+        if (!GlobalGestureService.isActive) provider?.unbindAll()
+        recognizer?.close()
+        GlobalGrabBridge.onGrabResult = null
+        GlobalGrabBridge.onReceiveGesture = null
         nearby.stopAllEndpoints(); nearby.stopAdvertising(); nearby.stopDiscovery()
         io.shutdown(); cameraExecutor.shutdown()
         super.onDestroy()

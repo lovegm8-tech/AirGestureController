@@ -12,8 +12,8 @@ android {
         applicationId = "tw.airgesture.transferbeta"
         minSdk = 29
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.1.2-beta"
+        versionCode = 4
+        versionName = "0.2.0-code-review"
     }
     buildTypes { release { isMinifyEnabled = false } }
     compileOptions {
@@ -31,6 +31,7 @@ dependencies {
     implementation("androidx.camera:camera-core:1.4.2")
     implementation("androidx.camera:camera-camera2:1.4.2")
     implementation("androidx.camera:camera-lifecycle:1.4.2")
+    implementation("androidx.lifecycle:lifecycle-service:2.8.7")
     implementation("com.google.mediapipe:tasks-vision:1.0.0")
     implementation("com.google.android.gms:play-services-nearby:19.3.0")
     testImplementation("junit:junit:4.13.2")
