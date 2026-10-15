@@ -1,4 +1,4 @@
-# 張掌喚醒實驗版（WakeProbe v0.1.1）
+# 張掌喚醒實驗版（WakeProbe v0.1.2）
 
 **目的**：在 Samsung S26 Ultra 上實測「手機熄屏 → 張掌 → 亮屏 → 三星臉部解鎖 → 保留原影片畫面 → 張掌握拳模擬點擊影片中央」能否實現。特別要釐清熄屏後 CameraX 能否持續收到畫面、Android 是否允許喚醒，以及解鎖後能否重新取得前鏡頭。
 
@@ -40,3 +40,12 @@
 - 解鎖後延長至約 2 秒再重新啟動前鏡頭，讓三星先完成臉部辨識；仍遵守 Android 14+ 背景相機啟動限制。
 - 紀錄相機從 OPEN/CLOSING/CLOSED 的狀態轉換，有利於區分「釋放太慢」與「系統不主動觸發人臉辨識」。
 - 仍需 S26 Ultra 實機驗證；即使釋放成功，三星系統未必會重試因相機被占用而錯過的臉部辨識。
+
+## v0.1.2：測試 Android Activity 亮屏能否觸發正常三星解鎖
+
+- **A 方案（預設）**：保留熄屏張掌、CameraX 完整關閉與 400ms 交接，從相機前景服務嘗試啟動短暫、透明的 `FaceUnlockWakeActivity`；透過 `setTurnScreenOn(true)`、`setShowWhenLocked(true)` 試亮屏，在 Activity 顯示時向 `KeyguardManager.requestDismissKeyguard` 請求由**系統處理**鎖定畫面驗證。Activity 最多保留約 2.4 秒，避免蓋住原本影片。
+- **B 方案（對照組）**：完全保留 v0.1.1 的舊式 `PowerManager.SCREEN_BRIGHT_WAKE_LOCK | ACQUIRE_CAUSES_WAKEUP` 亮屏方式。方便判斷只改喚醒途徑是否影響三星臉部辨識。
+- Android 14/15/16 可能限制背景 Activity 啟動。如果 A 方案的紀錄只有「送出 Activity 亮屏流程」，**沒有「Activity 喚醒頁 onCreate」**，表示系統可能未允許 Activity 真正啟動；此時螢幕也可能不亮。請再用 B 方案測試，勿誤認是手勢偵測故障。
+- 即使 Activity 啟動並亮屏成功，三星不一定會因此自動開始臉部辨識；`requestDismissKeyguard` 不會自動繞過 PIN、密碼或指紋，亦不保證觸發 OEM 特定臉部解鎖機制。
+- 測試順序：先停正式 AirGestureController，再啟動 WakeProbe；選 A，按啟動→切回影片→熄屏→張掌約 1 秒→觀察三星是否自動臉部解鎖；成功或失敗都查看紀錄。接著停止並重開實驗、選 B，用相同步驟比較。
+- 本版本號 `versionCode=3`，沿用獨立套件名 `tw.airgesture.wakeprobe` 與同一簽章，可直接覆蓋舊 WakeProbe，不會覆蓋原本的 AirGestureController。
