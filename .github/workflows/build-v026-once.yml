@@ -1,4 +1,5 @@
 name: AirGesture v0.2.6 one-time signed navigation fix
+# Retry after Gradle version string syntax correction.
 
 on:
   push:
