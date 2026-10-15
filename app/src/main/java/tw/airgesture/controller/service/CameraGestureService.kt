@@ -218,7 +218,8 @@ class CameraGestureService : LifecycleService() {
                                         image,
                                         onAction = { GestureAccessibilityService.send(it) },
                                         onPalmDetection = { GestureAccessibilityService.handDetected(it) },
-                                        onPointer = { GestureAccessibilityService.pointerUpdated(it) }
+                                        onPointer = { GestureAccessibilityService.pointerUpdated(it) },
+                                        isYouTubeForeground = { GestureAccessibilityService.isYouTubeForeground() }
                                     )
                                     Phase.SCREEN_SCAN -> engine.processForWake(image) { palm, hand, stamp ->
                                         main.post {
