@@ -3,26 +3,32 @@ package tw.airgesture.controller.service
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.app.KeyguardManager
+import android.media.AudioManager
 import android.os.PowerManager
 import android.graphics.Path
 import android.graphics.Point
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.WindowManager
+import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import tw.airgesture.controller.core.GestureDecisionEngine
 import tw.airgesture.controller.core.PointerDwellEngine
+import tw.airgesture.controller.core.WakeDiagnosticLog
 
 /** Injects only user-requested touch gestures; it never reads view contents. */
 class GestureAccessibilityService : AccessibilityService() {
     private val mainHandler = Handler(Looper.getMainLooper())
-    private var activePackage: String? = null
+    @Volatile private var activePackage: String? = null
     private var indicator: HandIndicator? = null
     private var cursor: PointerOverlay? = null
 
     companion object {
         @Volatile private var current: GestureAccessibilityService? = null
+        private const val YOUTUBE_PACKAGE = "com.google.android.youtube"
         fun isReady(): Boolean = current != null
+        fun isYouTubeForeground(): Boolean = current?.activePackage == YOUTUBE_PACKAGE
         fun showIndicator() {
             current?.let { service -> service.mainHandler.post {
                 if (current === service) {
@@ -101,6 +107,25 @@ class GestureAccessibilityService : AccessibilityService() {
         if (keyguard.isKeyguardLocked || !power.isInteractive) return
         // Avoid tapping this controller's own settings UI.
         if (activePackage == packageName) return
+        if (action == GestureDecisionEngine.Action.MEDIA_PLAY_PAUSE) {
+            // A YouTube-only media button, not a touch gesture. Fail closed if
+            // the foreground package switched after the classifier's snapshot.
+            if (activePackage != YOUTUBE_PACKAGE) return
+            try {
+                val audio = getSystemService(AUDIO_SERVICE) as AudioManager
+                val now = SystemClock.uptimeMillis()
+                val down = KeyEvent(now, now, KeyEvent.ACTION_DOWN,
+                    KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, 0)
+                val up = KeyEvent(now, now, KeyEvent.ACTION_UP,
+                    KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, 0)
+                audio.dispatchMediaKeyEvent(down)
+                audio.dispatchMediaKeyEvent(up)
+                WakeDiagnosticLog.add(this, "YouTube 長握拳：已發送媒體播放／暫停鍵")
+            } catch (e: Exception) {
+                WakeDiagnosticLog.add(this, "YouTube 媒體播放／暫停鍵失敗：${e.javaClass.simpleName}")
+            }
+            return
+        }
         val manager = getSystemService(WINDOW_SERVICE) as WindowManager
         val size = Point().also { manager.defaultDisplay.getRealSize(it) }
         if (size.x <= 0 || size.y <= 0) return
@@ -123,6 +148,7 @@ class GestureAccessibilityService : AccessibilityService() {
                 path.moveTo(x, y)
                 duration = 80L
             }
+            GestureDecisionEngine.Action.MEDIA_PLAY_PAUSE -> return
             GestureDecisionEngine.Action.SWIPE_BACK -> {
                 // Android back-gesture edge: from the extreme left toward the right.
                 path.moveTo(size.x * .015f, y)
