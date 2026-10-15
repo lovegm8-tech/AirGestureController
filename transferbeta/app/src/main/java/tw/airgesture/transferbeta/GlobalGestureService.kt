@@ -46,6 +46,12 @@ class GlobalGestureService : LifecycleService() {
         private const val NOTIFICATION = 4108
         @Volatile var isActive = false
             private set
+        @Volatile var framesSeen = 0L
+            private set
+        @Volatile var inferences = 0L
+            private set
+        @Volatile var requestedSensorFps = "由裝置決定"
+            private set
     }
 
     private val power = AdaptivePowerPolicy()
@@ -158,6 +164,7 @@ class GlobalGestureService : LifecycleService() {
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                 preferredCameraFps()?.let { advertised ->
+                    requestedSensorFps = advertised.toString()
                     Camera2Interop.Extender(b).setCaptureRequestOption(
                         CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, advertised)
                 }
@@ -178,8 +185,10 @@ class GlobalGestureService : LifecycleService() {
     }
 
     private fun infer(frame: ImageProxy) {
+        framesSeen++
         val now = SystemClock.uptimeMillis()
         if (!power.shouldInfer(now)) return
+        inferences++
         val image = frameToBitmap(frame)
         try {
             val result = recognizer?.recognizeForVideo(BitmapImageBuilder(image).build(), now)

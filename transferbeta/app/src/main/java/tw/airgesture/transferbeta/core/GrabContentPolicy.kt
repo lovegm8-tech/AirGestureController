@@ -8,6 +8,7 @@ data class VisibleText(val viewId: String?, val text: String?, val password: Boo
 sealed class GrabChoice {
     data class Link(val url: String) : GrabChoice()
     data class ScreenSnapshot(val reason: String) : GrabChoice()
+    data class Unavailable(val reason: String) : GrabChoice()
 }
 
 object GrabContentPolicy {
@@ -38,6 +39,11 @@ object GrabContentPolicy {
                     safeWebUrl(node.text)?.let { return GrabChoice.Link(it) }
                 }
             }
+        }
+        if (packageName == "com.google.android.youtube" ||
+            packageName == "com.google.android.apps.youtube.music") {
+            return GrabChoice.Unavailable(
+                "YouTube 原生 App 沒有提供目前影片的可靠網址；不會用標題猜測或用截圖冒充影片連結")
         }
         return GrabChoice.ScreenSnapshot(
             "此 App 未提供可驗證網址或具有授權的原檔 URI；僅能擷取畫面"

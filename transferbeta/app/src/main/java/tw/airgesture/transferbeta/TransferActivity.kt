@@ -5,6 +5,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.provider.Settings
 import androidx.lifecycle.Lifecycle
 import tw.airgesture.transferbeta.core.GrabContentPolicy
 import android.app.AlertDialog
@@ -89,6 +90,11 @@ class TransferActivity : ComponentActivity() {
     private val picker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) loadFile(uri)
     }
+    private val notificationPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (!granted) flash("通知權限未開；接收端背景收到網址時，可能無法顯示開啟連結的通知")
+    }
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         if (hasPermissions()) { startCamera(); findPeers() }
         else show("缺少相機或附近裝置權限，請授權後重新開啟 App")
@@ -146,6 +152,9 @@ class TransferActivity : ComponentActivity() {
         }
         root.addView(sensitivityButton)
         root.addView(text("全域抓取模式：瀏覽器網址可直接傳送；其他 App 僅能嘗試傳送「畫面截圖」，不是照片／文件原檔。", 14f))
+        button("前往 Android 無障礙設定，啟用隔空抓取") {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        }
         button("啟動全域隔空抓取（持續前鏡頭）") {
             if (!hasPermissions()) {
                 permissionLauncher.launch(permissions())
@@ -153,6 +162,11 @@ class TransferActivity : ComponentActivity() {
                 provider?.unbindAll()
                 recognizer?.close()
                 recognizer = null
+                if (Build.VERSION.SDK_INT >= 33 &&
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+                    PackageManager.PERMISSION_GRANTED) {
+                    notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
                 ContextCompat.startForegroundService(this,
                     Intent(this, GlobalGestureService::class.java)
                         .setAction(GlobalGestureService.ACTION_START))
@@ -162,6 +176,11 @@ class TransferActivity : ComponentActivity() {
         button("停止全域模式，恢復 App 內手勢") {
             stopService(Intent(this, GlobalGestureService::class.java))
             startCamera()
+        }
+        button("查看省電推論計數（非電池耗電量）") {
+            flash("前鏡頭影格：" + GlobalGestureService.framesSeen +
+                "；AI 推論：" + GlobalGestureService.inferences +
+                "；要求 FPS：" + GlobalGestureService.requestedSensorFps)
         }
         button("開啟最近收到的影片／網頁連結") {
             lastReceivedLink?.let { openLink(it) } ?: flash("目前沒有收到網址")

@@ -2,6 +2,8 @@ package tw.airgesture.transferbeta
 
 import java.io.File
 import java.lang.ref.WeakReference
+import android.os.Handler
+import android.os.Looper
 
 /** In-process prototype bridge. App process and its original Nearby connection must stay alive. */
 sealed class GrabResult {
@@ -15,14 +17,15 @@ object GlobalGrabBridge {
     @Volatile var onGrabResult: ((GrabResult) -> Unit)? = null
     @Volatile var onReceiveGesture: (() -> Unit)? = null
 
+    private val main = Handler(Looper.getMainLooper())
     fun onGrabGesture() {
-        val service = accessibility?.get()
-        if (service == null) {
-            onGrabResult?.invoke(GrabResult.Unavailable(
-                "請先到 Android 無障礙設定，啟用「隔空抓取」；原檔存取仍受到 Android 限制"))
-            return
+        main.post {
+            val service = accessibility?.get()
+            if (service == null) {
+                onGrabResult?.invoke(GrabResult.Unavailable(
+                    "請先在 Android 無障礙設定啟用「隔空抓取」"))
+            } else service.grabVisibleContent()
         }
-        service.grabVisibleContent()
     }
 
     fun onReleaseGesture() { onReceiveGesture?.invoke() }

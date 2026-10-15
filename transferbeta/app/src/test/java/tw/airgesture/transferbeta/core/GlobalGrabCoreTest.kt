@@ -36,6 +36,10 @@ class GlobalGrabCoreTest {
             listOf(VisibleText(id, "https://example.com", password = true)))
             is GrabChoice.ScreenSnapshot)
     }
+    @Test fun nativeYoutubeCannotBeGuessed() {
+        assertTrue(GrabContentPolicy.decide("com.google.android.youtube",
+            listOf(VisibleText("id/title", "An example video"))) is GrabChoice.Unavailable)
+    }
     @Test fun rejectUnsafeUris() {
         assertNotNull(GrabContentPolicy.safeWebUrl("https://example.com/a"))
         assertNull(GrabContentPolicy.safeWebUrl("file:///secret.jpg"))

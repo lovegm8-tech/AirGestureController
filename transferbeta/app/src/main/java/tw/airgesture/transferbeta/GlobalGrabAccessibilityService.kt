@@ -54,6 +54,8 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         when (val result = GrabContentPolicy.decide(pkg, nodes)) {
             is GrabChoice.Link -> GlobalGrabBridge.result(GrabResult.Link(result.url))
             is GrabChoice.ScreenSnapshot -> captureScreenPixels()
+            is GrabChoice.Unavailable -> GlobalGrabBridge.result(
+                GrabResult.Unavailable(result.reason))
         }
     }
 
