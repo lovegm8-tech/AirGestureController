@@ -1,3 +1,16 @@
+# AirGestureController v0.2.8 — YouTube 播放／暫停專用長握拳
+
+- **專用對象：YouTube 官方 Android App**，無障礙服務識別前景套件 `com.google.android.youtube`；Chrome 網頁觀看 YouTube 不套用 YouTube 專用規則。
+- **張掌→短握拳**：YouTube 中先等待拳頭放開並確認，才執行一次中央點擊，避免長握拳時先點畫面開出控制列。
+- **張掌→長握拳**：YouTube 中持續握拳達 0.5 秒／0.7 秒／1 秒（沿用設定頁的可選時間），改為一次 `AudioManager.dispatchMediaKeyEvent(KEYCODE_MEDIA_PLAY_PAUSE)`，不會先送中央點擊，也不會再送第二次中央點擊；同一次長握拳不得重複發送媒體指令。
+- **其他 App**：保留 v0.2.7 的普通握拳中央點擊與長握拳第二次點擊邏輯，張掌滑動、右滑返回、食指懸浮游標與其 1／2／3 秒停穩點擊仍保持不變。
+- Android 媒體播放／暫停指令由目前接收媒體鍵的 App 決定實際效果；即使 YouTube 正在前景，仍可能因為媒體焦點、播放模式、系統或 YouTube 版本差異而無效。**不能宣稱已經在實機驗證 YouTube 能暫停**。
+- 解鎖時仍需要正常三星臉部驗證；延用 v0.2.7 已整合的獨立短暫 Activity 工作、熄屏間歇省電及 10 分鐘上限。無相機上傳或網路權限。
+- 安裝：`tw.airgesture.controller`、`versionCode=10`、使用原本的 Android 固定簽章，直接覆蓋 v0.2.7。
+- 實測：開啟 YouTube 影片，先試短握拳是否正常單擊，再試長握拳是否切換播放／暫停；如無反應，查看設定頁中的本機診斷紀錄是否有「YouTube 長握拳：已發送媒體播放／暫停鍵」，以區分手勢未成立與媒體鍵未被 YouTube 接收。
+
+---
+
 # AirGestureController v0.2.7 — 可自行調整點擊時間
 
 - **食指游標停穩點擊**：App 設定頁可選 1 秒、2 秒（預設）、3 秒；進度提示跟隨設定。點擊一次後須將食指移至另一個位置才能再次點擊，防止長時間停留造成重複觸控。
