@@ -1,6 +1,8 @@
 package tw.airgesture.transferbeta
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityService.ScreenshotResult
+import android.accessibilityservice.AccessibilityService.TakeScreenshotCallback
 import android.graphics.Bitmap
 import android.os.Build
 import android.view.Display
