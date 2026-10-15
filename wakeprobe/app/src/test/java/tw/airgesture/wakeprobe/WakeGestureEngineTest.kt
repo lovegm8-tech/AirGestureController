@@ -14,7 +14,8 @@ class WakeGestureEngineTest {
         assertNull(e.accept(palm, 0))
         assertNull(e.accept(palm, 200))
         assertNull(e.accept(palm, 450))
-        assertEquals(WakeGestureEngine.Action.ATTEMPT_WAKE, e.accept(palm, 880))
+        assertNull(e.accept(palm, 650))
+        assertEquals(WakeGestureEngine.Action.ATTEMPT_WAKE, e.accept(palm, 900))
         assertNull(e.accept(palm, 1100))
         assertEquals(WakeGestureEngine.State.AWAITING_UNLOCK, e.state)
     }
