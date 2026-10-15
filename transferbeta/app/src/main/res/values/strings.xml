@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="global_grab_accessibility_description">只有在使用者做出隔空抓取手勢後，讀取目前畫面的網址或擷取畫面；不會持續記錄畫面，也無法取得其他 App 未授權的原始檔案。</string>
+</resources>
