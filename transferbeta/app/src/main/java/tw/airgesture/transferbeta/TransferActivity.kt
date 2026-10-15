@@ -224,10 +224,7 @@ class TransferActivity : ComponentActivity() {
                 "；AI 推論：" + GlobalGestureService.inferences +
                 "；要求 FPS：" + GlobalGestureService.requestedSensorFps)
         }
-        button("明確要求畫面截圖（不是原檔）") {
-            GlobalGrabBridge.accessibility?.get()?.takeFallbackScreenshot()
-                ?: flash("請先啟用隔空抓取無障礙服務")
-        }
+        root.addView(text("在其他 App 顯示內容時，若要截圖備援，請使用持續通知的「手動截圖備援」，避免拍到本 App 介面。", 14f))
         button("開啟最近收到的影片／網頁連結") {
             lastReceivedLink?.let { openLink(it) } ?: flash("目前沒有收到網址")
         }

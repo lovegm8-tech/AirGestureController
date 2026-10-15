@@ -189,6 +189,12 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
      */
     fun takeFallbackScreenshot() {
         clearPending()
+        val foreground = rootInActiveWindow?.packageName?.toString()
+        if (foreground == packageName || foreground == "com.android.systemui") {
+            GlobalGrabBridge.result(GrabResult.Unavailable(
+                "目前顯示的是隔空傳檔或系統通知面板，請返回原畫面再截圖"))
+            return
+        }
         if (Build.VERSION.SDK_INT < 30) {
             GlobalGrabBridge.result(GrabResult.Unavailable("Android 版本不支援無障礙畫面擷取"))
             return

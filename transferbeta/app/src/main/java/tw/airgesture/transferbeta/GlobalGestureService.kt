@@ -44,6 +44,7 @@ class GlobalGestureService : LifecycleService() {
     companion object {
         const val ACTION_START = "tw.airgesture.transferbeta.START_GLOBAL"
         const val ACTION_STOP = "tw.airgesture.transferbeta.STOP_GLOBAL"
+        const val ACTION_CAPTURE_SCREEN = "tw.airgesture.transferbeta.EXPLICIT_SCREEN_CAPTURE"
         private const val CHANNEL = "global_grab_camera"
         private const val NOTIFICATION = 4108
         @Volatile var isActive = false
@@ -109,6 +110,15 @@ class GlobalGestureService : LifecycleService() {
             stopSelf()
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_CAPTURE_SCREEN && isActive) {
+            main.postDelayed({
+                val accessibility = GlobalGrabBridge.accessibility?.get()
+                if (accessibility == null) {
+                    connections.reportCaptureFailure("請先啟用無障礙抓取權限")
+                } else accessibility.takeFallbackScreenshot()
+            }, 850)
+            return START_NOT_STICKY
+        }
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) !=
             PackageManager.PERMISSION_GRANTED) {
             stopSelf()
@@ -142,6 +152,9 @@ class GlobalGestureService : LifecycleService() {
         val stop = PendingIntent.getService(this, 32,
             Intent(this, GlobalGestureService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val screenshot = PendingIntent.getService(this, 34,
+            Intent(this, GlobalGestureService::class.java).setAction(ACTION_CAPTURE_SCREEN),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val open = PendingIntent.getActivity(this, 33,
             Intent(this, TransferActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
@@ -151,6 +164,8 @@ class GlobalGestureService : LifecycleService() {
             .setContentText("低頻辨識中；偵測到手掌才切換快速辨識")
             .setOngoing(true)
             .setContentIntent(open)
+            .addAction(Notification.Action.Builder(
+                android.R.drawable.ic_menu_camera, "手動截圖備援", screenshot).build())
             .addAction(Notification.Action.Builder(
                 android.R.drawable.ic_media_pause, "停止前鏡頭偵測", stop).build())
             .build()
