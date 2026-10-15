@@ -52,6 +52,9 @@ class BackgroundTransferManager(private val app: Context) {
     private var outgoing: File? = null
     private var offered: Offer? = null
     private var generation = 0
+    private var searchCycle = 0
+    private val searchWindowMs = 18_000L
+    private val searchPauseMs = 12_000L
     var status: String = "未啟動"
         private set
     var pendingDigits: String? = null
@@ -100,6 +103,7 @@ class BackgroundTransferManager(private val app: Context) {
     fun stop() {
         started = false
         generation++
+        searchCycle++
         client.stopDiscovery(); client.stopAdvertising(); client.stopAllEndpoints()
         endpoint = null
         connected = false
@@ -113,6 +117,7 @@ class BackgroundTransferManager(private val app: Context) {
     }
     private fun search() {
         if (!started || connected || awaitingPair != null) return
+        val cycle = ++searchCycle
         client.stopDiscovery(); client.stopAdvertising()
         endpoint = null
         val options = Strategy.P2P_POINT_TO_POINT
@@ -124,6 +129,18 @@ class BackgroundTransferManager(private val app: Context) {
         client.startDiscovery(service, discovery,
             DiscoveryOptions.Builder().setStrategy(options).build())
             .addOnFailureListener { ui("附近搜尋不可用：" + it.message) }
+        // Discovery/advertising can drain power when no peer is nearby.
+        // Keep confirmed connections alive, but duty-cycle searching otherwise.
+        main.postDelayed({
+            if (started && !connected && awaitingPair == null && cycle == searchCycle) {
+                client.stopDiscovery(); client.stopAdvertising()
+                ui("省電搜尋間歇中；稍後自動尋找附近裝置")
+                main.postDelayed({
+                    if (started && !connected && awaitingPair == null && cycle == searchCycle)
+                        search()
+                }, searchPauseMs)
+            }
+        }, searchWindowMs)
     }
     fun refresh() {
         if (!busy && awaitingPair == null && !connected) search()
@@ -167,6 +184,7 @@ class BackgroundTransferManager(private val app: Context) {
                 if (r.status.isSuccess) {
                     endpoint = id
                     connected = true
+                    searchCycle++
                     client.stopAdvertising()
                     client.stopDiscovery()
                     ui("雙手機已安全配對；背景傳輸就緒")
@@ -182,6 +200,7 @@ class BackgroundTransferManager(private val app: Context) {
             main.post {
                 connected = false
                 endpoint = null
+                searchCycle++
                 busy = false
                 offered = null
                 pendingDigits = null
@@ -331,6 +350,20 @@ class BackgroundTransferManager(private val app: Context) {
             main.post {
                 if (id != endpoint) return@post
                 if (u.payloadId != payloadOutgoing && u.payloadId != payloadIncoming) return@post
+                val expected = offered as? Offer.FileOffer
+                if (u.payloadId == payloadIncoming && u.totalBytes > TransferPolicy.MAX_BYTES) {
+                    client.cancelPayload(u.payloadId)
+                    busy = false; incomingFile = null; offered = null
+                    ui("拒絕接收超過 256MB 的檔案")
+                    return@post
+                }
+                if (u.payloadId == payloadIncoming && expected != null &&
+                    u.totalBytes >= 0 && u.totalBytes != expected.size) {
+                    client.cancelPayload(u.payloadId)
+                    busy = false; incomingFile = null; offered = null
+                    ui("接收檔案大小與宣告不符，已拒絕")
+                    return@post
+                }
                 when (u.status) {
                     PayloadTransferUpdate.Status.SUCCESS -> {
                         if (u.payloadId == payloadIncoming) {
