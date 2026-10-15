@@ -41,7 +41,8 @@ class WakePalmDwellEngineTest {
         assertTrue(e.accept(true, 900))
         e.reset()
         assertFalse(e.accept(true, 1200))
-        assertFalse(e.accept(true, 1500))
-        assertTrue(e.accept(true, 2100))
+        assertFalse(e.accept(true, 1540))
+        assertFalse(e.accept(true, 1880))
+        assertTrue(e.accept(true, 2150))
     }
 }
