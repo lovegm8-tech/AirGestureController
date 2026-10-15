@@ -59,7 +59,7 @@ class CameraGestureService : LifecycleService() {
     }
 
     private enum class Phase { ACTIVE, SCREEN_SCAN, SCREEN_REST, WAIT_FACE, SCREEN_SLEEP }
-    private var phase = Phase.ACTIVE
+    @Volatile private var phase = Phase.ACTIVE
     private val main = Handler(Looper.getMainLooper())
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
     private val power by lazy { getSystemService(POWER_SERVICE) as PowerManager }
@@ -157,7 +157,7 @@ class CameraGestureService : LifecycleService() {
                 main.post {
                     if (running) {
                         analyzer = model
-                        if (phase == Phase.ACTIVE) bindCamera()
+                        if (phase == Phase.ACTIVE || phase == Phase.SCREEN_SCAN) bindCamera()
                     } else model.close()
                 }
             } catch (e: Exception) {
@@ -437,6 +437,9 @@ class CameraGestureService : LifecycleService() {
         }
         if (!cameraBound && !cameraOpening && cameraStates == null) {
             onClosed?.invoke(true)
+            if (running && phase == Phase.ACTIVE && power.isInteractive && !keyguard.isKeyguardLocked) {
+                main.postDelayed({ bindCamera() }, 450L)
+            }
             return
         }
         cameraClosing = true
@@ -467,6 +470,9 @@ class CameraGestureService : LifecycleService() {
                         cameraClosing = false
                         WakeDiagnosticLog.add(this, "CameraX 前鏡頭 CLOSED")
                         onClosed?.invoke(true)
+                        if (running && phase == Phase.ACTIVE && power.isInteractive && !keyguard.isKeyguardLocked) {
+                            main.postDelayed({ bindCamera() }, 450L)
+                        }
                     }
                 }
             }
@@ -480,6 +486,9 @@ class CameraGestureService : LifecycleService() {
                 val closed = states.value?.type == CameraState.Type.CLOSED
                 WakeDiagnosticLog.add(this, "關閉相機等待逾時；CLOSED=${closed}")
                 onClosed?.invoke(closed)
+                if (running && phase == Phase.ACTIVE && power.isInteractive && !keyguard.isKeyguardLocked) {
+                    main.postDelayed({ bindCamera() }, 450L)
+                }
             }
         }, 3000L)
     }
