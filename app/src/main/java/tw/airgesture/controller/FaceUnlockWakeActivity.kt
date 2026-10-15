@@ -14,10 +14,14 @@ import tw.airgesture.controller.core.WakeDiagnosticLog
  */
 class FaceUnlockWakeActivity : Activity() {
     private val main = Handler(Looper.getMainLooper())
+    private var dismissalRequested = false
     private val close = Runnable {
         if (!isFinishing && !isDestroyed) {
-            WakeDiagnosticLog.add(this, "喚醒 Activity 已結束，返回原 App")
-            finish()
+            WakeDiagnosticLog.add(this, "喚醒 Activity 結束；taskId=$taskId；獨立工作=$isTaskRoot；準備還原原本影片")
+            // A separate task prevents Android from bringing MainActivity
+            // forward as the previous activity beneath this unlock screen.
+            // Never remove an existing task if OEM behavior reused it.
+            if (isTaskRoot) finishAndRemoveTask() else finish()
             overridePendingTransition(0, 0)
         }
     }
@@ -27,7 +31,7 @@ class FaceUnlockWakeActivity : Activity() {
         setTurnScreenOn(true)
         super.onCreate(state)
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
-        WakeDiagnosticLog.add(this, "已建立解鎖 Activity")
+        WakeDiagnosticLog.add(this, "已建立獨立解鎖 Activity；taskId=$taskId；isTaskRoot=$isTaskRoot")
         main.postDelayed(close, 2400L)
     }
 
@@ -40,6 +44,8 @@ class FaceUnlockWakeActivity : Activity() {
             main.postDelayed(close, 220L)
             return
         }
+        if (dismissalRequested) return
+        dismissalRequested = true
         try {
             keyguard.requestDismissKeyguard(this, object : KeyguardManager.KeyguardDismissCallback() {
                 override fun onDismissSucceeded() {
