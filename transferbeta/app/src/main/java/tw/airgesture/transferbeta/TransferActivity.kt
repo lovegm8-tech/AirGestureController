@@ -166,7 +166,7 @@ class TransferActivity : ComponentActivity() {
         button("重新搜尋附近手機") { findPeers() }
         button("模擬張掌 → 握拳（發送）") { sendGesture() }
         button("模擬握拳 → 張掌（接收）") { receiveGesture() }
-        root.addView(text("實際手勢：先維持第一個手勢約 0.3 秒，再維持第二個手勢約 0.3 秒。", 14f))
+        root.addView(text("實際手勢：接收端收到檔案通知後，先握拳至少 0.5 秒，再張掌 0.5 秒；若偵測不穩可先用「模擬接收」確認傳輸。", 14f))
         root.addView(text("可直接在三星相簿、Google 相簿或檔案管理員中按「分享」，選擇「隔空傳檔測試版」。", 14f))
         val sensitivityButton = Button(this).apply {
             text = "S25 辨識模式：靈敏（點選切換）"
@@ -757,6 +757,14 @@ class GestureSequence(
     private var confirmed = ""
     private var confirmedAt = 0L
     private var cooldownUntil = 0L
+    fun reset() {
+        candidate = ""
+        candidateSince = 0L
+        candidateLastSeen = 0L
+        confirmed = ""
+        confirmedAt = 0L
+        cooldownUntil = 0L
+    }
 
     fun accept(raw: String, now: Long): Result {
         val pose = if (raw == "Open_Palm" || raw == "Closed_Fist") raw else ""

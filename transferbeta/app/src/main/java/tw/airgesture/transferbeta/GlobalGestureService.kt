@@ -47,6 +47,7 @@ class GlobalGestureService : LifecycleService() {
         const val ACTION_START = "tw.airgesture.transferbeta.START_GLOBAL"
         const val ACTION_STOP = "tw.airgesture.transferbeta.STOP_GLOBAL"
         const val ACTION_CAPTURE_SCREEN = "tw.airgesture.transferbeta.EXPLICIT_SCREEN_CAPTURE"
+        const val ACTION_CONFIRM_RECEIVE = "tw.airgesture.transferbeta.CONFIRM_RECEIVE"
         private const val CHANNEL = "global_grab_camera"
         private const val NOTIFICATION = 4108
         @Volatile var isActive = false
@@ -65,12 +66,13 @@ class GlobalGestureService : LifecycleService() {
     private lateinit var connections: BackgroundTransferManager
     private lateinit var overlay: GestureStatusOverlay
     private val power = AdaptivePowerPolicy()
-    private val sequence = GestureSequence()
+    private val sequence = GestureSequence(holdMillis = 240L, unknownGraceMillis = 550L)
     private val cameraExecutor = Executors.newSingleThreadExecutor()
     private var provider: ProcessCameraProvider? = null
     private var recognizer: GestureRecognizer? = null
     private var lastHint = 0L
     private var isScreenOn = true
+    @Volatile private var receivingOffer = false
 
     private val screen = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -94,6 +96,13 @@ class GlobalGestureService : LifecycleService() {
         connections = BackgroundTransferManager(applicationContext)
         overlay = GestureStatusOverlay(applicationContext)
         connections.onVisualEvent = { event -> overlay.showState(event) }
+        connections.onReceiverOfferState = { awaiting ->
+            if (receivingOffer != awaiting) {
+                receivingOffer = awaiting
+                power.setReceiverAwaiting(awaiting)
+                cameraExecutor.execute { sequence.reset() }
+            }
+        }
         registerReceiver(screen, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_SCREEN_ON)
@@ -104,6 +113,10 @@ class GlobalGestureService : LifecycleService() {
         super.onStartCommand(intent, flags, startId)
         if (intent?.action == ACTION_STOP) {
             stopSelf()
+            return START_NOT_STICKY
+        }
+        if (intent?.action == ACTION_CONFIRM_RECEIVE && isActive) {
+            connections.confirmReceive()
             return START_NOT_STICKY
         }
         if (intent?.action == ACTION_CAPTURE_SCREEN && isActive) {
@@ -201,7 +214,7 @@ class GlobalGestureService : LifecycleService() {
                             .build())
                 }
                 val b = ImageAnalysis.Builder()
-                    .setTargetResolution(Size(320, 240))
+                    .setTargetResolution(Size(480, 360))
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                 preferredCameraFps()?.let { advertised ->
@@ -281,6 +294,8 @@ class GlobalGestureService : LifecycleService() {
         GlobalGrabBridge.onGrabResult = null
         GlobalGrabBridge.onReceiveGesture = null
         connections.onVisualEvent = null
+        connections.onReceiverOfferState = null
+        power.setReceiverAwaiting(false)
         connections.stop()
         overlay.dismiss()
         power.stop()
