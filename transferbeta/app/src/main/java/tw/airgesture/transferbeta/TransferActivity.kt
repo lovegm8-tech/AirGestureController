@@ -9,6 +9,9 @@ import android.provider.Settings
 import androidx.lifecycle.Lifecycle
 import tw.airgesture.transferbeta.core.GrabContentPolicy
 import android.app.AlertDialog
+import android.accessibilityservice.AccessibilityServiceInfo
+import android.view.accessibility.AccessibilityManager
+import android.view.View
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -61,6 +64,14 @@ class TransferActivity : ComponentActivity() {
         }
     }
     private lateinit var status: TextView
+    private lateinit var titleHint: TextView
+    private lateinit var primaryAction: Button
+    private lateinit var advanced: LinearLayout
+    private var advancedOpen = false
+    private var normalLauncherEntry = false
+    private var homePromptVisible = false
+    private var queuedAutoHome = false
+    private val homePrefs by lazy { getSharedPreferences("airgrab_home", MODE_PRIVATE) }
     private lateinit var chosen: TextView
     private lateinit var hand: TextView
     private lateinit var animation: TextView
@@ -96,155 +107,293 @@ class TransferActivity : ComponentActivity() {
         if (!granted) flash("通知權限未開；接收端背景收到網址時，可能無法顯示開啟連結的通知")
     }
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        if (hasPermissions()) { startCamera(); findPeers() }
-        else show("缺少相機或附近裝置權限，請授權後重新開啟 App")
+        if (hasPermissions()) {
+            refreshHome()
+            if (homePrefs.getBoolean("auto_run", false) && hasAccessibilityPermission()) {
+                startGlobalMode()
+            }
+        } else {
+            show("尚未授予必要權限")
+            refreshHome()
+        }
     }
 
     private var shownPairCode: String? = null
-    private fun attachBackgroundSession() {
-        val active = GlobalGestureService.transfer ?: return
-        active.onStatus = { msg -> show("背景連線：" + msg) }
-        active.onPairing = { digits ->
-            if (shownPairCode != digits && !isFinishing) {
-                shownPairCode = digits
-                android.app.AlertDialog.Builder(this)
-                    .setTitle("雙手機安全驗證")
-                    .setMessage("只有兩支手機出現相同數字才可確認：\n\n" + digits)
-                    .setPositiveButton("數字相同") { _, _ ->
-                        active.acceptPairing(true)
-                        shownPairCode = null
-                    }
-                    .setNegativeButton("拒絕") { _, _ ->
-                        active.acceptPairing(false)
-                        shownPairCode = null
-                    }
-                    .setCancelable(false).show()
-            }
+
+    private fun hasAccessibilityPermission(): Boolean {
+        val am = getSystemService(ACCESSIBILITY_SERVICE) as AccessibilityManager
+        return am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK).any {
+            val name = it.resolveInfo.serviceInfo
+            name.packageName == packageName &&
+                name.name.endsWith(".GlobalGrabAccessibilityService")
         }
     }
+
+    private fun attachBackgroundSession() {
+        val manager = GlobalGestureService.transfer ?: return
+        manager.onStatus = { text ->
+            show(text)
+            refreshHome()
+            maybeReturnHome()
+        }
+        manager.onConnectionState = { _ ->
+            refreshHome()
+            maybeReturnHome()
+        }
+        manager.onPairing = { code ->
+            if (shownPairCode == code || isFinishing) return@onPairing
+            shownPairCode = code
+            homePromptVisible = true
+            refreshHome()
+            AlertDialog.Builder(this)
+                .setTitle("確認配對")
+                .setMessage("請確認兩支手機都顯示相同數字：
+
+" + code)
+                .setPositiveButton("數字相同，連線") { _, _ ->
+                    manager.acceptPairing(true)
+                    shownPairCode = null
+                    homePromptVisible = false
+                    refreshHome()
+                    maybeReturnHome()
+                }
+                .setNegativeButton("拒絕") { _, _ ->
+                    manager.acceptPairing(false)
+                    shownPairCode = null
+                    homePromptVisible = false
+                    refreshHome()
+                }
+                .setCancelable(false)
+                .show()
+        }
+    }
+
+    private fun maybeReturnHome() {
+        if (queuedAutoHome) return
+        val mayClose = tw.airgesture.transferbeta.core.HomeScreenPolicy.shouldAutoBackground(
+            homePrefs.getBoolean("auto_run", false),
+            normalLauncherEntry,
+            GlobalGestureService.isActive,
+            GlobalGestureService.transfer?.isConnected == true,
+            homePromptVisible,
+            advancedOpen
+        )
+        if (!mayClose) return
+        queuedAutoHome = true
+        main.postDelayed({
+            queuedAutoHome = false
+            if (tw.airgesture.transferbeta.core.HomeScreenPolicy.shouldAutoBackground(
+                    homePrefs.getBoolean("auto_run", false),
+                    normalLauncherEntry,
+                    GlobalGestureService.isActive,
+                    GlobalGestureService.transfer?.isConnected == true,
+                    homePromptVisible,
+                    advancedOpen
+                )) {
+                moveTaskToBack(true)
+            }
+        }, 900)
+    }
+
+    private fun startGlobalMode() {
+        if (!hasPermissions()) {
+            permissionLauncher.launch(permissions())
+            return
+        }
+        if (!hasAccessibilityPermission()) {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            return
+        }
+        homePrefs.edit().putBoolean("auto_run", true).apply()
+        if (!GlobalGestureService.isActive) {
+            try {
+                ContextCompat.startForegroundService(this,
+                    Intent(this, GlobalGestureService::class.java)
+                        .setAction(GlobalGestureService.ACTION_START))
+            } catch (e: Exception) {
+                homePrefs.edit().putBoolean("auto_run", false).apply()
+                show("無法啟動背景服務：" + e.message)
+                return
+            }
+        }
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        refreshHome()
+        main.postDelayed({
+            if (!isFinishing) {
+                attachBackgroundSession()
+                refreshHome()
+                maybeReturnHome()
+            }
+        }, 700)
+    }
+
+    private fun refreshHome() {
+        if (!::status.isInitialized || !::primaryAction.isInitialized) return
+        val d = tw.airgesture.transferbeta.core.HomeScreenPolicy.decide(
+            hasPermissions(), hasAccessibilityPermission(),
+            GlobalGestureService.isActive,
+            GlobalGestureService.transfer?.isConnected == true
+        )
+        val label = when (d.action) {
+            tw.airgesture.transferbeta.core.HomeAction.GRANT_PERMISSION -> "開始設定 · 允許必要權限"
+            tw.airgesture.transferbeta.core.HomeAction.ENABLE_ACCESSIBILITY -> "繼續設定 · 啟用隔空抓取"
+            tw.airgesture.transferbeta.core.HomeAction.START -> "啟用隔空抓取"
+            tw.airgesture.transferbeta.core.HomeAction.WAIT -> "重新搜尋附近手機"
+            tw.airgesture.transferbeta.core.HomeAction.BACKGROUND -> "返回桌面 · 開始使用"
+        }
+        primaryAction.text = label
+        titleHint.text = when (d.state) {
+            tw.airgesture.transferbeta.core.HomeState.NEED_PERMISSION -> "尚差一步：開啟權限"
+            tw.airgesture.transferbeta.core.HomeState.NEED_ACCESSIBILITY -> "尚差一步：開啟隔空抓取服務"
+            tw.airgesture.transferbeta.core.HomeState.NEED_START -> "設定已完成，按下方啟用"
+            tw.airgesture.transferbeta.core.HomeState.SEARCHING -> "隔空抓取已開啟，正在等待附近手機連線"
+            tw.airgesture.transferbeta.core.HomeState.READY -> "已連線 · 隔空抓取可以使用"
+        }
+        titleHint.setTextColor(if (d.state ==
+                tw.airgesture.transferbeta.core.HomeState.READY) 0xff0e8053.toInt()
+            else 0xff1f3550.toInt())
+        if (d.state == tw.airgesture.transferbeta.core.HomeState.SEARCHING) {
+            status.text = GlobalGestureService.transfer?.status ?: "搜尋附近手機中"
+        }
+    }
+
     override fun onResume() {
         super.onResume()
+        refreshHome()
+        if (homePrefs.getBoolean("auto_run", false) &&
+            hasPermissions() && hasAccessibilityPermission() && !GlobalGestureService.isActive) {
+            startGlobalMode()
+        }
         attachBackgroundSession()
+        maybeReturnHome()
     }
+
     override fun onPause() {
-        GlobalGestureService.transfer?.let { it.onStatus = null; it.onPairing = null }
+        GlobalGestureService.transfer?.let {
+            it.onStatus = null
+            it.onPairing = null
+            it.onConnectionState = null
+        }
         super.onPause()
     }
+
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        normalLauncherEntry = intent?.action == Intent.ACTION_MAIN &&
+            intent?.getBooleanExtra("airgrab_show_settings", false) != true
         val scroll = ScrollView(this)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(32, 24, 32, 28)
+            setPadding(32, 32, 32, 40)
             setBackgroundColor(0xfff7f9fc.toInt())
         }
-        fun text(msg: String, size: Float = 17f) = TextView(this).apply {
-            this.text = msg
+        fun text(value: String, size: Float = 17f) = TextView(this).apply {
+            this.text = value
             textSize = size
             setTextColor(0xff1f3550.toInt())
             setPadding(0, 10, 0, 10)
         }
-        root.addView(text("AirGrab｜隔空抓取 v0.2.0", 23f))
-        root.addView(text("兩支手機皆安裝此 App；第一次連線確認雙方驗證碼。", 15f))
-        status = text("未連線"); root.addView(status)
-        chosen = text("尚未選擇原檔"); root.addView(chosen)
-        hand = text("前鏡頭尚未啟動"); root.addView(hand)
-        animation = text("準備就緒", 23f).apply {
-            gravity = Gravity.CENTER
-            minimumHeight = 140
-            setBackgroundColor(0xffe5edf8.toInt())
-        }
-        root.addView(animation)
-        progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = 100
-        }
-        root.addView(progress)
-        fun button(name: String, action: () -> Unit) {
-            root.addView(Button(this).apply { text = name; setOnClickListener { action() } })
-        }
-        button("選擇要傳送的原始照片或 PDF") { picker.launch(arrayOf("*/*")) }
-        button("重新搜尋附近手機") { findPeers() }
-        button("模擬張掌 → 握拳（發送）") { sendGesture() }
-        button("模擬握拳 → 張掌（接收）") { receiveGesture() }
-        root.addView(text("實際手勢：接收端收到檔案通知後，先握拳至少 0.5 秒，再張掌 0.5 秒；若偵測不穩可先用「模擬接收」確認傳輸。", 14f))
-        root.addView(text("可直接在三星相簿、Google 相簿或檔案管理員中按「分享」，選擇「隔空傳檔測試版」。", 14f))
-        val sensitivityButton = Button(this).apply {
-            text = "S25 辨識模式：靈敏（點選切換）"
+        root.addView(text("AirGrab  隔空抓取", 26f))
+        root.addView(text("啟用一次，就能在其他 App 隔空抓取和接收。", 15f))
+        titleHint = text("檢查服務狀態中…", 20f)
+        root.addView(titleHint)
+        status = text("等待連線", 14f)
+        root.addView(status)
+        primaryAction = Button(this).apply {
+            text = "開始設定"
+            minHeight = (resources.displayMetrics.density * 64).toInt()
             setOnClickListener {
-                enhancedMode = !enhancedMode
-                text = if (enhancedMode) "S25 辨識模式：靈敏（點選切換）"
-                    else "辨識模式：標準（點選切換）"
-                getSharedPreferences("gesture", MODE_PRIVATE).edit()
-                    .putBoolean("enhanced", enhancedMode).apply()
-                flash(if (enhancedMode) "已切換靈敏模式：降低辨識門檻，觀察誤判率"
-                    else "已切換標準模式：較嚴格的手勢信心門檻")
+                when (tw.airgesture.transferbeta.core.HomeScreenPolicy.decide(
+                    hasPermissions(), hasAccessibilityPermission(),
+                    GlobalGestureService.isActive,
+                    GlobalGestureService.transfer?.isConnected == true
+                ).action) {
+                    tw.airgesture.transferbeta.core.HomeAction.GRANT_PERMISSION ->
+                        permissionLauncher.launch(permissions())
+                    tw.airgesture.transferbeta.core.HomeAction.ENABLE_ACCESSIBILITY ->
+                        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                    tw.airgesture.transferbeta.core.HomeAction.START -> startGlobalMode()
+                    tw.airgesture.transferbeta.core.HomeAction.WAIT ->
+                        GlobalGestureService.transfer?.refresh()
+                    tw.airgesture.transferbeta.core.HomeAction.BACKGROUND ->
+                        moveTaskToBack(true)
+                }
             }
         }
-        root.addView(sensitivityButton)
-        root.addView(text("全域抓取模式：瀏覽器網址可直接傳送；其他 App 僅能嘗試傳送「畫面截圖」，不是照片／文件原檔。", 14f))
-        button("前往 Android 無障礙設定，啟用隔空抓取") {
+        root.addView(primaryAction)
+        root.addView(text("抓取：張開手掌 → 握拳
+
+接收：握拳 → 張開手掌", 16f))
+        root.addView(text("完成連線後，可以直接使用相簿、影片或網頁，不必停留在 AirGrab。", 14f))
+        val advancedToggle = Button(this).apply { text = "進階設定與測試  ▾" }
+        root.addView(advancedToggle)
+        advanced = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        fun extraButton(label: String, click: () -> Unit) {
+            advanced.addView(Button(this).apply {
+                text = label
+                setOnClickListener { click() }
+            })
+        }
+        extraButton("手動選擇照片或檔案發送") { picker.launch(arrayOf("*/*")) }
+        extraButton("測試接收（不需要做手勢）") {
+            GlobalGestureService.transfer?.confirmReceive()
+                ?: flash("請先啟動隔空抓取服務")
+        }
+        extraButton("重新搜尋裝置") { GlobalGestureService.transfer?.refresh() }
+        extraButton("無障礙服務設定") {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
-        button("允許抓取動畫顯示在其他 App 上方") {
+        extraButton("懸浮動畫權限") {
             if (!Settings.canDrawOverlays(this)) {
                 startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                     Uri.parse("package:" + packageName)))
-            } else flash("懸浮動畫權限已開啟", true)
+            } else flash("已允許懸浮動畫", true)
         }
-        button("啟動全域隔空抓取（持續前鏡頭）") {
-            if (!hasPermissions()) {
-                permissionLauncher.launch(permissions())
-            } else {
-                provider?.unbindAll()
-                recognizer?.close()
-                recognizer = null
-                nearby.stopAllEndpoints()
-                nearby.stopDiscovery()
-                nearby.stopAdvertising()
-                endpoint = null
-                connected = false
-                if (Build.VERSION.SDK_INT >= 33 &&
-                    ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
-                    PackageManager.PERMISSION_GRANTED) {
-                    notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-                }
-                ContextCompat.startForegroundService(this,
-                    Intent(this, GlobalGestureService::class.java)
-                        .setAction(GlobalGestureService.ACTION_START))
-                main.postDelayed({ attachBackgroundSession() }, 600)
-                flash("已要求開始全域抓取；請切換至相簿或瀏覽器", true)
-            }
+        extraButton("辨識與效能資訊") {
+            flash("影格：" + GlobalGestureService.framesSeen +
+                "／辨識：" + GlobalGestureService.inferences +
+                "／鏡頭 FPS：" + GlobalGestureService.requestedSensorFps)
         }
-        button("停止全域模式，恢復 App 內手勢") {
+        extraButton("停止背景隔空抓取") {
+            homePrefs.edit().putBoolean("auto_run", false).apply()
             stopService(Intent(this, GlobalGestureService::class.java))
-            startCamera()
+            status.text = "使用者已停止背景服務"
+            main.postDelayed({ refreshHome() }, 250)
         }
-        button("查看省電推論計數（非電池耗電量）") {
-            flash("前鏡頭影格：" + GlobalGestureService.framesSeen +
-                "；AI 推論：" + GlobalGestureService.inferences +
-                "；要求 FPS：" + GlobalGestureService.requestedSensorFps)
+        chosen = text("尚未選擇測試檔案", 14f)
+        advanced.addView(chosen)
+        hand = text("舊版 App 內手勢測試已停用；由全域服務辨識", 13f)
+        advanced.addView(hand)
+        animation = text("測試訊息", 15f).apply { gravity = Gravity.CENTER }
+        advanced.addView(animation)
+        progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100 }
+        advanced.addView(progress)
+        root.addView(advanced)
+        advancedToggle.setOnClickListener {
+            advancedOpen = !advancedOpen
+            advanced.visibility = if (advancedOpen) View.VISIBLE else View.GONE
+            advancedToggle.text = if (advancedOpen) "收起進階設定  ▴" else "進階設定與測試  ▾"
         }
-        root.addView(text("在其他 App 顯示內容時，若要截圖備援，請使用持續通知的「手動截圖備援」，避免拍到本 App 介面。", 14f))
-        button("開啟最近收到的影片／網頁連結") {
-            lastReceivedLink?.let { openLink(it) } ?: flash("目前沒有收到網址")
-        }
-        root.addView(text("請先到「設定 → 無障礙」手動開啟「隔空抓取」，並保持附近連線。待機仍需使用鏡頭，實際耗電待測。", 14f))
         scroll.addView(root)
         setContentView(scroll)
         enhancedMode = getSharedPreferences("gesture", MODE_PRIVATE).getBoolean("enhanced", true)
-        sensitivityButton.text = if (enhancedMode) "S25 辨識模式：靈敏（點選切換）"
-            else "辨識模式：標準（點選切換）"
         if (!GlobalGestureService.isActive) {
             GlobalGrabBridge.onGrabResult = { result ->
                 main.post { consumeGlobalGrab(result) }
             }
             GlobalGrabBridge.onReceiveGesture = { main.post { receiveGesture() } }
         }
-        if (hasPermissions()) {
-            if (!GlobalGestureService.isActive) startCamera()
-            findPeers()
-        } else permissionLauncher.launch(permissions())
+        refreshHome()
         consumeSharedFile(intent)
+        // The camera and Nearby are now exclusively owned by GlobalGestureService.
+        // Do not start activity-local camera/discovery on every app launch.
     }
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
