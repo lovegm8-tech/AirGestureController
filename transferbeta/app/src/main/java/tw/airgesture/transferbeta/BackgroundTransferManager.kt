@@ -577,6 +577,7 @@ class BackgroundTransferManager(private val app: Context) {
                     outgoingOffer === offer && offerDelivery === tracker &&
                     tracker.recordAttempt(SystemClock.uptimeMillis())) {
                     ui("對方尚未確認請求，重新發送（第 " + tracker.attempts + " 次）")
+                    visual(VisualPhase.WAITING_FOR_RECEIVER, "等待對方收到請求 · 重試中")
                     control(offer)
                 }
             }, delayMs)
@@ -596,7 +597,7 @@ class BackgroundTransferManager(private val app: Context) {
         session = UUID.randomUUID().toString()
         sendAndRetryOffer(JSONObject().put("type", "link_offer").put("sid", session).put("url", url))
         ui("網址已取得，等待對方確認（30 秒）")
-        visual(VisualPhase.WAITING_FOR_RECEIVER, "已取得連結 · 尚未送達")
+        visual(VisualPhase.WAITING_FOR_RECEIVER, "連結已抓取 · 等待對方確認請求")
         val key = ++generation
         main.postDelayed({
             if (generation == key && busy) {
@@ -630,7 +631,7 @@ class BackgroundTransferManager(private val app: Context) {
                     sendAndRetryOffer(JSONObject().put("type", "file_offer").put("sid", session)
                         .put("name", name).put("size", candidate.length()).put("hash", sum))
                     ui("已取得：" + name + "；等待對方接收")
-                    visual(VisualPhase.WAITING_FOR_RECEIVER, "已取得檔案 · 等待對方")
+                    visual(VisualPhase.WAITING_FOR_RECEIVER, "檔案已抓取 · 等待對方確認請求")
                     val key = ++generation
                     main.postDelayed({
                         if (generation == key && busy && payloadOutgoing < 0) {
