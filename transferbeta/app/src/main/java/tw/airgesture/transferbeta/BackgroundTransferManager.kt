@@ -87,14 +87,16 @@ class BackgroundTransferManager(private val app: Context) {
             Intent(app, GlobalGestureService::class.java).setAction(
                 GlobalGestureService.ACTION_CONFIRM_RECEIVE),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        notifications.notify(4431, Notification.Builder(app, "airgrab_receives")
+        try { notifications.notify(4431, Notification.Builder(app, "airgrab_receives")
             .setSmallIcon(android.R.drawable.ic_menu_share)
             .setContentTitle("AirGrab 等待接收")
             .setContentText(label.take(50) + " · 握拳張掌，或點通知立即接收")
             .setOngoing(true)
             .addAction(Notification.Action.Builder(
                 android.R.drawable.ic_input_add, "立即接收", accept).build())
-            .build())
+            .build()) } catch (_: SecurityException) {
+                ui("通知權限未開，但仍可使用接收手勢")
+            }
     }
     var onVisualEvent: ((VisualEvent) -> Unit)? = null
     private fun visual(phase: VisualPhase, label: String, progress: Int? = null) {
@@ -185,7 +187,10 @@ class BackgroundTransferManager(private val app: Context) {
         if (!busy && awaitingPair == null && !connected) search()
         else ui(if (connected) "裝置已連線" else "配對或傳輸仍在進行")
     }
-    fun reportCaptureFailure(message: String) { ui(message) }
+    fun reportCaptureFailure(message: String) {
+        ui(message)
+        visual(VisualPhase.FAILURE, message.take(75))
+    }
     private val discovery = object : EndpointDiscoveryCallback() {
         override fun onEndpointFound(id: String, peer: DiscoveredEndpointInfo) {
             val other = peer.endpointName.substringAfter('|', "")
@@ -457,6 +462,10 @@ class BackgroundTransferManager(private val app: Context) {
     private fun onControl(j: JSONObject) {
         val sid = j.optString("sid")
         when (j.optString("type")) {
+            "offer_seen" -> if (sid == session && busy) {
+                ui("接收手機已收到請求，等待接收手勢")
+                visual(VisualPhase.WAITING_FOR_RECEIVER, "對方已看到請求 · 等待接收")
+            }
             "file_offer" -> {
                 val name = j.optString("name")
                 val count = j.optLong("size", -1)
@@ -468,6 +477,7 @@ class BackgroundTransferManager(private val app: Context) {
                 incomingFile = null; incomingFinished = false; payloadIncoming = -1L
                 setReceiveArmed(true)
                 notifyIncomingOffer(name)
+                control(JSONObject().put("type", "offer_seen").put("sid", sid))
                 ui("收到檔案請求：" + name + "；握拳 → 張掌以接收")
                 visual(VisualPhase.OFFER_RECEIVED, "收到檔案 · 握拳張掌接收")
                 expireOffer(sid)
@@ -480,6 +490,7 @@ class BackgroundTransferManager(private val app: Context) {
                 offered = Offer.LinkOffer(sid, url)
                 setReceiveArmed(true)
                 notifyIncomingOffer("影片／網頁網址")
+                control(JSONObject().put("type", "offer_seen").put("sid", sid))
                 ui("收到影片或網頁網址；握拳 → 張掌以接收")
                 visual(VisualPhase.OFFER_RECEIVED, "收到連結 · 握拳張掌接收")
                 expireOffer(sid)
