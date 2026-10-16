@@ -392,29 +392,28 @@ class TransferActivity : ComponentActivity() {
                 ?: flash("請先啟動隔空抓取服務")
         }
         extraButton("重新搜尋裝置") { GlobalGestureService.transfer?.refresh() }
-        extraButton("已記住的裝置／忘記配對") {
+        extraButton("已配對裝置與多台連線") {
             val current = GlobalGestureService.transfer
             if (current == null) {
-                flash("請先啟動 AirGrab，才能查看已記住的裝置")
+                flash("請先啟動 AirGrab 才能管理信任裝置")
             } else {
-                val id = current.rememberedDeviceId
-                if (id == null) {
-                    AlertDialog.Builder(this)
-                        .setTitle("信任裝置")
-                        .setMessage("目前沒有已記住的手機。首次連線時會要求雙方核對數字。")
-                        .setPositiveButton("確定", null).show()
-                } else {
-                    AlertDialog.Builder(this)
-                        .setTitle("已記住的裝置")
-                        .setMessage("裝置代碼：" + id +
-                            "\n\n之後重新連線會用手機安全金鑰驗證，不必再輸入數字。" +
-                            "\n\n若換機或重新安裝，請從這裡清除原本的信任裝置。")
-                        .setPositiveButton("保留配對", null)
-                        .setNegativeButton("忘記這支裝置") { _, _ ->
-                            current.forgetTrustedDevice()
-                            refreshHome()
-                        }.show()
-                }
+                val saved = current.rememberedDeviceIds
+                val live = current.connectedDeviceIds.toSet()
+                val summary = if (saved.isEmpty()) "尚無已配對裝置，首次連線須核對雙方數字。"
+                    else saved.mapIndexed { index, id ->
+                        (index + 1).toString() + ". " + id +
+                            (if (id in live) "（已連線）" else "（未連線）")
+                    }.joinToString("\n")
+                AlertDialog.Builder(this)
+                    .setTitle("AirGrab 多裝置：已連線 " + live.size + " 台")
+                    .setMessage(summary +
+                        "\n\n傳送端抓取後開放接收 30 秒，已配對設備可各自握拳張掌加入。" +
+                        "\n最多記住 8 台裝置。清除配對會讓所有裝置下次重新核對數字。")
+                    .setPositiveButton("保留配對", null)
+                    .setNegativeButton("清除全部配對") { _, _ ->
+                        current.forgetTrustedDevice()
+                        refreshHome()
+                    }.show()
             }
         }
         extraButton("無障礙服務設定") {
