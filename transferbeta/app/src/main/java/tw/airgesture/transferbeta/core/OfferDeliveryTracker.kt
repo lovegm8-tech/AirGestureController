@@ -14,7 +14,7 @@ class OfferDeliveryTracker(
         private set
 
     fun recordAttempt(nowMs: Long): Boolean {
-        if (!shouldRetry(nowMs) && attempts > 0) return false
+        if (!shouldRetry(nowMs)) return false
         attempts++
         return true
     }
