@@ -43,26 +43,61 @@ class TrustedPeerStore(private val app: Context) {
         return PeerIdentityProtocol.encode(bytes)
     }
 
-    fun trustedId(): String? = prefs.getString("peer_id", null)
-    fun trustedKey(): String? = prefs.getString("peer_pub", null)
+    /** Multiple pinned peers. Migrates the original one-peer prefs without replacing keys. */
+    fun trustedPeers(): Map<String, String> {
+        val result = linkedMapOf<String, String>()
+        // Legacy v0.2.5 pairing must survive upgrading the app.
+        val originalId = prefs.getString("peer_id", null)
+        val originalKey = prefs.getString("peer_pub", null)
+        if (originalId != null && originalKey != null &&
+            PeerIdentityProtocol.matchesPinned(originalId, originalKey, originalId, originalKey))
+            result[originalId] = originalKey
+        val ids = prefs.getStringSet("trusted_ids_v2", emptySet()) ?: emptySet()
+        for (id in ids.sorted()) {
+            val pub = prefs.getString("trusted_pub_$id", null) ?: continue
+            if (PeerIdentityProtocol.matchesPinned(id, pub, id, pub)) result[id] = pub
+        }
+        return result
+    }
 
+    fun trustedId(): String? = trustedPeers().keys.firstOrNull()
+    fun trustedKey(): String? = trustedId()?.let { trustedPeers()[it] }
     fun isTrusted(id: String, public: String): Boolean =
-        PeerIdentityProtocol.matchesPinned(trustedId(), trustedKey(), id, public)
-
+        PeerIdentityProtocol.matchesPinned(id, trustedPeers()[id], id, public)
     fun isRecognizedHint(id: String): Boolean =
-        PeerIdentityProtocol.validPeerId(id) && trustedId() == id && trustedKey() != null
+        PeerIdentityProtocol.validPeerId(id) && trustedPeers().containsKey(id)
+    fun rememberedIds(): List<String> = trustedPeers().keys.toList()
 
     fun pinAfterVerifiedFirstPairing(id: String, public: String) {
         require(PeerIdentityProtocol.validPeerId(id))
         PeerIdentityProtocol.parseKey(public)
-        // A DIFFERENT valid public key must never silently replace a pinned one.
-        check(trustedId() == null && trustedKey() == null ||
-            isTrusted(id, public)) { "Unexpected trusted device change" }
-        check(prefs.edit().putString("peer_id", id)
-            .putString("peer_pub", public).commit()) { "Cannot persist trusted device" }
+        val existing = trustedPeers()[id]
+        check(existing == null || existing == public) {
+            "Pinned device identity cannot be silently replaced"
+        }
+        check(existing != null || trustedPeers().size < 8) {
+            "AirGrab supports up to eight trusted devices"
+        }
+        val updatedIds = (prefs.getStringSet("trusted_ids_v2", emptySet())
+            ?: emptySet()).toMutableSet().apply { add(id) }
+        check(prefs.edit().putString("trusted_pub_$id", public)
+            .putStringSet("trusted_ids_v2", updatedIds).commit()) {
+            "Cannot persist trusted peer"
+        }
+    }
+
+    fun forget(id: String) {
+        val updated = (prefs.getStringSet("trusted_ids_v2", emptySet())
+            ?: emptySet()).toMutableSet().apply { remove(id) }
+        val editor = prefs.edit().remove("trusted_pub_$id")
+            .putStringSet("trusted_ids_v2", updated)
+        if (prefs.getString("peer_id", null) == id) {
+            editor.remove("peer_id").remove("peer_pub")
+        }
+        check(editor.commit()) { "Cannot forget device" }
     }
 
     fun forget() {
-        check(prefs.edit().remove("peer_id").remove("peer_pub").commit())
+        for (id in rememberedIds()) forget(id)
     }
 }
