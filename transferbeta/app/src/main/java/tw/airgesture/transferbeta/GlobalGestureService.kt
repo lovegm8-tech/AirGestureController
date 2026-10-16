@@ -165,7 +165,8 @@ class GlobalGestureService : LifecycleService() {
             Intent(this, GlobalGestureService::class.java).setAction(ACTION_CAPTURE_SCREEN),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val open = PendingIntent.getActivity(this, 33,
-            Intent(this, TransferActivity::class.java),
+            Intent(this, TransferActivity::class.java)
+                .putExtra("airgrab_show_settings", true),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val n = Notification.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_camera)
