@@ -53,7 +53,7 @@ class GlobalGestureService : LifecycleService() {
         private const val NOTIFICATION = 4108
         @Volatile var isActive = false
             private set
-        @Volatile var transfer: BackgroundTransferManager? = null
+        @Volatile var transfer: MultiPeerTransferManager? = null
             private set
         @Volatile var framesSeen = 0L
             private set
@@ -64,7 +64,7 @@ class GlobalGestureService : LifecycleService() {
     }
 
     private val main = Handler(Looper.getMainLooper())
-    private lateinit var connections: BackgroundTransferManager
+    private lateinit var connections: MultiPeerTransferManager
     private lateinit var overlay: GestureStatusOverlay
     private val power = AdaptivePowerPolicy()
     private val handFeedback = HandFeedbackPolicy()
@@ -97,7 +97,7 @@ class GlobalGestureService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
-        connections = BackgroundTransferManager(applicationContext)
+        connections = MultiPeerTransferManager(applicationContext)
         overlay = GestureStatusOverlay(applicationContext)
         connections.onVisualEvent = { event -> overlay.showState(event) }
         connections.onReceiverOfferState = { awaiting ->
