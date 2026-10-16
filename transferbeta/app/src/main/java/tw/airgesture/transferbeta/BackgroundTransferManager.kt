@@ -82,6 +82,8 @@ class BackgroundTransferManager(private val app: Context) {
     private var localPublic: String? = null
     private var peerPublic: String? = null
     private var peerProof: String? = null
+    private var ownProofValidated = false
+    private var peerConfirmedReady = false
     private var identityKeyPair: KeyPair? = null
     private var authRound = 0
 
@@ -110,6 +112,8 @@ class BackgroundTransferManager(private val app: Context) {
         localPublic = null
         peerPublic = null
         peerProof = null
+        ownProofValidated = false
+        peerConfirmedReady = false
         identityKeyPair = null
         peerHint = null
     }
@@ -263,13 +267,11 @@ class BackgroundTransferManager(private val app: Context) {
                 return
             }
         }
-        authPending = false
-        connected = true
-        onConnectionState?.invoke(true)
-        searchCycle++
-        client.stopAdvertising()
-        client.stopDiscovery()
-        ui("已驗證並記住這支裝置；下次自動安全重連")
+        if (!ownProofValidated) {
+            ownProofValidated = true
+            control(JSONObject().put("type", "auth_ready"))
+        }
+        finishAuthIfBothReady()
     }
 
     private sealed class Offer {
@@ -419,6 +421,18 @@ class BackgroundTransferManager(private val app: Context) {
         }
         override fun onEndpointLost(id: String) {}
     }
+    /** Both endpoints must validate each other's signature before transfers unlock. */
+    private fun finishAuthIfBothReady() {
+        if (!authPending || !ownProofValidated || !peerConfirmedReady) return
+        authPending = false
+        connected = true
+        onConnectionState?.invoke(true)
+        searchCycle++
+        client.stopAdvertising()
+        client.stopDiscovery()
+        ui("已完成雙向身份驗證，已記住裝置並自動安全連線")
+    }
+
     private val lifecycle = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(id: String, info: ConnectionInfo) {
             main.post {
@@ -653,6 +667,10 @@ class BackgroundTransferManager(private val app: Context) {
                                     peerProof = json.optString("sig")
                                     verifyRemoteProofIfReady()
                                 }
+                            }
+                            "auth_ready" -> if (authPending) {
+                                peerConfirmedReady = true
+                                finishAuthIfBothReady()
                             }
                             else -> if (connected) onControl(json)
                         }
