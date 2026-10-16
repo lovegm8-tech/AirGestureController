@@ -1,5 +1,10 @@
 name: AirGrab Signed Test APK - Manual Approval Only
 on:
+  push:
+    branches:
+      - experiment/global-grab-code
+    paths:
+      - transferbeta/BUILD_REQUEST_AIRGRAB_V023.txt
   workflow_dispatch:
     inputs:
       approval:
@@ -11,7 +16,7 @@ permissions:
   contents: read
 jobs:
   build:
-    if: github.ref == 'refs/heads/experiment/global-grab-code' && inputs.approval == 'BUILD_AIRGRAB_APK'
+    if: github.ref == 'refs/heads/experiment/global-grab-code' && ((github.event_name == 'workflow_dispatch' && inputs.approval == 'BUILD_AIRGRAB_APK') || (github.event_name == 'push' && github.event.head_commit.message == 'AirGrab v0.2.3 authorized build request'))
     runs-on: ubuntu-latest
     timeout-minutes: 40
     defaults:
@@ -90,6 +95,6 @@ jobs:
           grep -qiF '05e77197d2ad73ac4a255e4c40b868a5c26c539b9aea3c1abd53100ff484f19e' "$RUNNER_TEMP/cert.txt"
       - uses: actions/upload-artifact@v4
         with:
-          name: AirGrab-v0.2.2-beta-signed
+          name: AirGrab-v0.2.3-beta-signed
           path: transferbeta/app/build/outputs/apk/release/app-release.apk
           retention-days: 14
