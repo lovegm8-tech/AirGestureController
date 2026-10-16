@@ -1,0 +1,1 @@
+User explicitly authorized signing/building one AirGrab v0.2.4-beta APK after the Samsung Gallery EXTRA_STREAM import regression fix passed code tests. Keep package tw.airgesture.transferbeta and permanent signing certificate; versionCode 8; preserve the working hand tracking/overlay. Build only this user-authorized test release.
