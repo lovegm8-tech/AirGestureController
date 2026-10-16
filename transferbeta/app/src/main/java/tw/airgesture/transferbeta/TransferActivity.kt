@@ -8,6 +8,7 @@ import android.app.PendingIntent
 import android.provider.Settings
 import androidx.lifecycle.Lifecycle
 import tw.airgesture.transferbeta.core.GrabContentPolicy
+import tw.airgesture.transferbeta.core.VideoSendMode
 import android.app.AlertDialog
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.view.accessibility.AccessibilityManager
@@ -356,6 +357,34 @@ class TransferActivity : ComponentActivity() {
             })
         }
         extraButton("手動選擇照片或檔案發送") { picker.launch(arrayOf("*/*")) }
+        val videoModeButton = Button(this).apply {
+            fun showMode() {
+                val mode = VideoSendMode.fromKey(
+                    getSharedPreferences("video_transfer", MODE_PRIVATE)
+                        .getString("mode", "auto"))
+                text = "影片模式：" + mode.display
+            }
+            showMode()
+            setOnClickListener {
+                val modes = VideoSendMode.entries
+                val selected = VideoSendMode.fromKey(
+                    getSharedPreferences("video_transfer", MODE_PRIVATE)
+                        .getString("mode", "auto"))
+                AlertDialog.Builder(this@TransferActivity)
+                    .setTitle("AirGrab 影片傳送模式")
+                    .setSingleChoiceItems(modes.map { it.display }.toTypedArray(),
+                        modes.indexOf(selected)) { dialog, index ->
+                        getSharedPreferences("video_transfer", MODE_PRIVATE)
+                            .edit().putString("mode", modes[index].key).apply()
+                        showMode()
+                        dialog.dismiss()
+                    }
+                    .setMessage("自動模式：檢查接收端編碼支援，遇到 HEVC、HDR 或高解析度影片優先轉成 H.264／AAC。轉檔不修改手機原影片，可能需要較長時間。")
+                    .setNegativeButton("取消", null).show()
+            }
+        }
+        advanced.addView(videoModeButton)
+
         extraButton("測試接收（不需要做手勢）") {
             GlobalGestureService.transfer?.confirmReceive()
                 ?: flash("請先啟動隔空抓取服務")
