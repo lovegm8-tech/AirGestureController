@@ -20,6 +20,8 @@ import tw.airgesture.transferbeta.core.GrabContentPolicy
 import tw.airgesture.transferbeta.core.TransferPolicy
 import tw.airgesture.transferbeta.core.PeerIdentityProtocol
 import tw.airgesture.transferbeta.core.OfferDeliveryTracker
+import tw.airgesture.transferbeta.core.MediaFilePolicy
+import tw.airgesture.transferbeta.core.MediaKind
 import java.security.KeyPair
 import tw.airgesture.transferbeta.core.VisualEvent
 import tw.airgesture.transferbeta.core.VisualPhase
@@ -902,12 +904,18 @@ class BackgroundTransferManager(private val app: Context) {
             var target: Uri? = null
             try {
                 val source = payload.asFile()?.asUri() ?: error("沒有收到檔案")
-                target = app.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                    ContentValues().apply {
-                        put(MediaStore.Downloads.DISPLAY_NAME, meta.name)
-                        put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
-                        put(MediaStore.Downloads.IS_PENDING, 1)
-                    }) ?: error("無法建立下載項目")
+                val destination = MediaFilePolicy.destination(meta.name)
+                val collection = when (destination.kind) {
+                    MediaKind.VIDEO -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                    MediaKind.IMAGE -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                    MediaKind.DOWNLOAD -> MediaStore.Downloads.EXTERNAL_CONTENT_URI
+                }
+                target = app.contentResolver.insert(collection, ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, meta.name)
+                    put(MediaStore.MediaColumns.MIME_TYPE, destination.mime)
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, destination.folder + "/")
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }) ?: error("無法建立接收檔案")
                 val md = MessageDigest.getInstance("SHA-256")
                 var count = 0L
                 app.contentResolver.openInputStream(source)?.use { input ->
@@ -927,13 +935,20 @@ class BackgroundTransferManager(private val app: Context) {
                     "SHA-256 不一致"
                 }
                 app.contentResolver.update(target!!, ContentValues().apply {
-                    put(MediaStore.Downloads.IS_PENDING, 0)
+                    put(MediaStore.MediaColumns.IS_PENDING, 0)
                 }, null, null)
+                // A matching SHA-256 proves byte-for-byte transport, not that
+                // the receiver has a decoder for the video stream inside MP4.
+                val playbackNote = if (destination.kind == MediaKind.VIDEO)
+                    VideoPlaybackProbe.explain(app, target!!) else null
                 main.post {
                     control(JSONObject().put("type","file_verified").put("sid",meta.sid))
                     busy = false; offered = null; ++generation
-                    ui("✓ 已接收原始檔案：" + meta.name)
-                    visual(VisualPhase.RECEIVE_COMPLETE, "接收成功：" + meta.name)
+                    val detail = playbackNote ?: "✓ 已接收原始檔案：" + meta.name
+                    ui(detail)
+                    visual(VisualPhase.RECEIVE_COMPLETE,
+                        if (playbackNote != null) "影片原檔驗證完成 · 查看格式提示"
+                        else "接收成功：" + meta.name)
                 }
             } catch (e: Exception) {
                 try { target?.let { app.contentResolver.delete(it, null, null) } }
