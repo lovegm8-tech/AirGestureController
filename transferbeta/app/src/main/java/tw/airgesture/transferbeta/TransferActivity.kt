@@ -147,9 +147,7 @@ class TransferActivity : ComponentActivity() {
             refreshHome()
             AlertDialog.Builder(this)
                 .setTitle("確認配對")
-                .setMessage("請確認兩支手機都顯示相同數字：
-
-" + code)
+                .setMessage("請確認兩支手機都顯示相同數字：\n\n" + code)
                 .setPositiveButton("數字相同，連線") { _, _ ->
                     manager.acceptPairing(true)
                     shownPairCode = null
@@ -325,9 +323,7 @@ class TransferActivity : ComponentActivity() {
             }
         }
         root.addView(primaryAction)
-        root.addView(text("抓取：張開手掌 → 握拳
-
-接收：握拳 → 張開手掌", 16f))
+        root.addView(text("抓取：張開手掌 → 握拳\n\n接收：握拳 → 張開手掌", 16f))
         root.addView(text("完成連線後，可以直接使用相簿、影片或網頁，不必停留在 AirGrab。", 14f))
         val advancedToggle = Button(this).apply { text = "進階設定與測試  ▾" }
         root.addView(advancedToggle)
@@ -398,6 +394,8 @@ class TransferActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        normalLauncherEntry = intent.action == Intent.ACTION_MAIN &&
+            !intent.getBooleanExtra("airgrab_show_settings", false)
         consumeSharedFile(intent)
     }
 
