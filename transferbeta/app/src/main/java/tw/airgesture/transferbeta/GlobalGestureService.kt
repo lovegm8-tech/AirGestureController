@@ -34,6 +34,7 @@ import com.google.mediapipe.tasks.vision.gesturerecognizer.GestureRecognizer
 import tw.airgesture.transferbeta.core.AdaptivePowerPolicy
 import tw.airgesture.transferbeta.core.VisualEvent
 import tw.airgesture.transferbeta.core.VisualPhase
+import tw.airgesture.transferbeta.core.HandFeedbackPolicy
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
 
@@ -66,6 +67,7 @@ class GlobalGestureService : LifecycleService() {
     private lateinit var connections: BackgroundTransferManager
     private lateinit var overlay: GestureStatusOverlay
     private val power = AdaptivePowerPolicy()
+    private val handFeedback = HandFeedbackPolicy()
     private val sequence = GestureSequence(holdMillis = 240L, unknownGraceMillis = 550L)
     private val cameraExecutor = Executors.newSingleThreadExecutor()
     private var provider: ProcessCameraProvider? = null
@@ -81,6 +83,8 @@ class GlobalGestureService : LifecycleService() {
                     isScreenOn = false
                     power.screenChanged(false)
                     provider?.unbindAll()
+                    overlay.dismissHand()
+                    cameraExecutor.execute { handFeedback.reset() }
                 }
                 Intent.ACTION_SCREEN_ON -> {
                     isScreenOn = true
@@ -258,6 +262,9 @@ class GlobalGestureService : LifecycleService() {
             val handSeen = result.landmarks().firstOrNull()?.isNotEmpty() == true ||
                 shape == "Open_Palm" || shape == "Closed_Fist"
             power.observeHand(handSeen, now)
+            handFeedback.observe(handSeen, shape, now)?.let { hint ->
+                overlay.showHandFeedback(hint)
+            }
             when (sequence.accept(shape, now)) {
                 GestureSequence.Result.SEND -> {
                     overlay.showState(VisualEvent(VisualPhase.CAPTURING, "正在抓取目前內容…"))
@@ -303,6 +310,7 @@ class GlobalGestureService : LifecycleService() {
         power.setReceiverAwaiting(false)
         connections.stop()
         overlay.dismiss()
+        overlay.dismissHand()
         power.stop()
         provider?.unbindAll()
         try { unregisterReceiver(screen) } catch (_: Exception) {}
