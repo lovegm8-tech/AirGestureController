@@ -29,6 +29,7 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
     private val main = Handler(Looper.getMainLooper())
     private var pending: RunningShare? = null
     private var nextAttempt: Runnable? = null
+    private var flowTimeout: Runnable? = null
     private data class RunningShare(
         val origin: String,
         val plan: SharePlan,
@@ -61,6 +62,8 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
     }
 
     private fun clearPending() {
+        flowTimeout?.let { main.removeCallbacks(it) }
+        flowTimeout = null
         nextAttempt?.let { main.removeCallbacks(it) }
         nextAttempt = null
         pending = null
@@ -137,9 +140,23 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
             return
         }
         val now = SystemClock.uptimeMillis()
-        pending = RunningShare(pkg, plan, 1, now + 12_000, now)
+        val flow = RunningShare(pkg, plan, 1, now + 12_000, now)
+        pending = flow
+        // Accessibility events are not guaranteed after the Samsung Sharesheet
+        // appears. Ensure a definite diagnostic even if no more events arrive.
+        val watchdog = Runnable {
+            if (pending === flow) {
+                clearPending()
+                GlobalGrabBridge.result(GrabResult.Unavailable(
+                    "相簿分享選單未能自動交付照片給 AirGrab；請確認分享選單有 AirGrab，" +
+                    "或手動點選 AirGrab 測試原檔傳送"))
+            }
+        }
+        flowTimeout = watchdog
+        main.postDelayed(watchdog, 12_000L)
         if (tree.second[index].performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-            GlobalGrabBridge.result(GrabResult.ShareStarted(plan.description))
+            GlobalGrabBridge.result(GrabResult.ShareStarted(
+                "已開啟三星相簿分享選單；正在找 AirGrab（尚未取得照片原檔）"))
             schedulePendingCheck()
         } else {
             clearPending()
@@ -153,7 +170,7 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         if (now >= flow.expires) {
             clearPending()
             GlobalGrabBridge.result(GrabResult.Unavailable(
-                "分享流程已逾時；可能需要使用者手動確認格式或分享選單"))
+                "相簿分享選單等待逾時；尚未收到原始檔案，請手動選 AirGrab 測試"))
             return
         }
         if (now - flow.lastAction < 280) {
@@ -168,7 +185,8 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
             val index = ShareAutomationPolicy.onlyUniqueChooserTarget(pkg, nodes)
             if (index != null && clickable[index].performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
                 clearPending()
-                GlobalGrabBridge.result(GrabResult.ShareStarted("已選擇隔空傳檔，正在接收原 App 提供的檔案或網址"))
+                GlobalGrabBridge.result(GrabResult.ShareStarted(
+                    "已點選 AirGrab，等待三星相簿交付照片原檔（尚未送達對方）"))
                 return
             }
             // Device-specific resolver may not expose target; never guess a screen position.

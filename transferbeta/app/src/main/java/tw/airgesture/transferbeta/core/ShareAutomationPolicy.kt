@@ -102,10 +102,10 @@ object ShareAutomationPolicy {
 
     fun onlyUniqueChooserTarget(pkg: String?, nodes: List<ActionNode>): Int? {
         if (!isTrustedResolver(pkg)) return null
+        val appLabels = setOf("AirGrab", "AirGrab 隔空抓取", "隔空傳檔測試版")
         val matches = nodes.withIndex().filter { (_, n) ->
             n.visible && n.clickable && !n.password &&
-                ((n.label?.trim() in setOf("AirGrab 隔空抓取", "隔空傳檔測試版")) ||
-                 (n.hint?.trim() in setOf("AirGrab 隔空抓取", "隔空傳檔測試版")))
+                ((n.label?.trim() in appLabels) || (n.hint?.trim() in appLabels))
         }
         return matches.singleOrNull()?.index
     }

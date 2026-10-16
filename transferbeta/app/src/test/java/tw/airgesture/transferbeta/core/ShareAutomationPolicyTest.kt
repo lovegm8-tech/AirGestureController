@@ -50,6 +50,20 @@ class ShareAutomationPolicyTest {
         val nodes=listOf(ActionNode(null, "AirGrab 隔空抓取", clickable=true))
         assertEquals(0,ShareAutomationPolicy.onlyUniqueChooserTarget("android",nodes))
     }
+    @Test fun samsungSharesheetCanExposeShortAppName() {
+        val nodes = listOf(ActionNode(null, "AirGrab", clickable = true))
+        assertEquals(0, ShareAutomationPolicy.onlyUniqueChooserTarget(
+            "com.samsung.android.app.sharelive", nodes))
+        assertNull(ShareAutomationPolicy.onlyUniqueChooserTarget(
+            "com.sec.android.gallery3d", nodes))
+    }
+    @Test fun galleryShareEntryRecognized() {
+        val plan = ShareAutomationPolicy.plan("com.sec.android.gallery3d")!!
+        assertEquals(GrabKind.PHOTO, plan.kind)
+        assertEquals(0, ShareAutomationPolicy.match(plan.steps.first(), listOf(
+            ActionNode("com.sec.android.gallery3d:id/share", null, clickable = true),
+            ActionNode(null, "編輯", clickable = true))))
+    }
     @Test fun chooserAmbiguousMeansNoClick() {
         val n=ActionNode(null, "隔空傳檔測試版", clickable=true)
         assertNull(ShareAutomationPolicy.onlyUniqueChooserTarget("android", listOf(n,n)))
