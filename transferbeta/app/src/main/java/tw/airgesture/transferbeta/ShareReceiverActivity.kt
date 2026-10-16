@@ -42,6 +42,7 @@ class ShareReceiverActivity : Activity() {
 
     private fun notifyAndFinish(message: String) {
         main.post {
+            GlobalGestureService.transfer?.reportCaptureFailure(message)
             if (!isFinishing) {
                 Toast.makeText(applicationContext, message, Toast.LENGTH_SHORT).show()
                 finish()
@@ -68,16 +69,15 @@ class ShareReceiverActivity : Activity() {
             incoming.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
         } else incoming.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri
 
-        // Deliberately support exactly one original file or one unambiguous link.
-        val candidates = listOfNotNull(stream, incoming.clipData?.getItemAt(0)?.uri)
-        val uri = candidates.firstOrNull { it.scheme == "content" }
-        val uriCount = incoming.clipData?.itemCount ?: 0
+        // ACTION_SEND's EXTRA_STREAM is authoritative: Samsung Gallery may add
+        // auxiliary ClipData entries (including previews) for one selected photo.
+        val clipUris = (0 until (incoming.clipData?.itemCount ?: 0))
+            .map { incoming.clipData?.getItemAt(it)?.uri }
+        val chosen = ShareEntryPolicy.chooseSingleOriginal(
+            incoming.action, stream?.toString(), clipUris.map { it?.toString() })
+        val uri = chosen?.let(Uri::parse)
         if (uri != null) {
-            if (!ShareEntryPolicy.validItemCount(uriCount) ||
-                !ShareEntryPolicy.allowedFileScheme(uri.scheme)) {
-                notifyAndFinish("目前一次只能隔空抓取一個原始檔案")
-                return
-            }
+            transfer.reportShareStarted("三星相簿已交付照片 · 正在讀取原始檔…")
             handling = true
             io.execute {
                 var staged: File? = null
@@ -112,6 +112,7 @@ class ShareReceiverActivity : Activity() {
                     main.post {
                         val ready = GlobalGestureService.transfer
                         if (GlobalGestureService.isActive && ready?.isConnected == true) {
+                            ready.reportShareStarted("已取得三星相簿原檔 · 正在建立接收請求")
                             ready.offerFile(candidate, safe)
                             // Ownership transferred to background transport; do not delete here.
                             staged = null
@@ -133,7 +134,7 @@ class ShareReceiverActivity : Activity() {
             if (url != null) {
                 transfer.offerLink(url)
                 finish()
-            } else notifyAndFinish("未取得可傳送的原始檔案或唯一網址")
+            } else notifyAndFinish("相簿沒有交付單一可讀取原始檔或網址；請檢查分享入口")
         }
     }
 

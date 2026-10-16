@@ -613,9 +613,15 @@ class BackgroundTransferManager(private val app: Context) {
     }
 
     fun offerFile(candidate: File, originalName: String) {
-        if (!connected || busy) { ui("無法傳送：未連線或正在傳送"); return }
+        if (!connected || busy) {
+            ui("無法傳送：未連線或正在傳送")
+            visual(VisualPhase.FAILURE, "原檔已取得，但連線忙碌或已斷線")
+            return
+        }
         if (!candidate.isFile || candidate.length() > TransferPolicy.MAX_BYTES) {
-            ui("檔案不存在或超過 256MB"); return
+            ui("檔案不存在或超過 256MB")
+            visual(VisualPhase.FAILURE, "原始檔案無法傳送：檔案不存在或太大")
+            return
         }
         val name = TransferPolicy.safeName(originalName)
             ?: run { ui("檔案名稱無效"); return }
@@ -646,7 +652,11 @@ class BackgroundTransferManager(private val app: Context) {
                     }, TransferPolicy.OFFER_TIMEOUT_MS)
                 }
             } catch (e: Exception) {
-                main.post { busy = false; ui("無法讀取原始檔案：" + e.message) }
+                main.post {
+                    busy = false
+                    ui("無法讀取原始檔案：" + e.message)
+                    visual(VisualPhase.FAILURE, "無法讀取原始檔案")
+                }
             }
         }
     }
