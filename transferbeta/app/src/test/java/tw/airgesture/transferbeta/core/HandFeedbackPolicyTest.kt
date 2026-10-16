@@ -1,0 +1,41 @@
+package tw.airgesture.transferbeta.core
+
+import org.junit.Assert.*
+import org.junit.Test
+
+class HandFeedbackPolicyTest {
+    @Test fun distinguishesHandFromRecognizedGesture() {
+        val p = HandFeedbackPolicy()
+        assertEquals(HandHint.HAND_SEEN, p.observe(true, "", 1000))
+        assertEquals(HandHint.OPEN_PALM, p.observe(true, "Open_Palm", 1120))
+        assertEquals(HandHint.CLOSED_FIST, p.observe(true, "Closed_Fist", 1240))
+    }
+    @Test fun throttlesRepeatedResultsWithoutHidingExistingBadge() {
+        val p = HandFeedbackPolicy()
+        assertEquals(HandHint.OPEN_PALM, p.observe(true, "Open_Palm", 1000))
+        assertNull(p.observe(true, "Open_Palm", 1100))
+        assertNull(p.observe(true, "Open_Palm", 1600))
+        assertEquals(HandHint.OPEN_PALM, p.observe(true, "Open_Palm", 1760))
+    }
+    @Test fun briefTrackingGapDoesNotBlink() {
+        val p = HandFeedbackPolicy()
+        p.observe(true, "Open_Palm", 1000)
+        assertNull(p.observe(false, "", 1150))
+        assertNull(p.observe(false, "", 2400))
+        assertEquals(HandHint.NONE, p.observe(false, "", 2500))
+        assertNull(p.observe(false, "", 2600))
+    }
+    @Test fun stopsWhenHandDisappearsAndCanDetectAgain() {
+        val p = HandFeedbackPolicy()
+        p.observe(true, "Closed_Fist", 1000)
+        assertEquals(HandHint.NONE, p.observe(false, "", 2600))
+        assertEquals(HandHint.OPEN_PALM, p.observe(true, "Open_Palm", 3100))
+        p.reset()
+        assertEquals(HandHint.HAND_SEEN, p.observe(true, "Other", 4200))
+    }
+    @Test fun noHandAtStartupProducesNoSpam() {
+        val p = HandFeedbackPolicy()
+        assertNull(p.observe(false, "", 1000))
+        assertNull(p.observe(false, "", 2500))
+    }
+}
