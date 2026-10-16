@@ -64,6 +64,17 @@ class ShareReceiverActivity : Activity() {
             notifyAndFinish("AirGrab 尚未連線，請先開啟隔空抓取再分享")
             return
         }
+        // Browser Sharesheets can attach incidental ClipData previews alongside
+        // the genuine URL. Explicit text/plain with one safe HTTPS link is a
+        // web link, not a photo/document even when ClipData carries a URI.
+        val sharedText = incoming.getStringExtra(Intent.EXTRA_TEXT)
+            ?: incoming.clipData?.getItemAt(0)?.text?.toString()
+        val safeLink = SharedTextPolicy.onlyWebLink(sharedText)
+        if (incoming.type?.startsWith("text/") == true && safeLink != null) {
+            transfer.offerLink(safeLink)
+            finish()
+            return
+        }
         @Suppress("DEPRECATION")
         val stream = if (Build.VERSION.SDK_INT >= 33) {
             incoming.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
@@ -128,13 +139,10 @@ class ShareReceiverActivity : Activity() {
                 }
             }
         } else {
-            val text = incoming.getStringExtra(Intent.EXTRA_TEXT)
-                ?: incoming.clipData?.getItemAt(0)?.text?.toString()
-            val url = SharedTextPolicy.onlyWebLink(text)
-            if (url != null) {
-                transfer.offerLink(url)
+            if (safeLink != null) {
+                transfer.offerLink(safeLink)
                 finish()
-            } else notifyAndFinish("相簿沒有交付單一可讀取原始檔或網址；請檢查分享入口")
+            } else notifyAndFinish("分享來源沒有提供唯一有效網址或原始檔；請檢查分享入口")
         }
     }
 
