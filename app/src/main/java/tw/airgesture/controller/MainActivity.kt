@@ -37,6 +37,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var cursorRange: Spinner
     private lateinit var pointerDwell: Spinner
     private lateinit var longFistDuration: Spinner
+    private lateinit var animatedHandFeedback: Switch
     private lateinit var tiltedPalmAssist: Switch
     private lateinit var fastSwipeAssist: Switch
     private lateinit var screenWake: Switch
@@ -92,7 +93,14 @@ class MainActivity : ComponentActivity() {
         label("操作對照", 19f, true)
         label("✋ 張掌向上移動 → 螢幕向上滑\n✋ 張掌向下移動 → 螢幕向下滑\n✋ 張掌向右移動 → 左邊緣右滑返回\n☝️ 只伸食指 → 控制懸浮游標，停穩所選秒數點擊\n✊ 張掌後短握拳 → 單擊中央；YouTube 長握拳 → 播放／暫停", 16f)
         label("重複操作：手掌停穩約 0.5 秒即可準備下一次手勢。食指點擊後需移動到新位置，避免停留時連點。", 13f)
-        label("懸浮辨識燈：灰色＝未看到張掌、綠色＝已抓到張掌、藍色閃一下＝已觸發操作。指示燈不會擋住點擊。", 13f)
+        label("辨識提示：手部進入畫面會顯示狀態動畫；沒有手時縮回小圓點。提示不阻擋螢幕點擊。", 13f)
+        animatedHandFeedback = Switch(this).apply {
+            text = "顯示手部辨識動畫（建議）"
+            isChecked = Settings.animatedHandFeedback(this@MainActivity)
+            textSize = 16f
+        }
+        content.addView(animatedHandFeedback, LinearLayout.LayoutParams(-1, dip(54)))
+        label("預設開啟：已偵測到手、張掌已辨識、握拳已辨識、食指游標辨識；點擊或滑動成功時短暫顯示執行提示。關閉可改回舊版簡潔小圓點。", 13f)
 
         label("食指游標停穩點擊時間", 19f, true)
         pointerDwell = Spinner(this)
@@ -194,7 +202,7 @@ class MainActivity : ComponentActivity() {
         cooldownText.text = "操作冷卻時間：${500 + cooldown.progress * 100} 毫秒"
         content.addView(cooldown, LinearLayout.LayoutParams(-1, dip(48)))
         button("儲存設定") {
-            Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition, cursorRange.selectedItemPosition, tiltedPalmAssist.isChecked, fastSwipeAssist.isChecked, screenWake.isChecked, wakePowerMode.selectedItemPosition, pointerDwell.selectedItemPosition, longFistDuration.selectedItemPosition)
+            Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition, cursorRange.selectedItemPosition, tiltedPalmAssist.isChecked, fastSwipeAssist.isChecked, screenWake.isChecked, wakePowerMode.selectedItemPosition, pointerDwell.selectedItemPosition, longFistDuration.selectedItemPosition, animatedHandFeedback.isChecked)
             toast("已儲存；重新啟動辨識後生效")
         }
         label("隱私：App 不要求網路權限，影像只在本機暫時分析，不會錄影或上傳。\n啟動後可從通知列隨時停止前鏡頭。", 13f)
@@ -222,7 +230,7 @@ class MainActivity : ComponentActivity() {
 
     private fun startControl() {
         if (!GestureAccessibilityService.isReady()) { toast("無障礙服務尚未啟用"); return }
-        Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition, cursorRange.selectedItemPosition, tiltedPalmAssist.isChecked, fastSwipeAssist.isChecked, screenWake.isChecked, wakePowerMode.selectedItemPosition, pointerDwell.selectedItemPosition, longFistDuration.selectedItemPosition)
+        Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition, cursorRange.selectedItemPosition, tiltedPalmAssist.isChecked, fastSwipeAssist.isChecked, screenWake.isChecked, wakePowerMode.selectedItemPosition, pointerDwell.selectedItemPosition, longFistDuration.selectedItemPosition, animatedHandFeedback.isChecked)
         val intent = Intent(this, CameraGestureService::class.java).setAction(CameraGestureService.START)
         try {
             ContextCompat.startForegroundService(this, intent)
