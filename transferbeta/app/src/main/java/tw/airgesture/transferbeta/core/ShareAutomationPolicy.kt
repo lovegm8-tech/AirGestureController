@@ -28,7 +28,9 @@ data class ActionNode(
     val clickable: Boolean = false,
     val password: Boolean = false,
     val visible: Boolean = true,
-    val depth: Int = 0
+    val depth: Int = 0,
+    val texts: List<String> = emptyList(),
+    val ids: List<String> = emptyList()
 )
 
 object ShareAutomationPolicy {
@@ -80,6 +82,12 @@ object ShareAutomationPolicy {
         else -> null
     }
 
+    private fun labels(node: ActionNode): List<String> =
+        listOfNotNull(node.label, node.hint) + node.texts
+
+    private fun ids(node: ActionNode): List<String> =
+        listOfNotNull(node.id) + node.ids
+
     /** Browser share controls are usually inside a toolbar overflow menu, not
      * directly on the page. Match known menu controls only; never guess XY. */
     fun browserOverflow(nodes: List<ActionNode>): Int? {
@@ -89,8 +97,8 @@ object ShareAutomationPolicy {
             ":id/overflow_menu", ":id/menu_button_wrapper", ":id/toolbar_menu_button")
         return nodes.withIndex().filter { (_, n) ->
             n.visible && n.clickable && !n.password &&
-                (ids.any { n.id?.lowercase()?.endsWith(it) == true } ||
-                 listOfNotNull(n.label, n.hint).any { it.trim().lowercase() in labels })
+                (ids.any { suffix -> ids(n).any { it.lowercase().endsWith(suffix) } } ||
+                 labels(n).any { it.trim().lowercase() in labels })
         }.singleOrNull()?.index
     }
 
@@ -99,8 +107,8 @@ object ShareAutomationPolicy {
             node.visible && node.clickable && !node.password &&
                 (
                     step.preferredIds.any { suffix ->
-                        node.id?.lowercase()?.endsWith(suffix.lowercase()) == true
-                    } || listOfNotNull(node.label, node.hint).any { text ->
+                        ids(node).any { it.lowercase().endsWith(suffix.lowercase()) }
+                    } || labels(node).any { text ->
                         val label = text.trim().lowercase()
                         step.tokens.any { key -> label == key || label.startsWith("$key ") }
                     }
@@ -117,10 +125,11 @@ object ShareAutomationPolicy {
 
     fun onlyUniqueChooserTarget(pkg: String?, nodes: List<ActionNode>): Int? {
         if (!isTrustedResolver(pkg)) return null
-        val appLabels = setOf("AirGrab", "AirGrab 隔空抓取", "隔空傳檔測試版")
+        val appLabels = setOf("airgrab", "airgrab 隔空抓取",
+            "airgrab｜隔空抓取", "隔空抓取", "隔空傳檔測試版")
         val matches = nodes.withIndex().filter { (_, n) ->
             n.visible && n.clickable && !n.password &&
-                ((n.label?.trim() in appLabels) || (n.hint?.trim() in appLabels))
+                labels(n).any { it.trim().lowercase() in appLabels }
         }
         return matches.singleOrNull()?.index
     }
