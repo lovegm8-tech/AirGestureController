@@ -14,6 +14,8 @@ import android.view.WindowManager
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import tw.airgesture.controller.core.GestureDecisionEngine
+import tw.airgesture.controller.core.HandVisualState
+import tw.airgesture.controller.core.Settings
 import tw.airgesture.controller.core.PointerDwellEngine
 import tw.airgesture.controller.core.WakeDiagnosticLog
 
@@ -32,20 +34,23 @@ class GestureAccessibilityService : AccessibilityService() {
         fun showIndicator() {
             current?.let { service -> service.mainHandler.post {
                 if (current === service) {
-                    if (service.indicator == null) service.indicator = HandIndicator(service)
+                    if (service.indicator == null) service.indicator = HandIndicator(
+                        service, Settings.animatedHandFeedback(service)
+                    )
                     service.indicator?.show()
                 }
             } }
         }
-        fun handDetected(open: Boolean) {
+        fun handStateChanged(state: HandVisualState) {
             current?.let { service -> service.mainHandler.post {
-                if (current === service) service.indicator?.update(open)
+                if (current === service) service.indicator?.update(state)
             } }
         }
         fun hideIndicator() {
             current?.let { service -> service.mainHandler.post {
                 if (current === service) {
                     service.indicator?.hide()
+                    service.indicator = null // Re-read display setting when service restarts.
                     service.cursor?.hide()
                 }
             } }
