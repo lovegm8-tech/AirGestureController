@@ -41,7 +41,8 @@ object ShareAutomationPolicy {
 
     fun plan(pkg: String?): SharePlan? = when(pkg) {
         "com.android.chrome", "com.sec.android.app.sbrowser",
-        "com.brave.browser", "com.microsoft.emmx", "org.mozilla.firefox" ->
+        "com.brave.browser", "com.microsoft.emmx", "org.mozilla.firefox",
+        "com.google.android.googlequicksearchbox" ->
             SharePlan(GrabKind.BROWSER, WantedResult.LINK,
                 listOf(step(shareWords, ":id/share", ":id/action_share")),
                 description = "網址欄不提供完整網址時，改由瀏覽器分享")
@@ -79,16 +80,30 @@ object ShareAutomationPolicy {
         else -> null
     }
 
+    /** Browser share controls are usually inside a toolbar overflow menu, not
+     * directly on the page. Match known menu controls only; never guess XY. */
+    fun browserOverflow(nodes: List<ActionNode>): Int? {
+        val labels = setOf("更多", "更多選項", "選單", "主選單", "more",
+            "more options", "menu", "open menu", "customize and control google chrome")
+        val ids = listOf(":id/menu_button", ":id/menu_btn", ":id/action_menu",
+            ":id/overflow_menu", ":id/menu_button_wrapper", ":id/toolbar_menu_button")
+        return nodes.withIndex().filter { (_, n) ->
+            n.visible && n.clickable && !n.password &&
+                (ids.any { n.id?.lowercase()?.endsWith(it) == true } ||
+                 listOfNotNull(n.label, n.hint).any { it.trim().lowercase() in labels })
+        }.singleOrNull()?.index
+    }
+
     fun match(step: ShareStep, nodes: List<ActionNode>): Int? {
         val matches = nodes.withIndex().filter { (_, node) ->
             node.visible && node.clickable && !node.password &&
                 (
                     step.preferredIds.any { suffix ->
                         node.id?.lowercase()?.endsWith(suffix.lowercase()) == true
-                    } || (node.label ?: node.hint)?.let { text ->
+                    } || listOfNotNull(node.label, node.hint).any { text ->
                         val label = text.trim().lowercase()
                         step.tokens.any { key -> label == key || label.startsWith("$key ") }
-                    } == true
+                    }
                 )
         }
         // Unambiguous selection only; some screens show a share for every list item.

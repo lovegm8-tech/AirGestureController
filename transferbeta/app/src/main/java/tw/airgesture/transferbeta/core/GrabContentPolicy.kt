@@ -14,12 +14,20 @@ sealed class GrabChoice {
 object GrabContentPolicy {
     private val browserPackages = setOf(
         "com.android.chrome", "com.sec.android.app.sbrowser", "com.brave.browser",
-        "com.microsoft.emmx", "org.mozilla.firefox"
+        "com.microsoft.emmx", "org.mozilla.firefox",
+        "com.google.android.googlequicksearchbox"
     )
     private val addressIdSuffixes = listOf(
         ":id/url_bar", ":id/location_bar", ":id/location_bar_edit_text",
-        ":id/mozac_browser_toolbar_url_view", ":id/url_view"
+        ":id/mozac_browser_toolbar_url_view", ":id/url_view",
+        ":id/omnibox", ":id/search_box_text", ":id/url_bar_entry",
+        ":id/url_bar_text", ":id/url_edit_text", ":id/url_edit"
     )
+
+    fun isBrowser(packageName: String?): Boolean = packageName in browserPackages
+
+    fun isAddressId(id: String?): Boolean =
+        addressIdSuffixes.any { suffix -> id?.lowercase()?.endsWith(suffix) == true }
 
     fun safeWebUrl(text: String?): String? {
         val s = text?.trim()?.takeIf { it.length in 12..2048 } ?: return null
@@ -32,10 +40,10 @@ object GrabContentPolicy {
     }
 
     fun decide(packageName: String?, nodes: List<VisibleText>): GrabChoice {
-        if (packageName in browserPackages) {
+        if (isBrowser(packageName)) {
             for (node in nodes.take(180)) {
                 if (node.password) continue
-                if (addressIdSuffixes.any { node.viewId?.endsWith(it) == true }) {
+                if (isAddressId(node.viewId)) {
                     safeWebUrl(node.text)?.let { return GrabChoice.Link(it) }
                 }
             }

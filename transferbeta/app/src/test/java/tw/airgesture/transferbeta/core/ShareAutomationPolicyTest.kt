@@ -4,6 +4,29 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ShareAutomationPolicyTest {
+    @Test fun knownOverflowAllowsNestedBrowserShare() {
+        val nodes = listOf(
+            ActionNode("com.android.chrome:id/menu_button", null, clickable = true),
+            ActionNode(null, "網址", clickable = true))
+        assertEquals(0, ShareAutomationPolicy.browserOverflow(nodes))
+        assertNull(ShareAutomationPolicy.browserOverflow(listOf(
+            ActionNode(null, "不明選單", clickable = true))))
+        assertEquals(0, ShareAutomationPolicy.browserOverflow(listOf(
+            ActionNode(null, "Customize and control Google Chrome", clickable = true))))
+    }
+    @Test fun googleSearchAppHasBrowserSharePlan() {
+        assertEquals(GrabKind.BROWSER,
+            ShareAutomationPolicy.plan("com.google.android.googlequicksearchbox")!!.kind)
+        assertTrue(GrabContentPolicy.isBrowser("com.google.android.googlequicksearchbox"))
+    }
+    @Test fun browserAddressControlCanReadUrl() {
+        assertTrue(GrabContentPolicy.isAddressId("com.android.chrome:id/url_bar"))
+        assertTrue(GrabContentPolicy.isAddressId("com.sec.android.app.sbrowser:id/location_bar"))
+        assertFalse(GrabContentPolicy.isAddressId("com.android.chrome:id/search_results"))
+        val result = GrabContentPolicy.decide("com.android.chrome", listOf(
+            VisibleText("com.android.chrome:id/url_bar", "https://example.com/test?x=1")))
+        assertEquals("https://example.com/test?x=1", (result as GrabChoice.Link).url)
+    }
     @Test fun browserCanUseOfficialShareIfAddressBarNotReadable() {
         val plan=ShareAutomationPolicy.plan("com.android.chrome")!!
         assertEquals(GrabKind.BROWSER,plan.kind)

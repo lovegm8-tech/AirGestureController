@@ -30,6 +30,8 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
     private var pending: RunningShare? = null
     private var nextAttempt: Runnable? = null
     private var flowTimeout: Runnable? = null
+    private var browserCapture: BrowserCapture? = null
+    private data class BrowserCapture(val origin: String, val expiry: Long)
     private data class RunningShare(
         val origin: String,
         val plan: SharePlan,
@@ -45,7 +47,7 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         // Expensive node traversal only while a bounded, user-initiated share is pending.
-        if (event == null || pending == null) return
+        if (event == null || (pending == null && browserCapture == null)) return
         if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
             event.eventType != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
             event.eventType != AccessibilityEvent.TYPE_WINDOWS_CHANGED) return
@@ -56,7 +58,10 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
 
     private fun schedulePendingCheck() {
         if (nextAttempt != null) return
-        val call = Runnable { nextAttempt = null; advanceFlow() }
+        val call = Runnable {
+            nextAttempt = null
+            if (browserCapture != null) advanceBrowserCapture() else advanceFlow()
+        }
         nextAttempt = call
         main.postDelayed(call, 320)
     }
@@ -67,6 +72,7 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         nextAttempt?.let { main.removeCallbacks(it) }
         nextAttempt = null
         pending = null
+        browserCapture = null
     }
 
     private fun collect(root: AccessibilityNodeInfo?): Pair<List<ActionNode>, List<AccessibilityNodeInfo>> {
@@ -109,6 +115,58 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         return Pair(nodes, clickable)
     }
 
+    private fun readable(root: AccessibilityNodeInfo?): List<VisibleText> {
+        if (root == null) return emptyList()
+        val found = ArrayList<VisibleText>()
+        val queue = ArrayDeque<Pair<AccessibilityNodeInfo, Int>>()
+        queue.add(root to 0)
+        while (queue.isNotEmpty() && found.size < 240) {
+            val (node, depth) = queue.removeFirst()
+            if (node.isVisibleToUser && !node.isPassword) {
+                val text = node.text?.toString() ?: node.contentDescription?.toString()
+                if (!text.isNullOrBlank()) {
+                    found.add(VisibleText(node.viewIdResourceName, text))
+                }
+            }
+            if (depth < 18) for (i in 0 until node.childCount) {
+                node.getChild(i)?.let { queue.add(it to (depth + 1)) }
+            }
+        }
+        return found
+    }
+
+    private fun completeBrowserCapture() {
+        val capture = browserCapture ?: return
+        browserCapture = null
+        nextAttempt?.let { main.removeCallbacks(it) }
+        nextAttempt = null
+        // Only close an address editor that AirGrab itself opened. Never press
+        // Back from an arbitrary browser screen or guess a destination URL.
+        performGlobalAction(GLOBAL_ACTION_BACK)
+        main.postDelayed({
+            val root = rootInActiveWindow
+            if (root?.packageName?.toString() == capture.origin) beginShare(capture.origin, root)
+            else GlobalGrabBridge.result(GrabResult.Unavailable(
+                "無法讀取完整網址；請保持瀏覽器頁面開啟後重試"))
+        }, 480L)
+    }
+
+    private fun advanceBrowserCapture() {
+        val capture = browserCapture ?: return
+        val root = rootInActiveWindow
+        if (root != null && root.packageName?.toString() == capture.origin) {
+            val result = GrabContentPolicy.decide(capture.origin, readable(root))
+            if (result is GrabChoice.Link) {
+                clearPending()
+                performGlobalAction(GLOBAL_ACTION_BACK)
+                GlobalGrabBridge.result(GrabResult.Link(result.url))
+                return
+            }
+        }
+        if (SystemClock.uptimeMillis() >= capture.expiry) completeBrowserCapture()
+        else schedulePendingCheck()
+    }
+
     fun grabVisibleContent() {
         clearPending()
         val root = rootInActiveWindow
@@ -119,7 +177,7 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
             return
         }
         val tree = collect(root)
-        val plainText = tree.first.map { VisibleText(it.id, it.label ?: it.hint, it.password) }
+        val plainText = readable(root)
         when (val decision = GrabContentPolicy.decide(pkg, plainText)) {
             is GrabChoice.Link -> {
                 GlobalGrabBridge.result(GrabResult.Link(decision.url))
@@ -127,20 +185,50 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
             }
             else -> Unit
         }
+        if (GrabContentPolicy.isBrowser(pkg)) {
+            // Chromium/Samsung often show only the host in the address pill.
+            // Clicking the known address control exposes a complete URL in its
+            // edit field. This is initiated only by the user's grab gesture.
+            val addresses = tree.first.withIndex().filter { (_, node) ->
+                node.visible && node.clickable && !node.password &&
+                    GrabContentPolicy.isAddressId(node.id)
+            }
+            val index = addresses.singleOrNull()?.index
+            if (index != null && tree.second[index].performAction(
+                    AccessibilityNodeInfo.ACTION_CLICK)) {
+                val now = SystemClock.uptimeMillis()
+                browserCapture = BrowserCapture(pkg, now + 1800L)
+                GlobalGrabBridge.result(GrabResult.ShareStarted(
+                    "正在讀取瀏覽器完整網址…"))
+                schedulePendingCheck()
+                return
+            }
+        }
+        beginShare(pkg, root)
+    }
+
+    private fun beginShare(pkg: String, root: AccessibilityNodeInfo) {
+        val tree = collect(root)
         val plan = ShareAutomationPolicy.plan(pkg)
         if (plan == null) {
             GlobalGrabBridge.result(GrabResult.Unavailable(
                 "此 App 目前無已驗證的分享規則；請用分享選單或手動選取原檔。"))
             return
         }
-        val index = ShareAutomationPolicy.match(plan.steps.first(), tree.first)
+        val direct = ShareAutomationPolicy.match(plan.steps.first(), tree.first)
+        val menu = if (direct == null && GrabContentPolicy.isBrowser(pkg))
+            ShareAutomationPolicy.browserOverflow(tree.first) else null
+        val index = direct ?: menu
         if (index == null) {
             GlobalGrabBridge.result(GrabResult.Unavailable(
-                "在目前畫面找不到唯一的「分享」入口；未執行自動點擊。"))
+                if (GrabContentPolicy.isBrowser(pkg))
+                    "瀏覽器目前沒有可讀取的完整網址，也找不到可信任的分享選項；請在網址列開啟完整網址後重試"
+                else "在目前畫面找不到唯一的「分享」入口；未執行自動點擊。"))
             return
         }
         val now = SystemClock.uptimeMillis()
-        val flow = RunningShare(pkg, plan, 1, now + 12_000, now)
+        val flow = RunningShare(pkg, plan, if (direct != null) 1 else 0,
+            now + 12_000, now)
         pending = flow
         // Accessibility events are not guaranteed after the Samsung Sharesheet
         // appears. Ensure a definite diagnostic even if no more events arrive.
@@ -148,7 +236,9 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
             if (pending === flow) {
                 clearPending()
                 GlobalGrabBridge.result(GrabResult.Unavailable(
-                    "相簿分享選單未能自動交付照片給 AirGrab；請確認分享選單有 AirGrab，" +
+                    if (GrabContentPolicy.isBrowser(pkg))
+                    "瀏覽器分享選單尚未把連結交給 AirGrab；請確認分享介面有 AirGrab"
+                else "相簿分享選單未能自動交付照片給 AirGrab；請確認分享選單有 AirGrab，" +
                     "或手動點選 AirGrab 測試原檔傳送"))
             }
         }
@@ -156,7 +246,10 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         main.postDelayed(watchdog, 12_000L)
         if (tree.second[index].performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
             GlobalGrabBridge.result(GrabResult.ShareStarted(
-                "已開啟三星相簿分享選單；正在找 AirGrab（尚未取得照片原檔）"))
+                if (GrabContentPolicy.isBrowser(pkg))
+                    if (direct != null) "已開啟瀏覽器分享 · 正在找 AirGrab"
+                    else "已展開瀏覽器選單 · 正在找分享功能"
+                else "已開啟三星相簿分享選單；正在找 AirGrab（尚未取得照片原檔）"))
             schedulePendingCheck()
         } else {
             clearPending()
@@ -170,7 +263,9 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         if (now >= flow.expires) {
             clearPending()
             GlobalGrabBridge.result(GrabResult.Unavailable(
-                "相簿分享選單等待逾時；尚未收到原始檔案，請手動選 AirGrab 測試"))
+                if (GrabContentPolicy.isBrowser(flow.origin))
+                    "網頁連結分享逾時；未能把連結交給 AirGrab"
+                else "相簿分享選單等待逾時；尚未收到原始檔案，請手動選 AirGrab 測試"))
             return
         }
         if (now - flow.lastAction < 280) {
