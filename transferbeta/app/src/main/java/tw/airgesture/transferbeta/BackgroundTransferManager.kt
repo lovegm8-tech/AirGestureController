@@ -18,6 +18,8 @@ import com.google.android.gms.nearby.connection.*
 import org.json.JSONObject
 import tw.airgesture.transferbeta.core.GrabContentPolicy
 import tw.airgesture.transferbeta.core.TransferPolicy
+import tw.airgesture.transferbeta.core.PeerIdentityProtocol
+import java.security.KeyPair
 import tw.airgesture.transferbeta.core.VisualEvent
 import tw.airgesture.transferbeta.core.VisualPhase
 import java.io.File
@@ -36,7 +38,9 @@ class BackgroundTransferManager(private val app: Context) {
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
     private val client = Nearby.getConnectionsClient(app)
-    private val service = "tw.airgesture.transferbeta.p2p.v1"
+    // v2 never accidentally negotiates with a previous non-authenticated beta.
+    private val service = "tw.airgesture.transferbeta.p2p.v2"
+    private val trusted = TrustedPeerStore(app)
     private val deviceId: String by lazy {
         val pref = app.getSharedPreferences("device", Context.MODE_PRIVATE)
         pref.getString("id", null) ?: UUID.randomUUID().toString().take(12).also {
@@ -67,7 +71,191 @@ class BackgroundTransferManager(private val app: Context) {
         private set
     var pendingDigits: String? = null
         private set
+
     private var awaitingPair: String? = null
+    private var peerHint: String? = null
+    private var manualNumericApproved = false
+    private var authPending = false
+    private var localNonce: String? = null
+    private var peerNonce: String? = null
+    private var localPublic: String? = null
+    private var peerPublic: String? = null
+    private var peerProof: String? = null
+    private var identityKeyPair: KeyPair? = null
+    private var authRound = 0
+
+    val rememberedDeviceId: String? get() = trusted.trustedId()
+    fun forgetTrustedDevice() {
+        val old = trusted.trustedId()
+        trusted.forget()
+        ui(if (old != null) "已清除信任裝置，下次須重新確認配對數字" else "目前沒有記住的裝置")
+        if (endpoint != null) {
+            client.stopAllEndpoints()
+            endpoint = null
+            connected = false
+            onConnectionState?.invoke(false)
+            resetAuthentication()
+            if (started) main.postDelayed({ search() }, 1200)
+        }
+    }
+
+    private fun resetAuthentication() {
+        authRound++
+        manualNumericApproved = false
+        authPending = false
+        localNonce = null
+        peerNonce = null
+        localPublic = null
+        peerPublic = null
+        peerProof = null
+        identityKeyPair = null
+        peerHint = null
+    }
+
+    private fun failAuthentication(reason: String) {
+        if (endpoint == null) return
+        ui("裝置身份驗證失敗：" + reason)
+        visual(VisualPhase.FAILURE, "連線驗證失敗 · 請到進階設定確認裝置")
+        val old = endpoint
+        connected = false
+        onConnectionState?.invoke(false)
+        resetAuthentication()
+        endpoint = null
+        if (old != null) client.disconnectFromEndpoint(old)
+        if (started) main.postDelayed({ search() }, 1700L)
+    }
+
+    private fun startCryptographicAuth(id: String) {
+        if (id != endpoint) return
+        authPending = true
+        val round = ++authRound
+        ui("正在確認已配對裝置的加密身分…")
+        // Android Keystore operations stay off the UI thread.
+        worker.execute {
+            try {
+                val key = trusted.identity()
+                val pub = PeerIdentityProtocol.encodedKey(key.public)
+                val nonce = trusted.randomNonce()
+                main.post {
+                    if (!started || round != authRound || endpoint != id || !authPending) return@post
+                    identityKeyPair = key
+                    localPublic = pub
+                    localNonce = nonce
+                    control(JSONObject()
+                        .put("type", "auth_hello").put("v", PeerIdentityProtocol.PROTOCOL_VERSION)
+                        .put("id", deviceId).put("pub", pub).put("nonce", nonce))
+                    ui("已交換認證資料，正在驗證對方…")
+                }
+            } catch (_: Exception) {
+                main.post { if (round == authRound) failAuthentication("無法取得手機安全金鑰") }
+            }
+        }
+        main.postDelayed({
+            if (round == authRound && authPending && endpoint == id)
+                failAuthentication("逾時，無法確認對方身份")
+        }, 13_000)
+    }
+
+    private fun handleAuthHello(j: JSONObject) {
+        if (!authPending) return
+        if (j.optInt("v") != PeerIdentityProtocol.PROTOCOL_VERSION) {
+            failAuthentication("協定版本不符，請兩支手機更新")
+            return
+        }
+        val claimed = j.optString("id")
+        val pub = j.optString("pub")
+        val nonce = j.optString("nonce")
+        if (!PeerIdentityProtocol.validPeerId(claimed) || claimed != peerHint ||
+            claimed == deviceId || !PeerIdentityProtocol.validNonce(nonce)) {
+            failAuthentication("裝置代碼或隨機驗證碼異常")
+            return
+        }
+        try { PeerIdentityProtocol.parseKey(pub) }
+        catch (_: Exception) { failAuthentication("公鑰格式錯誤"); return }
+        val pinnedId = trusted.trustedId()
+        val pinnedKey = trusted.trustedKey()
+        if (pinnedId != null || pinnedKey != null) {
+            if (!trusted.isTrusted(claimed, pub)) {
+                failAuthentication("對方金鑰已變更，不會自動信任；請手動忘記裝置後重新配對")
+                return
+            }
+        } else if (!manualNumericApproved) {
+            failAuthentication("首次連線必須先人工確認配對數字")
+            return
+        }
+        if (peerPublic != null && (peerPublic != pub || peerNonce != nonce)) {
+            failAuthentication("同一連線重複收到不一致身份資料")
+            return
+        }
+        peerPublic = pub
+        peerNonce = nonce
+        sendLocalProof()
+        verifyRemoteProofIfReady()
+    }
+
+    private fun sendLocalProof() {
+        val otherId = peerHint ?: return
+        val otherPub = peerPublic ?: return
+        val otherNonce = peerNonce ?: return
+        val ownNonce = localNonce ?: return
+        val ownPub = localPublic ?: return
+        val key = identityKeyPair ?: return
+        worker.execute {
+            try {
+                val proof = PeerIdentityProtocol.proofMessage(
+                    deviceId, otherId, ownPub, otherPub, ownNonce, otherNonce)
+                val sig = PeerIdentityProtocol.sign(key, proof)
+                main.post {
+                    if (authPending && otherPub == peerPublic && otherNonce == peerNonce &&
+                        ownNonce == localNonce) {
+                        control(JSONObject().put("type", "auth_proof").put("sig", sig))
+                    }
+                }
+            } catch (_: Exception) {
+                main.post { if (authPending) failAuthentication("無法簽署身份挑戰") }
+            }
+        }
+    }
+
+    private fun verifyRemoteProofIfReady() {
+        if (!authPending) return
+        val signature = peerProof ?: return
+        val otherId = peerHint ?: return
+        val otherPub = peerPublic ?: return
+        val otherNonce = peerNonce ?: return
+        val ownNonce = localNonce ?: return
+        val ownPub = localPublic ?: return
+        val msg = try {
+            PeerIdentityProtocol.proofMessage(
+                otherId, deviceId, otherPub, ownPub, otherNonce, ownNonce)
+        } catch (_: Exception) {
+            failAuthentication("無效簽章資料")
+            return
+        }
+        if (!PeerIdentityProtocol.verify(otherPub, msg, signature)) {
+            failAuthentication("裝置沒有正確私鑰，已拒絕連線")
+            return
+        }
+        if (!trusted.isTrusted(otherId, otherPub)) {
+            if (!manualNumericApproved) {
+                failAuthentication("未授權的新裝置")
+                return
+            }
+            try { trusted.pinAfterVerifiedFirstPairing(otherId, otherPub) }
+            catch (_: Exception) {
+                failAuthentication("無法儲存或驗證信任裝置")
+                return
+            }
+        }
+        authPending = false
+        connected = true
+        onConnectionState?.invoke(true)
+        searchCycle++
+        client.stopAdvertising()
+        client.stopDiscovery()
+        ui("已驗證並記住這支裝置；下次自動安全重連")
+    }
+
     private sealed class Offer {
         abstract val sid: String
         data class FileOffer(
@@ -147,6 +335,7 @@ class BackgroundTransferManager(private val app: Context) {
         client.stopDiscovery(); client.stopAdvertising(); client.stopAllEndpoints()
         endpoint = null
         connected = false
+        resetAuthentication()
         busy = false
         offered = null
         clearIncomingPrompt()
@@ -162,7 +351,7 @@ class BackgroundTransferManager(private val app: Context) {
         ui("背景傳輸已停止")
     }
     private fun search() {
-        if (!started || connected || awaitingPair != null) return
+        if (!started || connected || authPending || awaitingPair != null) return
         val cycle = ++searchCycle
         client.stopDiscovery(); client.stopAdvertising()
         endpoint = null
@@ -178,18 +367,20 @@ class BackgroundTransferManager(private val app: Context) {
         // Discovery/advertising can drain power when no peer is nearby.
         // Keep confirmed connections alive, but duty-cycle searching otherwise.
         main.postDelayed({
-            if (started && !connected && awaitingPair == null && cycle == searchCycle) {
+            if (started && !connected && !authPending &&
+                awaitingPair == null && cycle == searchCycle) {
                 client.stopDiscovery(); client.stopAdvertising()
                 ui("省電搜尋間歇中；稍後自動尋找附近裝置")
                 main.postDelayed({
-                    if (started && !connected && awaitingPair == null && cycle == searchCycle)
+                    if (started && !connected && !authPending &&
+                        awaitingPair == null && cycle == searchCycle)
                         search()
                 }, searchPauseMs)
             }
         }, searchWindowMs)
     }
     fun refresh() {
-        if (!busy && awaitingPair == null && !connected) search()
+        if (!busy && !authPending && awaitingPair == null && !connected) search()
         else ui(if (connected) "裝置已連線" else "配對或傳輸仍在進行")
     }
     fun reportCaptureFailure(message: String) {
@@ -202,6 +393,7 @@ class BackgroundTransferManager(private val app: Context) {
             if (other.length == 12 && deviceId < other && endpoint == null &&
                 awaitingPair == null && !connected) {
                 endpoint = id
+                peerHint = other
                 client.requestConnection("Beta|" + deviceId, id, lifecycle)
                     .addOnFailureListener {
                         endpoint = null
@@ -214,43 +406,68 @@ class BackgroundTransferManager(private val app: Context) {
     private val lifecycle = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(id: String, info: ConnectionInfo) {
             main.post {
-                if (!started || awaitingPair != null) {
+                if (!started || (endpoint != null && endpoint != id) ||
+                    (awaitingPair != null && awaitingPair != id) || connected || authPending) {
                     client.rejectConnection(id)
+                    return@post
+                }
+                val hintedId = info.endpointName.substringAfter('|', "")
+                if (!PeerIdentityProtocol.validPeerId(hintedId) || hintedId == deviceId) {
+                    client.rejectConnection(id)
+                    ui("無效的裝置廣播識別碼")
+                    return@post
+                }
+                if (peerHint != null && peerHint != hintedId) {
+                    client.rejectConnection(id)
+                    ui("搜尋識別與連線識別不一致")
+                    return@post
+                }
+                endpoint = id
+                peerHint = hintedId
+                // A matching name only allows an attempt. It NEVER authorizes file
+                // exchange until the persisted public key signs fresh challenges.
+                if (trusted.isRecognizedHint(hintedId)) {
+                    ui("發現已記住裝置，正在驗證安全金鑰…")
+                    awaitingPair = null
+                    manualNumericApproved = false
+                    client.acceptConnection(id, payloadCallback).addOnFailureListener {
+                        failAuthentication("無法建立已記住裝置連線")
+                    }
                 } else {
-                    endpoint = id
                     awaitingPair = id
+                    manualNumericApproved = false
                     pendingDigits = info.authenticationDigits
-                    ui("新連線待確認：請在兩支手機比對數字 " + info.authenticationDigits)
+                    ui("首次安全配對：請在兩支手機確認 " + info.authenticationDigits)
                     onPairing?.invoke(info.authenticationDigits)
                     notifyPairing(info.authenticationDigits)
                 }
             }
         }
-        override fun onConnectionResult(id: String, r: ConnectionResolution) {
+        override fun onConnectionResult(id: String, result: ConnectionResolution) {
             main.post {
+                if (!started || id != endpoint) return@post
                 pendingDigits = null
                 awaitingPair = null
-                if (r.status.isSuccess) {
-                    endpoint = id
-                    connected = true
-                    onConnectionState?.invoke(true)
-                    searchCycle++
-                    client.stopAdvertising()
-                    client.stopDiscovery()
-                    ui("雙手機已安全配對；背景傳輸就緒")
-                } else {
-                    endpoint = null
+                app.getSystemService(NotificationManager::class.java).cancel(4418)
+                if (result.status.isSuccess) {
                     connected = false
-                    ui("配對失敗；請重新搜尋")
-                    main.postDelayed({ search() }, 1700)
+                    startCryptographicAuth(id)
+                } else {
+                    connected = false
+                    endpoint = null
+                    resetAuthentication()
+                    ui("安全連線未建立，稍後重新搜尋")
+                    main.postDelayed({ search() }, 1700L)
                 }
             }
         }
         override fun onDisconnected(id: String) {
             main.post {
+                if (id != endpoint) return@post
                 connected = false
                 onConnectionState?.invoke(false)
                 endpoint = null
+                resetAuthentication()
                 searchCycle++
                 busy = false
                 offered = null
@@ -258,8 +475,8 @@ class BackgroundTransferManager(private val app: Context) {
                 setReceiveArmed(false)
                 pendingDigits = null
                 awaitingPair = null
-                ui("對方已斷線；重新搜尋並重新驗證配對")
-                if (started) main.postDelayed({ search() }, 1800)
+                ui("對方已斷線，稍後自動尋找已記住裝置")
+                if (started) main.postDelayed({ search() }, 1800L)
             }
         }
     }
@@ -270,6 +487,7 @@ class BackgroundTransferManager(private val app: Context) {
             "pair_needed", "隔空抓取配對確認", NotificationManager.IMPORTANCE_HIGH))
         val open = PendingIntent.getActivity(app, 114,
             Intent(app, TransferActivity::class.java)
+                .putExtra("airgrab_show_settings", true)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         manager.notify(4418, Notification.Builder(app, "pair_needed")
@@ -284,11 +502,15 @@ class BackgroundTransferManager(private val app: Context) {
         val id = awaitingPair ?: return
         awaitingPair = null
         pendingDigits = null
-        if (yes) client.acceptConnection(id, payloadCallback)
-            .addOnFailureListener { ui("接受配對失敗：" + it.message) }
+        if (yes) {
+            manualNumericApproved = true
+            client.acceptConnection(id, payloadCallback)
+                .addOnFailureListener { failAuthentication("手動確認後仍連線失敗") }
+        }
         else {
             client.rejectConnection(id)
             endpoint = null
+            resetAuthentication()
             ui("已拒絕配對")
             main.postDelayed({ search() }, 1700)
         }
@@ -399,10 +621,24 @@ class BackgroundTransferManager(private val app: Context) {
             main.post {
                 if (id != endpoint) return@post
                 if (p.type == Payload.Type.BYTES) {
-                    try { onControl(JSONObject(String(p.asBytes() ?: return@post))) }
+                    try {
+                        val bytes = p.asBytes() ?: return@post
+                        if (bytes.size > 16_384) return@post
+                        val json = JSONObject(String(bytes, Charsets.UTF_8))
+                        when (json.optString("type")) {
+                            "auth_hello" -> handleAuthHello(json)
+                            "auth_proof" -> {
+                                if (authPending && json.optString("sig").length in 40..512) {
+                                    peerProof = json.optString("sig")
+                                    verifyRemoteProofIfReady()
+                                }
+                            }
+                            else -> if (connected) onControl(json)
+                        }
+                    }
                     catch (_: Exception) { ui("無效控制訊息已丟棄") }
                 } else if (p.type == Payload.Type.FILE) {
-                    if (offered !is Offer.FileOffer || !busy) {
+                    if (!connected || offered !is Offer.FileOffer || !busy) {
                         client.cancelPayload(p.id); return@post
                     }
                     incomingFile = p
@@ -413,7 +649,7 @@ class BackgroundTransferManager(private val app: Context) {
         }
         override fun onPayloadTransferUpdate(id: String, u: PayloadTransferUpdate) {
             main.post {
-                if (id != endpoint) return@post
+                if (id != endpoint || !connected) return@post
                 if (u.payloadId != payloadOutgoing && u.payloadId != payloadIncoming) return@post
                 val expected = offered as? Offer.FileOffer
                 if (u.payloadId == payloadIncoming && u.totalBytes > TransferPolicy.MAX_BYTES) {
