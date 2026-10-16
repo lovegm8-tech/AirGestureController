@@ -47,6 +47,21 @@ class TransferAnimationPolicyTest {
         assertTrue(TransferAnimationPolicy.isReceiver(
             VisualEvent(VisualPhase.RECEIVING, "接收端")))
     }
+    @Test fun bothSidesWaitUpToThirtySeconds() {
+        for (phase in listOf(VisualPhase.WAITING_FOR_RECEIVER,VisualPhase.OFFER_RECEIVED)) {
+            val event=VisualEvent(phase,"等待接收")
+            assertTrue(TransferAnimationPolicy.isWaiting(event))
+            assertEquals(30_000L,TransferAnimationPolicy.durationMs(event))
+            assertFalse(TransferAnimationPolicy.isSuccess(event))
+        }
+    }
+    @Test fun completedOrFailedStagesDoNotRemainPinned() {
+        for (phase in listOf(VisualPhase.RECEIVE_COMPLETE,VisualPhase.SEND_COMPLETE,VisualPhase.FAILURE)) {
+            val event=VisualEvent(phase,"完成")
+            assertFalse(TransferAnimationPolicy.isWaiting(event))
+            assertTrue(TransferAnimationPolicy.durationMs(event) < 30_000L)
+        }
+    }
     @Test fun unknownProgressClamps() {
         assertEquals(0,TransferAnimationPolicy.displayProgress(
             VisualEvent(VisualPhase.RECEIVING, "receiving", -40)))
