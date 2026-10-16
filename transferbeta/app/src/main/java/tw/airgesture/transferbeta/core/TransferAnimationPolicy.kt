@@ -28,12 +28,15 @@ object TransferAnimationPolicy {
     fun durationMs(event: VisualEvent): Long = when (event.phase) {
         VisualPhase.CAPTURING -> 1500L
         VisualPhase.CONTENT_READY -> 1400L
-        VisualPhase.WAITING_FOR_RECEIVER -> 1450L
-        VisualPhase.OFFER_RECEIVED -> 4500L
+        VisualPhase.WAITING_FOR_RECEIVER -> 30_000L
+        VisualPhase.OFFER_RECEIVED -> 30_000L
         VisualPhase.RECEIVING, VisualPhase.VERIFYING -> 4500L
         VisualPhase.SEND_COMPLETE, VisualPhase.RECEIVE_COMPLETE -> 1900L
         VisualPhase.FAILURE -> 1900L
     }
+    fun hasReceiveCountdown(phase: VisualPhase): Boolean =
+        phase == VisualPhase.WAITING_FOR_RECEIVER || phase == VisualPhase.OFFER_RECEIVED
+
     fun symbol(event: VisualEvent): String = when (event.phase) {
         VisualPhase.CAPTURING -> "◎"
         VisualPhase.CONTENT_READY -> "↗"

@@ -29,6 +29,18 @@ class TransferAnimationPolicyTest {
         assertTrue(TransferAnimationPolicy.isSuccess(
             VisualEvent(VisualPhase.SEND_COMPLETE, "對端已確認")))
     }
+    @Test fun receiveOfferStaysVisibleForThirtySeconds() {
+        for (phase in listOf(VisualPhase.WAITING_FOR_RECEIVER, VisualPhase.OFFER_RECEIVED)) {
+            assertTrue(TransferAnimationPolicy.hasReceiveCountdown(phase))
+            assertEquals(30_000L,
+                TransferAnimationPolicy.durationMs(VisualEvent(phase, "waiting")))
+        }
+    }
+    @Test fun onlyRealTransferEndsShowSuccessQuickly() {
+        assertFalse(TransferAnimationPolicy.hasReceiveCountdown(VisualPhase.RECEIVE_COMPLETE))
+        assertEquals(1900L, TransferAnimationPolicy.durationMs(
+            VisualEvent(VisualPhase.RECEIVE_COMPLETE, "success")))
+    }
     @Test fun senderReceiverPaletteShouldDiffer() {
         assertFalse(TransferAnimationPolicy.isReceiver(
             VisualEvent(VisualPhase.CONTENT_READY, "發送端")))
