@@ -24,7 +24,8 @@ class GestureCameraAnalyzer(
     options: GestureDecisionEngine.Options,
     performanceMode: Int = 1,
     angleAssistEnabled: Boolean = false,
-    pointerDwellMs: Long = 2000L
+    pointerDwellMs: Long = 2000L,
+    smartLitPower: Boolean = false
 ) : AutoCloseable {
     private val decision = GestureDecisionEngine(options)
     private val youtubeRouter = YouTubeGestureRouter(options.longFistSecondClickMs, options.longFistMaximumFrameGapMs)
@@ -32,7 +33,9 @@ class GestureCameraAnalyzer(
     private val tiltAssist = TiltedPalmAssist(angleAssistEnabled)
     private val useAngleAssist = angleAssistEnabled
     private val useFastSwipeAssist = options.fastSwipeAssistEnabled
-    private val scheduler = AdaptiveFrameScheduler(AdaptiveFrameScheduler.Mode.fromIndex(performanceMode))
+    private val scheduler = AdaptiveFrameScheduler(
+        AdaptiveFrameScheduler.Mode.fromIndex(performanceMode), smartLitPower
+    )
     private val converter = ReusableFrameConverter()
     private val recognizer: GestureRecognizer
     private val wakeTiltAssist = TiltedPalmAssist(true)
