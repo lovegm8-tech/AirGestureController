@@ -141,9 +141,21 @@ class BackgroundTransferManager(private val app: Context) {
                     identityKeyPair = key
                     localPublic = pub
                     localNonce = nonce
-                    control(JSONObject()
+                    fun hello(): JSONObject = JSONObject()
                         .put("type", "auth_hello").put("v", PeerIdentityProtocol.PROTOCOL_VERSION)
-                        .put("id", deviceId).put("pub", pub).put("nonce", nonce))
+                        .put("id", deviceId).put("pub", pub).put("nonce", nonce)
+                    control(hello())
+                    // The two Nearby onConnectionResult callbacks are not guaranteed
+                    // simultaneous. Retry the same session hello until a proof arrives.
+                    for (delayMs in listOf(450L, 1100L, 2400L, 4300L)) {
+                        main.postDelayed({
+                            if (authPending && round == authRound && endpoint == id) {
+                                control(hello())
+                            }
+                        }, delayMs)
+                    }
+                    sendLocalProof()
+                    verifyRemoteProofIfReady()
                     ui("已交換認證資料，正在驗證對方…")
                 }
             } catch (_: Exception) {
