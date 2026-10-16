@@ -14,6 +14,7 @@ object Settings {
     private const val KEY_SCREEN_WAKE_POWER = "screen_wake_power"
     private const val KEY_POINTER_DWELL = "pointer_dwell"
     private const val KEY_LONG_FIST = "long_fist"
+    private const val KEY_ANIMATED_HAND_FEEDBACK = "animated_hand_feedback"
 
     fun sensitivity(context: Context): Int = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         .getInt(KEY_SENSITIVITY, 1).coerceIn(0, 2)
@@ -65,6 +66,11 @@ object Settings {
     fun longFistMs(context: Context): Long =
         longArrayOf(500L, 700L, 1000L)[longFistIndex(context)]
 
+    /** Animated visual hand feedback does not change the model or touch rules. */
+    fun animatedHandFeedback(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_ANIMATED_HAND_FEEDBACK, true)
+
     fun save(
         context: Context,
         sensitivity: Int,
@@ -76,7 +82,8 @@ object Settings {
         screenWake: Boolean = screenWake(context),
         wakePowerMode: Int = wakePowerMode(context),
         pointerDwellIndex: Int = pointerDwellIndex(context),
-        longFistIndex: Int = longFistIndex(context)
+        longFistIndex: Int = longFistIndex(context),
+        animatedHandFeedback: Boolean = animatedHandFeedback(context)
     ) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putInt(KEY_SENSITIVITY, sensitivity.coerceIn(0, 2))
@@ -89,6 +96,7 @@ object Settings {
             .putInt(KEY_SCREEN_WAKE_POWER, wakePowerMode.coerceIn(0, 1))
             .putInt(KEY_POINTER_DWELL, pointerDwellIndex.coerceIn(0, 2))
             .putInt(KEY_LONG_FIST, longFistIndex.coerceIn(0, 2))
+            .putBoolean(KEY_ANIMATED_HAND_FEEDBACK, animatedHandFeedback)
             .apply()
     }
 
