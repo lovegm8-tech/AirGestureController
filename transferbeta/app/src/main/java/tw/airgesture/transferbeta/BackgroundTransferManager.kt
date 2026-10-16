@@ -45,6 +45,9 @@ class BackgroundTransferManager(private val app: Context) {
     }
     private var endpoint: String? = null
     private var connected = false
+    val isConnected: Boolean get() = connected
+    var onConnectionState: ((Boolean) -> Unit)? = null
+        set(value) { field = value; value?.invoke(connected) }
     private var started = false
     private var busy = false
     private var session = ""
@@ -151,6 +154,8 @@ class BackgroundTransferManager(private val app: Context) {
         pendingDigits = null
         awaitingPair = null
         onStatus = null; onPairing = null
+        onConnectionState?.invoke(false)
+        onConnectionState = null
         worker.shutdown()
         onVisualEvent = null
         onReceiverOfferState = null
@@ -228,6 +233,7 @@ class BackgroundTransferManager(private val app: Context) {
                 if (r.status.isSuccess) {
                     endpoint = id
                     connected = true
+                    onConnectionState?.invoke(true)
                     searchCycle++
                     client.stopAdvertising()
                     client.stopDiscovery()
@@ -243,6 +249,7 @@ class BackgroundTransferManager(private val app: Context) {
         override fun onDisconnected(id: String) {
             main.post {
                 connected = false
+                onConnectionState?.invoke(false)
                 endpoint = null
                 searchCycle++
                 busy = false
