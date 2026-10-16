@@ -502,13 +502,17 @@ class BackgroundTransferManager(private val app: Context) {
                 .putExtra("airgrab_show_settings", true)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        manager.notify(4418, Notification.Builder(app, "pair_needed")
-            .setSmallIcon(android.R.drawable.ic_menu_share)
-            .setContentTitle("隔空抓取：請比對配對數字")
-            .setContentText(digits + "（需兩支手機都確認）")
-            .setContentIntent(open)
-            .setAutoCancel(true)
-            .build())
+        try {
+            manager.notify(4418, Notification.Builder(app, "pair_needed")
+                .setSmallIcon(android.R.drawable.ic_menu_share)
+                .setContentTitle("隔空抓取：首次確認信任裝置")
+                .setContentText(digits + "（第一次須比對，之後使用安全金鑰）")
+                .setContentIntent(open)
+                .setAutoCancel(true)
+                .build())
+        } catch (_: SecurityException) {
+            ui("通知權限未開：請返回 AirGrab 確認首次配對數字")
+        }
     }
     fun acceptPairing(yes: Boolean) {
         val id = awaitingPair ?: return

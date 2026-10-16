@@ -359,8 +359,8 @@ class TransferActivity : ComponentActivity() {
                     AlertDialog.Builder(this)
                         .setTitle("已記住的裝置")
                         .setMessage("裝置代碼：" + id +
-                            "\\n\\n之後重新連線會用手機安全金鑰驗證，不必再輸入數字。" +
-                            "\\n\\n若換機或重新安裝，請從這裡清除原本的信任裝置。")
+                            "\n\n之後重新連線會用手機安全金鑰驗證，不必再輸入數字。" +
+                            "\n\n若換機或重新安裝，請從這裡清除原本的信任裝置。")
                         .setPositiveButton("保留配對", null)
                         .setNegativeButton("忘記這支裝置") { _, _ ->
                             current.forgetTrustedDevice()
