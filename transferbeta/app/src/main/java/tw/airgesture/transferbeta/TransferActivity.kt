@@ -286,6 +286,13 @@ class TransferActivity : ComponentActivity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        if (intent?.action == Intent.ACTION_SEND) {
+            // Legacy pinned Sharesheet targets may explicitly launch this Activity.
+            // Forward straight to the UI-free intake rather than showing the home.
+            forwardLegacyShare(intent)
+            finish()
+            return
+        }
         normalLauncherEntry = intent?.action == Intent.ACTION_MAIN &&
             intent?.getBooleanExtra("airgrab_show_settings", false) != true
         val scroll = ScrollView(this)
@@ -423,33 +430,26 @@ class TransferActivity : ComponentActivity() {
             GlobalGrabBridge.onReceiveGesture = { main.post { receiveGesture() } }
         }
         refreshHome()
-        consumeSharedFile(intent)
+        // External shares are handled exclusively by the transparent ShareReceiverActivity.
         // The camera and Nearby are now exclusively owned by GlobalGestureService.
         // Do not start activity-local camera/discovery on every app launch.
     }
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        normalLauncherEntry = intent.action == Intent.ACTION_MAIN &&
-            !intent.getBooleanExtra("airgrab_show_settings", false)
-        consumeSharedFile(intent)
-    }
-
-    private fun consumeSharedFile(shared: Intent?) {
-        if (shared?.action != Intent.ACTION_SEND) return
-        @Suppress("DEPRECATION")
-        val uri = if (Build.VERSION.SDK_INT >= 33) {
-            shared.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
-        } else shared.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri
-        val source = uri ?: shared.clipData?.getItemAt(0)?.uri
-        if (source == null || (source.scheme != "content" && source.scheme != "file")) {
-            val url = tw.airgesture.transferbeta.core.SharedTextPolicy.onlyWebLink(
-                shared.getStringExtra(Intent.EXTRA_TEXT))
-            if (url != null) sendLink(url)
-            else flash("沒有收到唯一可信的網址或可讀取原檔")
+        if (intent.action == Intent.ACTION_SEND) {
+            forwardLegacyShare(intent)
+            finish()
             return
         }
-        loadFile(source)
+        normalLauncherEntry = intent.action == Intent.ACTION_MAIN &&
+            !intent.getBooleanExtra("airgrab_show_settings", false)
+    }
+
+    private fun forwardLegacyShare(shared: Intent) {
+        val routed = Intent(shared).setClass(this, ShareReceiverActivity::class.java)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        startActivity(routed)
     }
 
     private fun consumeGlobalGrab(result: GrabResult) {
