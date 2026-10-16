@@ -217,7 +217,7 @@ class CameraGestureService : LifecycleService() {
                                     Phase.ACTIVE -> engine.process(
                                         image,
                                         onAction = { GestureAccessibilityService.send(it) },
-                                        onPalmDetection = { GestureAccessibilityService.handDetected(it) },
+                                        onHandState = { GestureAccessibilityService.handStateChanged(it) },
                                         onPointer = { GestureAccessibilityService.pointerUpdated(it) },
                                         isYouTubeForeground = { GestureAccessibilityService.isYouTubeForeground() }
                                     )
