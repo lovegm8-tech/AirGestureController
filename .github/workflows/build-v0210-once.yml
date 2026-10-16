@@ -1,4 +1,4 @@
-name: AirGesture v0.2.10 smart camera battery optimization signed APK
+name: AirGesture v0.2.10 smart power and launcher icon final signed APK
 
 on:
   push:
@@ -99,7 +99,7 @@ jobs:
           fi
       - uses: actions/upload-artifact@v4
         with:
-          name: AirGesture-v0.2.10-smart-power-signed
+          name: AirGesture-v0.2.10-smart-power-icon-signed
           path: app/build/outputs/apk/release/app-release.apk
           retention-days: 14
 
