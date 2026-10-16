@@ -16,10 +16,15 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CaptureRequest
+import android.util.Range
 import android.util.Log
 import android.util.Size
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.CameraState
+import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.app.NotificationCompat
@@ -76,6 +81,9 @@ class CameraGestureService : LifecycleService() {
     private var receiverRegistered = false
     private var wakeEnabled = false
     private var powerMode = 0
+    private var smartLitPower = false
+    // Only ranges explicitly advertised by the device are considered.
+    private val preferredLowFps: Range<Int>? by lazy { queryLowFpsRange() }
     private var screenOffStartMs = -1L
     private var scanStartMs = -1L
     private var lastHandSeenMs = -1L
@@ -145,6 +153,7 @@ class CameraGestureService : LifecycleService() {
         running = true
         wakeEnabled = Settings.screenWake(this)
         powerMode = Settings.wakePowerMode(this)
+        smartLitPower = Settings.smartLitPower(this)
         status = "準備前鏡頭與辨識模型…"
         phase = if (!power.isInteractive) Phase.SCREEN_SLEEP else Phase.ACTIVE
         WakeDiagnosticLog.add(this, "手勢服務啟動；熄屏喚醒=${wakeEnabled}；省電模式=${powerMode}")
@@ -153,7 +162,8 @@ class CameraGestureService : LifecycleService() {
                 val model = GestureCameraAnalyzer(
                     this, Settings.engineOptions(this),
                     Settings.performanceMode(this), Settings.tiltedPalmAssist(this),
-                    Settings.pointerDwellMs(this)
+                    Settings.pointerDwellMs(this),
+                    smartLitPower
                 )
                 main.post {
                     if (running) {
@@ -188,6 +198,71 @@ class CameraGestureService : LifecycleService() {
             .build()
     }
 
+    /**
+     * CameraX still keeps the sensor open while ACTIVE; skip inference work with
+     * AdaptiveFrameScheduler. Lowering an advertised actual sensor FPS can also
+     * reduce HAL work. Never request a 5 FPS camera mode: held fists need ~10 Hz.
+     */
+    private fun queryLowFpsRange(): Range<Int>? = try {
+        val manager = getSystemService(CAMERA_SERVICE) as CameraManager
+        val frontId = manager.cameraIdList.firstOrNull { id ->
+            manager.getCameraCharacteristics(id).get(CameraCharacteristics.LENS_FACING) ==
+                CameraCharacteristics.LENS_FACING_FRONT
+        }
+        frontId?.let { id ->
+            manager.getCameraCharacteristics(id)
+                .get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+                ?.filter { it.lower > 0 && it.upper in 12..15 }
+                ?.maxByOrNull { it.upper }
+        }
+    } catch (_: Exception) { null }
+
+    private fun createImageAnalysis(lowFps: Boolean): ImageAnalysis {
+        val wake = phase == Phase.SCREEN_SCAN
+        val builder = ImageAnalysis.Builder()
+            .setTargetResolution(if (wake) Size(480, 360) else Size(640, 480))
+            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+        if (lowFps) {
+            preferredLowFps?.let { advertised ->
+                Camera2Interop.Extender(builder).setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, advertised
+                )
+            }
+        }
+        return builder.build().also { imageAnalysis ->
+            imageAnalysis.setAnalyzer(executor) { image ->
+                try {
+                    val engine = analyzer
+                    if (running && engine != null) {
+                        when (phase) {
+                            Phase.ACTIVE -> engine.process(
+                                image,
+                                onAction = { GestureAccessibilityService.send(it) },
+                                onHandState = { GestureAccessibilityService.handStateChanged(it) },
+                                onPointer = { GestureAccessibilityService.pointerUpdated(it) },
+                                isYouTubeForeground = { GestureAccessibilityService.isYouTubeForeground() }
+                            )
+                            Phase.SCREEN_SCAN -> engine.processForWake(image) { palm, hand, stamp ->
+                                main.post {
+                                    if (running && phase == Phase.SCREEN_SCAN) {
+                                        if (hand) lastHandSeenMs = stamp
+                                        if (wakePalm.accept(palm, stamp)) startWakeHandoff()
+                                    }
+                                }
+                            }
+                            else -> Unit
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("AirGesture", "Frame processing failed", e)
+                } finally {
+                    image.close()
+                }
+            }
+        }
+    }
+
     private fun bindCamera() {
         if (!running || analyzer == null || cameraOpening || cameraBound || cameraClosing) return
         if (phase != Phase.ACTIVE && phase != Phase.SCREEN_SCAN) return
@@ -204,45 +279,27 @@ class CameraGestureService : LifecycleService() {
                 try {
                     val cameraProvider = future.get()
                     provider = cameraProvider
-                    val imageAnalysis = ImageAnalysis.Builder()
-                        .setTargetResolution(Size(640, 480))
-                        .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
-                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                        .build()
-                    imageAnalysis.setAnalyzer(executor) { image ->
-                        try {
-                            val engine = analyzer
-                            if (running && engine != null) {
-                                when (phase) {
-                                    Phase.ACTIVE -> engine.process(
-                                        image,
-                                        onAction = { GestureAccessibilityService.send(it) },
-                                        onHandState = { GestureAccessibilityService.handStateChanged(it) },
-                                        onPointer = { GestureAccessibilityService.pointerUpdated(it) },
-                                        isYouTubeForeground = { GestureAccessibilityService.isYouTubeForeground() }
-                                    )
-                                    Phase.SCREEN_SCAN -> engine.processForWake(image) { palm, hand, stamp ->
-                                        main.post {
-                                            if (running && phase == Phase.SCREEN_SCAN) {
-                                                if (hand) lastHandSeenMs = stamp
-                                                if (wakePalm.accept(palm, stamp)) startWakeHandoff()
-                                            }
-                                        }
-                                    }
-                                    else -> Unit
-                                }
-                            }
-                        } catch (e: Exception) {
-                            Log.e("AirGesture", "Frame processing failed", e)
-                        } finally {
-                            image.close()
-                        }
-                    }
+                    val requestLowFps = (phase == Phase.SCREEN_SCAN || smartLitPower) &&
+                        preferredLowFps != null
+                    var imageAnalysis = createImageAnalysis(requestLowFps)
                     clearCameraObserver()
                     cameraProvider.unbindAll()
-                    val camera = cameraProvider.bindToLifecycle(
-                        this, CameraSelector.DEFAULT_FRONT_CAMERA, imageAnalysis
-                    )
+                    // Camera2Interop is best-effort: on a device/driver that rejects
+                    // its FPS constraint, retry once without it rather than lose gestures.
+                    val camera = try {
+                        cameraProvider.bindToLifecycle(
+                            this, CameraSelector.DEFAULT_FRONT_CAMERA, imageAnalysis
+                        )
+                    } catch (first: Exception) {
+                        if (!requestLowFps) throw first
+                        imageAnalysis.clearAnalyzer()
+                        cameraProvider.unbindAll()
+                        WakeDiagnosticLog.add(this, "低 FPS 設定不可用，已退回相機預設模式")
+                        imageAnalysis = createImageAnalysis(false)
+                        cameraProvider.bindToLifecycle(
+                            this, CameraSelector.DEFAULT_FRONT_CAMERA, imageAnalysis
+                        )
+                    }
                     val states = camera.cameraInfo.cameraState
                     cameraStates = states
                     val observer = Observer<CameraState> { current ->
@@ -296,6 +353,7 @@ class CameraGestureService : LifecycleService() {
         lastHandSeenMs = -1L
         wakePalm.reset()
         WakeDiagnosticLog.add(this, "熄屏張掌待命：${if (powerMode == 0) "間歇省電" else "連續偵測"}；最多 10 分鐘")
+        WakeDiagnosticLog.add(this, "快速喚醒節能：3／5 秒不變；低解析度 480×360；低 FPS=${preferredLowFps ?: "系統預設"}；CPU 喚醒鎖沿用")
         // A bounded PARTIAL_WAKE_LOCK makes short rest-window reopens timely.
         // It consumes CPU power, unlike a pure camera-off deep-sleep approach.
         try {
