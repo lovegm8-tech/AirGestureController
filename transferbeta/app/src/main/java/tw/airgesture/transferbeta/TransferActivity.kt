@@ -344,6 +344,31 @@ class TransferActivity : ComponentActivity() {
                 ?: flash("請先啟動隔空抓取服務")
         }
         extraButton("重新搜尋裝置") { GlobalGestureService.transfer?.refresh() }
+        extraButton("已記住的裝置／忘記配對") {
+            val current = GlobalGestureService.transfer
+            if (current == null) {
+                flash("請先啟動 AirGrab，才能查看已記住的裝置")
+            } else {
+                val id = current.rememberedDeviceId
+                if (id == null) {
+                    AlertDialog.Builder(this)
+                        .setTitle("信任裝置")
+                        .setMessage("目前沒有已記住的手機。首次連線時會要求雙方核對數字。")
+                        .setPositiveButton("確定", null).show()
+                } else {
+                    AlertDialog.Builder(this)
+                        .setTitle("已記住的裝置")
+                        .setMessage("裝置代碼：" + id +
+                            "\\n\\n之後重新連線會用手機安全金鑰驗證，不必再輸入數字。" +
+                            "\\n\\n若換機或重新安裝，請從這裡清除原本的信任裝置。")
+                        .setPositiveButton("保留配對", null)
+                        .setNegativeButton("忘記這支裝置") { _, _ ->
+                            current.forgetTrustedDevice()
+                            refreshHome()
+                        }.show()
+                }
+            }
+        }
         extraButton("無障礙服務設定") {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
