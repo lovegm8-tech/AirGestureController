@@ -111,6 +111,7 @@ class MultiPeerTransferManager(private val app: Context) {
     private var incomingFile: Payload? = null
     private var incomingPayload = -1L
     private var incomingFinished = false
+    private var incomingQueueAcknowledged = false
     private var busy = false
     private var started = false
     private var epoch = 0
@@ -774,10 +775,21 @@ class MultiPeerTransferManager(private val app: Context) {
                 busy = false
             }
             is Offered.FileOffer -> {
-                sendControl(p, JSONObject().put("type", "file_ready")
-                    .put("sid", current.sid))
-                ui("已加入接收隊列：" + current.name)
-                visual(VisualPhase.RECEIVING, "已確認接收 · 等待檔案", 0)
+                val sid = current.sid
+                incomingQueueAcknowledged = false
+                val request = JSONObject().put("type", "file_ready").put("sid", sid)
+                sendControl(p, request)
+                for (wait in listOf(1100L, 2500L, 4500L, 8000L, 13000L, 19000L, 26000L)) {
+                    main.postDelayed({
+                        if (busy && offered === current && offeredBy == p.endpoint &&
+                            !incomingQueueAcknowledged && incomingPayload == -1L &&
+                            p.verified) {
+                            sendControl(p, request)
+                        }
+                    }, wait)
+                }
+                ui("已發送接收手勢，正在等待來源裝置確認")
+                visual(VisualPhase.RECEIVING, "接收請求已送出 · 等待回應", 0)
             }
         }
     }
@@ -858,6 +870,7 @@ class MultiPeerTransferManager(private val app: Context) {
                             client.cancelPayload(payload.id)
                         } else {
                             incomingFile = payload
+                            incomingQueueAcknowledged = true
                             incomingPayload = payload.id
                             if (incomingFinished) verifyFile()
                         }
@@ -941,6 +954,7 @@ class MultiPeerTransferManager(private val app: Context) {
         incomingFile = null
         incomingPayload = -1L
         incomingFinished = false
+        incomingQueueAcknowledged = false
         onReceiverOfferState?.invoke(true)
         val name = if (offer is Offered.FileOffer) offer.name else "網頁連結"
         notifyIncomingOffer(name)
@@ -1010,11 +1024,18 @@ class MultiPeerTransferManager(private val app: Context) {
                     ui(p.modelLabel + " 已加入傳輸佇列")
                     sendControl(p, JSONObject().put("type", "file_queued").put("sid", sid))
                     startNextFile()
+                } else if (batch.policy.state(p.endpoint) in setOf(
+                        MultiReceiverBatch.State.QUEUED,
+                        MultiReceiverBatch.State.SENDING,
+                        MultiReceiverBatch.State.VERIFYING)) {
+                    // A retry of an already accepted request is idempotent.
+                    sendControl(p, JSONObject().put("type", "file_queued").put("sid", sid))
                 } else {
                     sendControl(p, JSONObject().put("type", "expired").put("sid", sid))
                 }
             }
             "file_queued" -> if (offeredBy == p.endpoint && offered?.sid == sid && busy) {
+                incomingQueueAcknowledged = true
                 ui("發送端已加入隊列，等待輪到這台裝置")
             }
             "expired" -> if (offeredBy == p.endpoint && offered?.sid == sid) {
@@ -1097,6 +1118,7 @@ class MultiPeerTransferManager(private val app: Context) {
         incomingFile = null
         incomingPayload = -1
         incomingFinished = false
+        incomingQueueAcknowledged = false
         closeIncomingPrompt()
         onReceiverOfferState?.invoke(false)
         reportCaptureFailure(reason)
