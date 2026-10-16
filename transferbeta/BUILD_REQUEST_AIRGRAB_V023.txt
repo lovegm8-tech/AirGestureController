@@ -1,0 +1,1 @@
+User explicitly authorized a new signed AirGrab Android APK. Build v0.2.3-beta, versionCode 7, containing hand-detection hints, receiver-offer retries, overlay permission onboarding, and transparent Android Sharesheet receiver. Preserve same signing key and package ID; use existing manually authorized workflow only for this single test release.
