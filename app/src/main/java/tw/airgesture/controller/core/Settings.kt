@@ -15,6 +15,7 @@ object Settings {
     private const val KEY_POINTER_DWELL = "pointer_dwell"
     private const val KEY_LONG_FIST = "long_fist"
     private const val KEY_ANIMATED_HAND_FEEDBACK = "animated_hand_feedback"
+    private const val KEY_SMART_LIT_POWER = "smart_lit_power"
 
     fun sensitivity(context: Context): Int = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         .getInt(KEY_SENSITIVITY, 1).coerceIn(0, 2)
@@ -71,6 +72,11 @@ object Settings {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getBoolean(KEY_ANIMATED_HAND_FEEDBACK, true)
 
+    /** Default true; OFF restores v0.2.9 lit-screen inference and camera FPS. */
+    fun smartLitPower(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_SMART_LIT_POWER, true)
+
     fun save(
         context: Context,
         sensitivity: Int,
@@ -83,7 +89,8 @@ object Settings {
         wakePowerMode: Int = wakePowerMode(context),
         pointerDwellIndex: Int = pointerDwellIndex(context),
         longFistIndex: Int = longFistIndex(context),
-        animatedHandFeedback: Boolean = animatedHandFeedback(context)
+        animatedHandFeedback: Boolean = animatedHandFeedback(context),
+        smartLitPower: Boolean = smartLitPower(context)
     ) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putInt(KEY_SENSITIVITY, sensitivity.coerceIn(0, 2))
@@ -97,6 +104,7 @@ object Settings {
             .putInt(KEY_POINTER_DWELL, pointerDwellIndex.coerceIn(0, 2))
             .putInt(KEY_LONG_FIST, longFistIndex.coerceIn(0, 2))
             .putBoolean(KEY_ANIMATED_HAND_FEEDBACK, animatedHandFeedback)
+            .putBoolean(KEY_SMART_LIT_POWER, smartLitPower)
             .apply()
     }
 
