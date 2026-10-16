@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityService.ScreenshotResult
 import android.accessibilityservice.AccessibilityService.TakeScreenshotCallback
 import android.graphics.Bitmap
+import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -77,7 +78,7 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
 
     private fun collect(root: AccessibilityNodeInfo?): Pair<List<ActionNode>, List<AccessibilityNodeInfo>> {
         if (root == null) return Pair(emptyList(), emptyList())
-        val seen = HashSet<Int>()
+        val seen = HashSet<String>()
         val nodes = ArrayList<ActionNode>(160)
         val clickable = ArrayList<AccessibilityNodeInfo>(160)
         val queue = ArrayDeque<Pair<AccessibilityNodeInfo, Int>>()
@@ -94,7 +95,12 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
             }
             if (target != null) {
                 // Avoid matching both a label and its parent as separate buttons.
-                val identity = System.identityHashCode(target)
+                // AccessibilityNodeInfo.parent can return a fresh wrapper for the
+                // same underlying control. Object identity would incorrectly
+                // count one share button multiple times and reject it as ambiguous.
+                val bounds = Rect().also { target.getBoundsInScreen(it) }
+                val identity = "${target.viewIdResourceName}:${bounds.left}:" +
+                    "${bounds.top}:${bounds.right}:${bounds.bottom}"
                 if (seen.add(identity)) {
                     nodes.add(ActionNode(
                         view ?: target.viewIdResourceName,
