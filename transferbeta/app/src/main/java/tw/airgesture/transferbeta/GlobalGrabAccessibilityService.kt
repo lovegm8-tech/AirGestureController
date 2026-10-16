@@ -78,7 +78,7 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
 
     private fun collect(root: AccessibilityNodeInfo?): Pair<List<ActionNode>, List<AccessibilityNodeInfo>> {
         if (root == null) return Pair(emptyList(), emptyList())
-        val seen = HashSet<String>()
+        val positions = HashMap<String, Int>()
         val nodes = ArrayList<ActionNode>(160)
         val clickable = ArrayList<AccessibilityNodeInfo>(160)
         val queue = ArrayDeque<Pair<AccessibilityNodeInfo, Int>>()
@@ -101,7 +101,13 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
                 val bounds = Rect().also { target.getBoundsInScreen(it) }
                 val identity = "${target.viewIdResourceName}:${bounds.left}:" +
                     "${bounds.top}:${bounds.right}:${bounds.bottom}"
-                if (seen.add(identity)) {
+                val texts = listOfNotNull(label, description,
+                    target.text?.toString(), target.contentDescription?.toString())
+                    .filter { it.isNotBlank() }
+                val ids = listOfNotNull(view, target.viewIdResourceName)
+                val existing = positions[identity]
+                if (existing == null) {
+                    positions[identity] = nodes.size
                     nodes.add(ActionNode(
                         view ?: target.viewIdResourceName,
                         label ?: target.text?.toString(),
@@ -109,9 +115,18 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
                         clickable = true,
                         password = node.isPassword || target.isPassword,
                         visible = node.isVisibleToUser && target.isVisibleToUser,
-                        depth = depth
+                        depth = depth,
+                        texts = texts.distinct(),
+                        ids = ids.distinct()
                     ))
                     clickable.add(target)
+                } else {
+                    val old = nodes[existing]
+                    nodes[existing] = old.copy(
+                        texts = (old.texts + texts).distinct().take(32),
+                        ids = (old.ids + ids).distinct().take(24),
+                        visible = old.visible || (node.isVisibleToUser && target.isVisibleToUser)
+                    )
                 }
             }
             if (depth < 18) for (i in 0 until node.childCount) {
@@ -131,7 +146,8 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
             if (node.isVisibleToUser && !node.isPassword) {
                 val text = node.text?.toString() ?: node.contentDescription?.toString()
                 if (!text.isNullOrBlank()) {
-                    found.add(VisibleText(node.viewIdResourceName, text))
+                    found.add(VisibleText(node.viewIdResourceName, text,
+                        focused = node.isFocused, editable = node.isEditable))
                 }
             }
             if (depth < 18) for (i in 0 until node.childCount) {
@@ -161,7 +177,8 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         val capture = browserCapture ?: return
         val root = rootInActiveWindow
         if (root != null && root.packageName?.toString() == capture.origin) {
-            val result = GrabContentPolicy.decide(capture.origin, readable(root))
+            val result = GrabContentPolicy.decide(
+                capture.origin, readable(root), allowFocusedEditor = true)
             if (result is GrabChoice.Link) {
                 clearPending()
                 performGlobalAction(GLOBAL_ACTION_BACK)
@@ -197,7 +214,8 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
             // edit field. This is initiated only by the user's grab gesture.
             val addresses = tree.first.withIndex().filter { (_, node) ->
                 node.visible && node.clickable && !node.password &&
-                    GrabContentPolicy.isAddressId(node.id)
+                    (GrabContentPolicy.isAddressId(node.id) ||
+                     node.ids.any(GrabContentPolicy::isAddressId))
             }
             val index = addresses.singleOrNull()?.index
             if (index != null && tree.second[index].performAction(
@@ -278,6 +296,9 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
             schedulePendingCheck()
             return
         }
+        // Android/Samsung resolver targets may arrive after the first event;
+        // keep polling only for this user-triggered, 12-second share session.
+        try {
         val root = rootInActiveWindow ?: return
         val pkg = root.packageName?.toString()
         val (nodes, clickable) = collect(root)
@@ -298,7 +319,9 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         if (clickable[index].performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
             flow.nextStep++
             flow.lastAction = now
-            schedulePendingCheck()
+        }
+        } finally {
+            if (pending === flow) schedulePendingCheck()
         }
     }
 
