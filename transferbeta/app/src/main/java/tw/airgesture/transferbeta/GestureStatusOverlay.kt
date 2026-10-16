@@ -18,6 +18,7 @@ import android.widget.TextView
 import tw.airgesture.transferbeta.core.TransferAnimationPolicy
 import tw.airgesture.transferbeta.core.VisualEvent
 import tw.airgesture.transferbeta.core.VisualPhase
+import tw.airgesture.transferbeta.core.HandHint
 
 /** Animated air-grab over any app: a hand absorbs or releases a document.
  * No continuously looping animation; waiting uses a 1-second countdown only. */
@@ -34,6 +35,82 @@ class GestureStatusOverlay(private val context: Context) {
     private var removal: Runnable? = null
     private var tick: Runnable? = null
     private var offerDeadline = 0L
+    // Independent small badge: never replaces the 30-second receive offer banner.
+    private var handBadge: TextView? = null
+    private var handBadgeHide: Runnable? = null
+    private var previousHandHint = HandHint.NONE
+
+    /**
+     * Camera feedback is not a transfer success. The badge sits below the main
+     * status banner and expires unless actual camera observations keep it alive.
+     */
+    fun showHandFeedback(hint: HandHint) {
+        if (!Settings.canDrawOverlays(context)) return
+        main.post {
+            handBadgeHide?.let { main.removeCallbacks(it) }
+            handBadgeHide = null
+            if (hint == HandHint.NONE) {
+                dismissHand()
+                return@post
+            }
+            val label = when (hint) {
+                HandHint.HAND_SEEN -> "◉ 已偵測到手"
+                HandHint.OPEN_PALM -> "✋ 張掌已辨識"
+                HandHint.CLOSED_FIST -> "✊ 握拳已辨識"
+                HandHint.NONE -> return@post
+            }
+            val current = handBadge ?: try {
+                val density = context.resources.displayMetrics.density
+                fun dp(n: Int) = (n * density).toInt()
+                val view = TextView(context).apply {
+                    gravity = Gravity.CENTER
+                    textSize = 14f
+                    setTextColor(Color.WHITE)
+                    setPadding(dp(14), dp(8), dp(14), dp(8))
+                    background = GradientDrawable().apply {
+                        cornerRadius = dp(19).toFloat()
+                        setColor(0xee122539.toInt())
+                        setStroke(dp(1), 0xff3d91c9.toInt())
+                    }
+                }
+                val params = WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                    PixelFormat.TRANSLUCENT
+                ).apply {
+                    gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                    y = dp(186)
+                }
+                wm.addView(view, params)
+                handBadge = view
+                view.alpha = 0f
+                view.animate().alpha(1f).setDuration(180).start()
+                view
+            } catch (_: Exception) { return@post }
+            current.text = label
+            // Do not replay a flash on every camera frame.
+            previousHandHint = hint
+            val hide = Runnable { dismissHand() }
+            handBadgeHide = hide
+            main.postDelayed(hide, 1900L)
+        }
+    }
+
+    fun dismissHand() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            main.post { dismissHand() }
+            return
+        }
+        handBadgeHide?.let { main.removeCallbacks(it) }
+        handBadgeHide = null
+        val existing = handBadge
+        handBadge = null
+        previousHandHint = HandHint.NONE
+        if (existing != null) try { wm.removeView(existing) } catch (_: Exception) {}
+    }
 
     fun showState(event: VisualEvent) {
         if (!Settings.canDrawOverlays(context)) return
