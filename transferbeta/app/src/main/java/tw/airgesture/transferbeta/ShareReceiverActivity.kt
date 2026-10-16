@@ -71,6 +71,7 @@ class ShareReceiverActivity : Activity() {
             ?: incoming.clipData?.getItemAt(0)?.text?.toString()
         val safeLink = SharedTextPolicy.onlyWebLink(sharedText)
         if (incoming.type?.startsWith("text/") == true && safeLink != null) {
+            GlobalGrabBridge.accessibility?.get()?.externalShareDelivered()
             transfer.offerLink(safeLink)
             finish()
             return
@@ -88,6 +89,7 @@ class ShareReceiverActivity : Activity() {
             incoming.action, stream?.toString(), clipUris.map { it?.toString() })
         val uri = chosen?.let(Uri::parse)
         if (uri != null) {
+            GlobalGrabBridge.accessibility?.get()?.externalShareDelivered()
             transfer.reportShareStarted("三星相簿已交付照片 · 正在讀取原始檔…")
             handling = true
             io.execute {
@@ -140,6 +142,7 @@ class ShareReceiverActivity : Activity() {
             }
         } else {
             if (safeLink != null) {
+                GlobalGrabBridge.accessibility?.get()?.externalShareDelivered()
                 transfer.offerLink(safeLink)
                 finish()
             } else notifyAndFinish("分享來源沒有提供唯一有效網址或原始檔；請檢查分享入口")
