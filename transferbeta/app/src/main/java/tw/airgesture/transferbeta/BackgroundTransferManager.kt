@@ -10,6 +10,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Log
 import com.google.android.gms.nearby.Nearby
@@ -54,6 +55,8 @@ class BackgroundTransferManager(private val app: Context) {
     private var outgoing: File? = null
     private var offered: Offer? = null
     private var generation = 0
+    private var lastDisplayedPercent = -1
+    private var lastProgressStamp = 0L
     private var searchCycle = 0
     private val searchWindowMs = 18_000L
     private val searchPauseMs = 12_000L
@@ -71,6 +74,28 @@ class BackgroundTransferManager(private val app: Context) {
     }
 
     /** Activity sets this while visible; all session data remains in this service. */
+    var onReceiverOfferState: ((Boolean) -> Unit)? = null
+    private fun setReceiveArmed(active: Boolean) { onReceiverOfferState?.invoke(active) }
+    private fun clearIncomingPrompt() {
+        app.getSystemService(NotificationManager::class.java).cancel(4431)
+    }
+    private fun notifyIncomingOffer(label: String) {
+        val notifications = app.getSystemService(NotificationManager::class.java)
+        notifications.createNotificationChannel(NotificationChannel(
+            "airgrab_receives", "AirGrab 待接收", NotificationManager.IMPORTANCE_DEFAULT))
+        val accept = PendingIntent.getService(app, 4432,
+            Intent(app, GlobalGestureService::class.java).setAction(
+                GlobalGestureService.ACTION_CONFIRM_RECEIVE),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        notifications.notify(4431, Notification.Builder(app, "airgrab_receives")
+            .setSmallIcon(android.R.drawable.ic_menu_share)
+            .setContentTitle("AirGrab 等待接收")
+            .setContentText(label.take(50) + " · 握拳張掌，或點通知立即接收")
+            .setOngoing(true)
+            .addAction(Notification.Action.Builder(
+                android.R.drawable.ic_input_add, "立即接收", accept).build())
+            .build())
+    }
     var onVisualEvent: ((VisualEvent) -> Unit)? = null
     private fun visual(phase: VisualPhase, label: String, progress: Int? = null) {
         main.post { onVisualEvent?.invoke(VisualEvent(phase, label, progress)) }
@@ -119,11 +144,14 @@ class BackgroundTransferManager(private val app: Context) {
         connected = false
         busy = false
         offered = null
+        clearIncomingPrompt()
+        setReceiveArmed(false)
         pendingDigits = null
         awaitingPair = null
         onStatus = null; onPairing = null
         worker.shutdown()
         onVisualEvent = null
+        onReceiverOfferState = null
         ui("背景傳輸已停止")
     }
     private fun search() {
@@ -214,6 +242,8 @@ class BackgroundTransferManager(private val app: Context) {
                 searchCycle++
                 busy = false
                 offered = null
+                clearIncomingPrompt()
+                setReceiveArmed(false)
                 pendingDigits = null
                 awaitingPair = null
                 ui("對方已斷線；重新搜尋並重新驗證配對")
@@ -264,8 +294,8 @@ class BackgroundTransferManager(private val app: Context) {
         busy = true
         session = UUID.randomUUID().toString()
         control(JSONObject().put("type", "link_offer").put("sid", session).put("url", url))
-        ui("已抓取網址，等待對方握拳張掌（30 秒）")
-        visual(VisualPhase.CONTENT_READY, "已抓取網址 · 等待接收")
+        ui("網址已取得，等待對方確認（30 秒）")
+        visual(VisualPhase.WAITING_FOR_RECEIVER, "已取得連結 · 尚未送達")
         val key = ++generation
         main.postDelayed({
             if (generation == key && busy) {
@@ -294,8 +324,8 @@ class BackgroundTransferManager(private val app: Context) {
                     payloadOutgoing = -1
                     control(JSONObject().put("type", "file_offer").put("sid", session)
                         .put("name", name).put("size", candidate.length()).put("hash", sum))
-                    ui("已抓取：" + name + "；等待對方接收")
-                    visual(VisualPhase.CONTENT_READY, "已抓取：" + name)
+                    ui("已取得：" + name + "；等待對方接收")
+                    visual(VisualPhase.WAITING_FOR_RECEIVER, "已取得檔案 · 等待對方")
                     val key = ++generation
                     main.postDelayed({
                         if (generation == key && busy && payloadOutgoing < 0) {
@@ -311,7 +341,13 @@ class BackgroundTransferManager(private val app: Context) {
     }
     fun confirmReceive() {
         if (!connected || busy) { ui("接收端未連線或正在傳輸"); return }
-        val current = offered ?: run { ui("目前沒有待接收的內容"); return }
+        val current = offered ?: run {
+            ui("尚無待接收的檔案或網址")
+            visual(VisualPhase.FAILURE, "尚無可接收內容")
+            return
+        }
+        clearIncomingPrompt()
+        setReceiveArmed(false)
         busy = true
         ++generation
         when (current) {
@@ -391,6 +427,8 @@ class BackgroundTransferManager(private val app: Context) {
                     PayloadTransferUpdate.Status.FAILURE,
                     PayloadTransferUpdate.Status.CANCELED -> {
                         busy = false; incomingFile = null; offered = null
+                        setReceiveArmed(false)
+                        clearIncomingPrompt()
                         ui("傳輸取消或失敗")
                         visual(VisualPhase.FAILURE, "傳輸中斷，未完成")
                     }
@@ -398,9 +436,18 @@ class BackgroundTransferManager(private val app: Context) {
                         if (u.totalBytes > 0) {
                             val percent = ((100 * u.bytesTransferred / u.totalBytes).toInt())
                                 .coerceIn(0, 100)
-                            ui("傳輸中 " + percent + "%")
-                            if (u.payloadId == payloadIncoming && (percent % 5 == 0 || percent == 100))
-                                visual(VisualPhase.RECEIVING, "正在接收 · " + percent + "%", percent)
+                            val now = SystemClock.uptimeMillis()
+                            if (lastDisplayedPercent < 0 ||
+                                (percent != lastDisplayedPercent &&
+                                 (percent - lastDisplayedPercent >= 5 ||
+                                  now - lastProgressStamp >= 650L || percent == 100))) {
+                                lastDisplayedPercent = percent
+                                lastProgressStamp = now
+                                ui("傳輸中 " + percent + "%")
+                                if (u.payloadId == payloadIncoming) {
+                                    visual(VisualPhase.RECEIVING, "接收中 " + percent + "%", percent)
+                                }
+                            }
                         }
                     }
                 }
@@ -419,6 +466,8 @@ class BackgroundTransferManager(private val app: Context) {
                 }
                 offered = Offer.FileOffer(sid, TransferPolicy.safeName(name)!!, count, sum)
                 incomingFile = null; incomingFinished = false; payloadIncoming = -1L
+                setReceiveArmed(true)
+                notifyIncomingOffer(name)
                 ui("收到檔案請求：" + name + "；握拳 → 張掌以接收")
                 visual(VisualPhase.OFFER_RECEIVED, "收到檔案 · 握拳張掌接收")
                 expireOffer(sid)
@@ -429,6 +478,8 @@ class BackgroundTransferManager(private val app: Context) {
                     control(JSONObject().put("type", "busy").put("sid", sid)); return
                 }
                 offered = Offer.LinkOffer(sid, url)
+                setReceiveArmed(true)
+                notifyIncomingOffer("影片／網頁網址")
                 ui("收到影片或網頁網址；握拳 → 張掌以接收")
                 visual(VisualPhase.OFFER_RECEIVED, "收到連結 · 握拳張掌接收")
                 expireOffer(sid)
@@ -470,6 +521,8 @@ class BackgroundTransferManager(private val app: Context) {
         main.postDelayed({
             if (generation == key && offered?.sid == id && !busy) {
                 offered = null
+                setReceiveArmed(false)
+                clearIncomingPrompt()
                 ui("接收請求逾時")
                 visual(VisualPhase.FAILURE, "接收請求已逾時")
             }
