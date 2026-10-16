@@ -141,8 +141,8 @@ class TransferActivity : ComponentActivity() {
             maybeReturnHome()
         }
         manager.onPairing = { code ->
-            if (shownPairCode == code || isFinishing) return@onPairing
-            shownPairCode = code
+            if (shownPairCode != code && !isFinishing) {
+                shownPairCode = code
             homePromptVisible = true
             refreshHome()
             AlertDialog.Builder(this)
@@ -163,6 +163,7 @@ class TransferActivity : ComponentActivity() {
                 }
                 .setCancelable(false)
                 .show()
+            }
         }
     }
 
