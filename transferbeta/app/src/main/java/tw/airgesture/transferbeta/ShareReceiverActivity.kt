@@ -1,7 +1,6 @@
 package tw.airgesture.transferbeta
 
 import android.app.Activity
-import android.content.ClipData
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -74,7 +73,8 @@ class ShareReceiverActivity : Activity() {
         val uri = candidates.firstOrNull { it.scheme == "content" }
         val uriCount = incoming.clipData?.itemCount ?: 0
         if (uri != null) {
-            if (uriCount > 1 || !ShareEntryPolicy.allowedFileScheme(uri.scheme)) {
+            if (!ShareEntryPolicy.validItemCount(uriCount) ||
+                !ShareEntryPolicy.allowedFileScheme(uri.scheme)) {
                 notifyAndFinish("目前一次只能隔空抓取一個原始檔案")
                 return
             }
@@ -91,9 +91,10 @@ class ShareReceiverActivity : Activity() {
                     cache.listFiles()?.filter {
                         it.isFile && System.currentTimeMillis() - it.lastModified() > 86_400_000L
                     }?.forEach { it.delete() }
-                    staged = File.createTempFile("share-", ".tmp", cache)
+                    val temp = File.createTempFile("share-", ".tmp", cache)
+                    staged = temp
                     contentResolver.openInputStream(uri)?.use { input ->
-                        FileOutputStream(staged).use { output ->
+                        FileOutputStream(temp).use { output ->
                             val buffer = ByteArray(64 * 1024)
                             var bytes = 0L
                             while (true) {
@@ -107,7 +108,7 @@ class ShareReceiverActivity : Activity() {
                             check(bytes > 0L) { "原始檔案是空的" }
                         }
                     } ?: error("沒有原始檔案讀取權限")
-                    val candidate = staged
+                    val candidate = temp
                     main.post {
                         val ready = GlobalGestureService.transfer
                         if (GlobalGestureService.isActive && ready?.isConnected == true) {
