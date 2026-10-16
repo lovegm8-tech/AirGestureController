@@ -37,6 +37,9 @@ object TransferAnimationPolicy {
     fun hasReceiveCountdown(phase: VisualPhase): Boolean =
         phase == VisualPhase.WAITING_FOR_RECEIVER || phase == VisualPhase.OFFER_RECEIVED
 
+    fun isWaiting(event: VisualEvent): Boolean =
+        event.phase == VisualPhase.WAITING_FOR_RECEIVER ||
+            event.phase == VisualPhase.OFFER_RECEIVED
     fun symbol(event: VisualEvent): String = when (event.phase) {
         VisualPhase.CAPTURING -> "◎"
         VisualPhase.CONTENT_READY -> "↗"
