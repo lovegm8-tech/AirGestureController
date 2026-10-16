@@ -399,9 +399,11 @@ class TransferActivity : ComponentActivity() {
             } else {
                 val saved = current.rememberedDeviceIds
                 val live = current.connectedDeviceIds.toSet()
+                val names = current.connectedDeviceNames
                 val summary = if (saved.isEmpty()) "尚無已配對裝置，首次連線須核對雙方數字。"
                     else saved.mapIndexed { index, id ->
-                        (index + 1).toString() + ". " + id +
+                        (index + 1).toString() + ". " +
+                            (names[id]?.let { "$it ($id)" } ?: id) +
                             (if (id in live) "（已連線）" else "（未連線）")
                     }.joinToString("\n")
                 AlertDialog.Builder(this)
