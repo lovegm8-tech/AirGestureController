@@ -38,6 +38,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var pointerDwell: Spinner
     private lateinit var longFistDuration: Spinner
     private lateinit var animatedHandFeedback: Switch
+    private lateinit var smartLitPower: Switch
     private lateinit var tiltedPalmAssist: Switch
     private lateinit var fastSwipeAssist: Switch
     private lateinit var screenWake: Switch
@@ -150,7 +151,7 @@ class MainActivity : ComponentActivity() {
                    "連續偵測：等待較短、耗電較高"))
         wakePowerMode.setSelection(Settings.wakePowerMode(this))
         content.addView(wakePowerMode, LinearLayout.LayoutParams(-1, dip(54)))
-        label("熄屏喚醒最多待命 10 分鐘，自動停止鏡頭；省電模式需在鏡頭偵測時張掌，喚醒可能較慢。離線運作，不會錄影。", 13f)
+        label("快速喚醒省電：維持 3 秒偵測／5 秒休息，熄屏偵測使用 480×360 畫面並嘗試較低 FPS，保留 CPU 喚醒鎖避免休眠延誤。最多待命 10 分鐘。", 13f)
         label("熄屏喚醒診斷紀錄", 17f, true)
         val wakeEvents = label(WakeDiagnosticLog.read(this), 12f)
         button("重新整理喚醒紀錄") { wakeEvents.text = WakeDiagnosticLog.read(this) }
@@ -158,6 +159,15 @@ class MainActivity : ComponentActivity() {
             WakeDiagnosticLog.clear(this)
             wakeEvents.text = WakeDiagnosticLog.read(this)
         }
+
+        label("亮屏智慧省電（新功能）", 19f, true)
+        smartLitPower = Switch(this).apply {
+            text = "啟用三階段智慧待命（建議）"
+            isChecked = Settings.smartLitPower(this@MainActivity)
+            textSize = 16f
+        }
+        content.addView(smartLitPower, LinearLayout.LayoutParams(-1, dip(54)))
+        label("啟用：無手先每 0.35 秒辨識一次，20 秒後每 0.9 秒一次；有手立即提高到約每 0.1 秒一次並保持 4.5 秒。會嘗試要求前鏡頭 12～15 FPS；關閉則恢復舊版亮屏頻率與鏡頭設定。", 13f)
 
         label("辨識效能模式", 19f, true)
         performance = Spinner(this)
@@ -167,7 +177,7 @@ class MainActivity : ComponentActivity() {
                 "高反應（待命約 9 次／秒、手勢約 12 次／秒）"))
         performance.setSelection(Settings.performanceMode(this))
         content.addView(performance, LinearLayout.LayoutParams(-1, dip(54)))
-        label("預設為智慧平衡。變更後請停止並重新啟動辨識才會生效。", 13f)
+        label("若已啟用亮屏智慧省電，此處的原本省電／平衡／高反應選項僅作為關閉智慧省電後的備援。變更後需重新啟動辨識。", 13f)
 
         label("食指游標活動範圍", 19f, true)
         cursorRange = Spinner(this)
@@ -202,7 +212,7 @@ class MainActivity : ComponentActivity() {
         cooldownText.text = "操作冷卻時間：${500 + cooldown.progress * 100} 毫秒"
         content.addView(cooldown, LinearLayout.LayoutParams(-1, dip(48)))
         button("儲存設定") {
-            Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition, cursorRange.selectedItemPosition, tiltedPalmAssist.isChecked, fastSwipeAssist.isChecked, screenWake.isChecked, wakePowerMode.selectedItemPosition, pointerDwell.selectedItemPosition, longFistDuration.selectedItemPosition, animatedHandFeedback.isChecked)
+            Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition, cursorRange.selectedItemPosition, tiltedPalmAssist.isChecked, fastSwipeAssist.isChecked, screenWake.isChecked, wakePowerMode.selectedItemPosition, pointerDwell.selectedItemPosition, longFistDuration.selectedItemPosition, animatedHandFeedback.isChecked, smartLitPower.isChecked)
             toast("已儲存；重新啟動辨識後生效")
         }
         label("隱私：App 不要求網路權限，影像只在本機暫時分析，不會錄影或上傳。\n啟動後可從通知列隨時停止前鏡頭。", 13f)
@@ -230,7 +240,7 @@ class MainActivity : ComponentActivity() {
 
     private fun startControl() {
         if (!GestureAccessibilityService.isReady()) { toast("無障礙服務尚未啟用"); return }
-        Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition, cursorRange.selectedItemPosition, tiltedPalmAssist.isChecked, fastSwipeAssist.isChecked, screenWake.isChecked, wakePowerMode.selectedItemPosition, pointerDwell.selectedItemPosition, longFistDuration.selectedItemPosition, animatedHandFeedback.isChecked)
+        Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition, cursorRange.selectedItemPosition, tiltedPalmAssist.isChecked, fastSwipeAssist.isChecked, screenWake.isChecked, wakePowerMode.selectedItemPosition, pointerDwell.selectedItemPosition, longFistDuration.selectedItemPosition, animatedHandFeedback.isChecked, smartLitPower.isChecked)
         val intent = Intent(this, CameraGestureService::class.java).setAction(CameraGestureService.START)
         try {
             ContextCompat.startForegroundService(this, intent)
