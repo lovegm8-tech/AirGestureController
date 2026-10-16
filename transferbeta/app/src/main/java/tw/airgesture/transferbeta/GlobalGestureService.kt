@@ -119,6 +119,10 @@ class GlobalGestureService : LifecycleService() {
             connections.confirmReceive()
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_START && isActive) {
+            // Reopening the Activity must never restart camera or Nearby pairing.
+            return START_NOT_STICKY
+        }
         if (intent?.action == ACTION_CAPTURE_SCREEN && isActive) {
             main.postDelayed({
                 val accessibility = GlobalGrabBridge.accessibility?.get()
