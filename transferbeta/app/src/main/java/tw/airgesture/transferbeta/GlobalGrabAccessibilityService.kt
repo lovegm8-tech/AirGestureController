@@ -325,6 +325,13 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         }
     }
 
+    /** Called only after our ACTION_SEND target receives a valid URL or URI.
+     * Prevents the 12-second chooser watchdog from falsely reporting failure. */
+    fun externalShareDelivered() {
+        if (Looper.myLooper() == Looper.getMainLooper()) clearPending()
+        else main.post { clearPending() }
+    }
+
     /**
      * Screenshot is an explicit last-resort action, not automatic downgrade.
      * Requires user-granted accessibility permission; protected content can fail.
