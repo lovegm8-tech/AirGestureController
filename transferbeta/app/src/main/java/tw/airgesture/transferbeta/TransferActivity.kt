@@ -379,11 +379,13 @@ class TransferActivity : ComponentActivity() {
                         showMode()
                         dialog.dismiss()
                     }
-                    .setMessage("自動模式：檢查接收端編碼支援，遇到 HEVC、HDR 或高解析度影片優先轉成 H.264／AAC。轉檔不修改手機原影片，可能需要較長時間。")
                     .setNegativeButton("取消", null).show()
             }
         }
         advanced.addView(videoModeButton)
+        advanced.addView(text(
+            "自動模式：接收端不支援 HEVC／HDR 或高解析度影片時，發送端轉成相容 H.264／MP4。" +
+                "轉檔需要等待，但不會更改手機裡的原始影片。", 13f))
 
         extraButton("測試接收（不需要做手勢）") {
             GlobalGestureService.transfer?.confirmReceive()
