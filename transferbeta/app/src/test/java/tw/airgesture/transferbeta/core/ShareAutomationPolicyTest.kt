@@ -4,6 +4,39 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ShareAutomationPolicyTest {
+    @Test fun chooserCanMatchChildLabelWhenClickableContainerHasNoText() {
+        val nodes = listOf(ActionNode(
+            id = "android:id/resolver_target", label = null, clickable = true,
+            texts = listOf("分享至", "AirGrab 隔空抓取", "應用程式"),
+            ids = listOf("android:id/text1")))
+        assertEquals(0, ShareAutomationPolicy.onlyUniqueChooserTarget("android", nodes))
+    }
+    @Test fun chooserNeverPicksAmbiguousOrUntrustedChildTargets() {
+        val card = ActionNode(null, null, clickable = true, texts = listOf("AirGrab"))
+        assertNull(ShareAutomationPolicy.onlyUniqueChooserTarget("android", listOf(card, card)))
+        assertNull(ShareAutomationPolicy.onlyUniqueChooserTarget("com.sec.android.gallery3d",
+            listOf(card)))
+    }
+    @Test fun shareButtonMatchesDescendantViewId() {
+        val step = ShareStep(listOf("分享"), listOf(":id/action_share"))
+        assertEquals(0, ShareAutomationPolicy.match(step, listOf(
+            ActionNode(null, null, clickable = true,
+                ids = listOf("com.sec.android.gallery3d:id/action_share"),
+                texts = listOf("分享")))))
+    }
+    @Test fun focusedBrowserEditorCanYieldFullUrlWithoutGuessing() {
+        val editor = VisibleText(null, "https://example.com/a/b?x=1", focused = true,
+            editable = true)
+        assertFalse(GrabContentPolicy.decide("com.android.chrome", listOf(editor)) is GrabChoice.Link)
+        val found = GrabContentPolicy.decide("com.android.chrome", listOf(editor),
+            allowFocusedEditor = true)
+        assertEquals("https://example.com/a/b?x=1", (found as GrabChoice.Link).url)
+    }
+    @Test fun browserDoesNotReadRandomUnfocusedPageLink() {
+        val page = VisibleText(null, "https://example.com", focused = false, editable = false)
+        assertFalse(GrabContentPolicy.decide("com.android.chrome", listOf(page),
+            allowFocusedEditor = true) is GrabChoice.Link)
+    }
     @Test fun knownOverflowAllowsNestedBrowserShare() {
         val nodes = listOf(
             ActionNode("com.android.chrome:id/menu_button", null, clickable = true),
