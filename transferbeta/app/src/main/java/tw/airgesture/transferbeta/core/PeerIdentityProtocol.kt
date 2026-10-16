@@ -14,7 +14,8 @@ import java.util.Base64
  */
 object PeerIdentityProtocol {
     const val PROTOCOL_VERSION = 1
-    private val idPattern = Regex("[a-f0-9]{12}")
+    // Existing v0.2.0 installs use UUID.take(12), including the hyphen.
+    private val idPattern = Regex("(?:[a-f0-9]{12}|[a-f0-9]{8}-[a-f0-9]{3})")
     fun validPeerId(value: String): Boolean = idPattern.matches(value)
 
     fun validNonce(encoded: String): Boolean = try {
