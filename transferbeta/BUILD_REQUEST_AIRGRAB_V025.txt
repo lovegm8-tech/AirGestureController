@@ -1,0 +1,1 @@
+User explicitly requested one combined signed AirGrab APK after video-compatibility transcode and browser URL grab fixes. Build versionCode 9 versionName 0.2.5-beta with the existing signing key so it upgrades 0.2.4. No further builds are authorized by this marker.
