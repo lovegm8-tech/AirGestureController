@@ -33,7 +33,7 @@ class PeerIdentityProtocolTest {
         val a=identity(); val b=identity()
         val ap=PeerIdentityProtocol.encodedKey(a.public)
         val bp=PeerIdentityProtocol.encodedKey(b.public)
-        val message=PeerIdentityProtocol.proofMessage(aliceId,bobId,ap,bp,nonce(),nonce())
+        val message=PeerIdentityProtocol.proofMessage(aliceId,bobId,ap,bp,nonce(),nonce(),"46201")
         assertTrue(PeerIdentityProtocol.verify(ap,message,PeerIdentityProtocol.sign(a,message)))
         assertFalse(PeerIdentityProtocol.verify(ap,message,PeerIdentityProtocol.sign(b,message)))
     }
@@ -41,8 +41,8 @@ class PeerIdentityProtocolTest {
         val a=identity(); val b=identity()
         val ap=PeerIdentityProtocol.encodedKey(a.public); val bp=PeerIdentityProtocol.encodedKey(b.public)
         val na=nonce(); val nb=nonce()
-        val one=PeerIdentityProtocol.proofMessage(aliceId,bobId,ap,bp,na,nb)
-        val two=PeerIdentityProtocol.proofMessage(aliceId,bobId,ap,bp,nonce(),nb)
+        val one=PeerIdentityProtocol.proofMessage(aliceId,bobId,ap,bp,na,nb,"46201")
+        val two=PeerIdentityProtocol.proofMessage(aliceId,bobId,ap,bp,nonce(),nb,"46201")
         val sig=PeerIdentityProtocol.sign(a,one)
         assertTrue(PeerIdentityProtocol.verify(ap,one,sig))
         assertFalse(PeerIdentityProtocol.verify(ap,two,sig))
@@ -51,10 +51,21 @@ class PeerIdentityProtocolTest {
         val a=identity(); val b=identity()
         val ap=PeerIdentityProtocol.encodedKey(a.public); val bp=PeerIdentityProtocol.encodedKey(b.public)
         val na=nonce(); val nb=nonce()
-        val original=PeerIdentityProtocol.proofMessage(aliceId,bobId,ap,bp,na,nb)
-        val swap=PeerIdentityProtocol.proofMessage(bobId,aliceId,bp,ap,nb,na)
+        val original=PeerIdentityProtocol.proofMessage(aliceId,bobId,ap,bp,na,nb,"46201")
+        val swap=PeerIdentityProtocol.proofMessage(bobId,aliceId,bp,ap,nb,na,"46201")
         val sig=PeerIdentityProtocol.sign(a,original)
         assertFalse(PeerIdentityProtocol.verify(ap,swap,sig))
+    }
+    @Test fun proofCannotBeRelayedIntoAnotherNearbySecureChannel() {
+        val a=identity(); val b=identity()
+        val ap=PeerIdentityProtocol.encodedKey(a.public)
+        val bp=PeerIdentityProtocol.encodedKey(b.public)
+        val na=nonce(); val nb=nonce()
+        val first=PeerIdentityProtocol.proofMessage(aliceId,bobId,ap,bp,na,nb,"12345")
+        val relayed=PeerIdentityProtocol.proofMessage(aliceId,bobId,ap,bp,na,nb,"67890")
+        val sig=PeerIdentityProtocol.sign(a,first)
+        assertTrue(PeerIdentityProtocol.verify(ap,first,sig))
+        assertFalse(PeerIdentityProtocol.verify(ap,relayed,sig))
     }
     @Test fun malformedOrUnknownPublicKeyIsDenied() {
         assertFalse(PeerIdentityProtocol.verify("not-base64","hello".toByteArray(),"bad"))

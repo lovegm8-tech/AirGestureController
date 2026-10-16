@@ -40,13 +40,16 @@ object PeerIdentityProtocol {
     fun proofMessage(
         signerId: String, otherId: String,
         signerPublic: String, otherPublic: String,
-        signerNonce: String, otherNonce: String
+        signerNonce: String, otherNonce: String, nearbyChannelToken: String
     ): ByteArray {
         require(validPeerId(signerId) && validPeerId(otherId) && signerId != otherId)
         require(validNonce(signerNonce) && validNonce(otherNonce))
         require(signerPublic != otherPublic)
+        // Channel binding: signature is valid ONLY on this Nearby secure connection.
+        // Prevents reusing signed auth through a different relay connection.
+        require(nearbyChannelToken.isNotBlank() && nearbyChannelToken.length <= 128)
         val parts = listOf("AirGrab-peer-auth-v1", signerId, otherId,
-            signerPublic, otherPublic, signerNonce, otherNonce)
+            signerPublic, otherPublic, signerNonce, otherNonce, nearbyChannelToken)
         return parts.joinToString("\n").toByteArray(StandardCharsets.UTF_8)
     }
 

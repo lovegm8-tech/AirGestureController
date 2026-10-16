@@ -75,6 +75,7 @@ class BackgroundTransferManager(private val app: Context) {
     private var awaitingPair: String? = null
     private var peerHint: String? = null
     private var manualNumericApproved = false
+    private var channelToken: String? = null
     private var authPending = false
     private var localNonce: String? = null
     private var peerNonce: String? = null
@@ -102,6 +103,7 @@ class BackgroundTransferManager(private val app: Context) {
     private fun resetAuthentication() {
         authRound++
         manualNumericApproved = false
+        channelToken = null
         authPending = false
         localNonce = null
         peerNonce = null
@@ -215,7 +217,8 @@ class BackgroundTransferManager(private val app: Context) {
         worker.execute {
             try {
                 val proof = PeerIdentityProtocol.proofMessage(
-                    deviceId, otherId, ownPub, otherPub, ownNonce, otherNonce)
+                    deviceId, otherId, ownPub, otherPub, ownNonce, otherNonce,
+                    channelToken ?: error("Nearby channel token missing"))
                 val sig = PeerIdentityProtocol.sign(key, proof)
                 main.post {
                     if (authPending && otherPub == peerPublic && otherNonce == peerNonce &&
@@ -239,7 +242,8 @@ class BackgroundTransferManager(private val app: Context) {
         val ownPub = localPublic ?: return
         val msg = try {
             PeerIdentityProtocol.proofMessage(
-                otherId, deviceId, otherPub, ownPub, otherNonce, ownNonce)
+                otherId, deviceId, otherPub, ownPub, otherNonce, ownNonce,
+                channelToken ?: error("Nearby channel token missing"))
         } catch (_: Exception) {
             failAuthentication("無效簽章資料")
             return
@@ -436,6 +440,7 @@ class BackgroundTransferManager(private val app: Context) {
                 }
                 endpoint = id
                 peerHint = hintedId
+                channelToken = info.authenticationDigits
                 // A matching name only allows an attempt. It NEVER authorizes file
                 // exchange until the persisted public key signs fresh challenges.
                 if (trusted.isRecognizedHint(hintedId)) {
