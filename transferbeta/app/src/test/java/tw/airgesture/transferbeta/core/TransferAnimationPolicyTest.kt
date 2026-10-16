@@ -9,8 +9,8 @@ class TransferAnimationPolicyTest {
             VisualEvent(VisualPhase.CAPTURING, "已點擊分享")))
     }
     @Test fun capturedContentCanShowGreenSuccess() {
-        assertTrue(TransferAnimationPolicy.isSuccess(
-            VisualEvent(VisualPhase.CONTENT_READY, "原檔已取得")))
+        assertFalse(TransferAnimationPolicy.isSuccess(
+            VisualEvent(VisualPhase.CONTENT_READY, "原檔已取得，尚未送達")))
     }
     @Test fun progressNeverMeansVerified() {
         val event=VisualEvent(VisualPhase.RECEIVING, "正在接收", 100)
@@ -22,6 +22,12 @@ class TransferAnimationPolicyTest {
             VisualEvent(VisualPhase.RECEIVE_COMPLETE, "SHA 驗證完成")))
         assertFalse(TransferAnimationPolicy.isSuccess(
             VisualEvent(VisualPhase.VERIFYING, "檢查中")))
+    }
+    @Test fun onlyVerifiedCompletedTransferIsSuccessful() {
+        assertFalse(TransferAnimationPolicy.isSuccess(
+            VisualEvent(VisualPhase.WAITING_FOR_RECEIVER, "尚未送達")))
+        assertTrue(TransferAnimationPolicy.isSuccess(
+            VisualEvent(VisualPhase.SEND_COMPLETE, "對端已確認")))
     }
     @Test fun senderReceiverPaletteShouldDiffer() {
         assertFalse(TransferAnimationPolicy.isReceiver(

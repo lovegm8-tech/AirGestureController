@@ -9,11 +9,14 @@ class AdaptivePowerPolicy(
     enum class Mode { STOPPED, ECO, ACTIVE }
     private var enabled = false
     private var screenOn = true
+    @Volatile private var receiverAwaiting = false
     private var lastInference = Long.MIN_VALUE
     private var activeUntil = Long.MIN_VALUE
 
     fun start() { enabled = true; lastInference = Long.MIN_VALUE }
-    fun stop() { enabled = false }
+    fun stop() { enabled = false; receiverAwaiting = false }
+    /** Keep the camera AI responsive only when a legitimate receive offer exists. */
+    fun setReceiverAwaiting(awaiting: Boolean) { receiverAwaiting = awaiting }
     fun screenChanged(on: Boolean) {
         screenOn = on
         lastInference = Long.MIN_VALUE
@@ -21,6 +24,7 @@ class AdaptivePowerPolicy(
     }
     fun mode(nowMs: Long): Mode = when {
         !enabled || !screenOn -> Mode.STOPPED
+        receiverAwaiting -> Mode.ACTIVE
         activeUntil != Long.MIN_VALUE && nowMs <= activeUntil -> Mode.ACTIVE
         else -> Mode.ECO
     }

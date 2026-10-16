@@ -19,8 +19,7 @@ data class VisualEvent(val phase: VisualPhase, val label: String, val progress: 
 
 object TransferAnimationPolicy {
     fun isSuccess(event: VisualEvent): Boolean =
-        event.phase in setOf(VisualPhase.CONTENT_READY,
-            VisualPhase.SEND_COMPLETE, VisualPhase.RECEIVE_COMPLETE)
+        event.phase in setOf(VisualPhase.SEND_COMPLETE, VisualPhase.RECEIVE_COMPLETE)
 
     fun isReceiver(event: VisualEvent): Boolean =
         event.phase in setOf(VisualPhase.OFFER_RECEIVED,
@@ -30,14 +29,14 @@ object TransferAnimationPolicy {
         VisualPhase.CAPTURING -> 1500L
         VisualPhase.CONTENT_READY -> 1400L
         VisualPhase.WAITING_FOR_RECEIVER -> 1450L
-        VisualPhase.OFFER_RECEIVED -> 1500L
+        VisualPhase.OFFER_RECEIVED -> 4500L
         VisualPhase.RECEIVING, VisualPhase.VERIFYING -> 4500L
         VisualPhase.SEND_COMPLETE, VisualPhase.RECEIVE_COMPLETE -> 1900L
         VisualPhase.FAILURE -> 1900L
     }
     fun symbol(event: VisualEvent): String = when (event.phase) {
         VisualPhase.CAPTURING -> "◎"
-        VisualPhase.CONTENT_READY -> "✓"
+        VisualPhase.CONTENT_READY -> "↗"
         VisualPhase.WAITING_FOR_RECEIVER -> "↗"
         VisualPhase.OFFER_RECEIVED -> "↙"
         VisualPhase.RECEIVING -> "↓"

@@ -22,6 +22,25 @@ class GlobalGrabCoreTest {
         p.screenChanged(true)
         assertEquals(AdaptivePowerPolicy.Mode.ECO, p.mode(8000))
     }
+    @Test fun receiverOfferFastTrackingWithoutPermanentHighPower() {
+        val policy = AdaptivePowerPolicy()
+        policy.start()
+        assertTrue(policy.shouldInfer(1000))
+        assertFalse(policy.shouldInfer(1400))
+        policy.setReceiverAwaiting(true)
+        assertEquals(AdaptivePowerPolicy.Mode.ACTIVE, policy.mode(1400))
+        assertTrue(policy.shouldInfer(1400))
+        assertFalse(policy.shouldInfer(1440))
+        assertTrue(policy.shouldInfer(1540))
+        policy.setReceiverAwaiting(false)
+        assertEquals(AdaptivePowerPolicy.Mode.ECO, policy.mode(2500))
+        policy.setReceiverAwaiting(true)
+        policy.screenChanged(false)
+        assertEquals(AdaptivePowerPolicy.Mode.STOPPED, policy.mode(2800))
+        policy.stop()
+        policy.screenChanged(true)
+        assertEquals(AdaptivePowerPolicy.Mode.STOPPED, policy.mode(3100))
+    }
     @Test fun trustedBrowserUrlOnly() {
         val id = "com.android.chrome:id/url_bar"
         val good = GrabContentPolicy.decide("com.android.chrome",
