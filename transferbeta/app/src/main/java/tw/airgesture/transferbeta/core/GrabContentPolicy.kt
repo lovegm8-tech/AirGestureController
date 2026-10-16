@@ -3,7 +3,13 @@ package tw.airgesture.transferbeta.core
 import java.net.URI
 
 /** Accessibility text grants neither original photo nor original document access. */
-data class VisibleText(val viewId: String?, val text: String?, val password: Boolean = false)
+data class VisibleText(
+    val viewId: String?,
+    val text: String?,
+    val password: Boolean = false,
+    val focused: Boolean = false,
+    val editable: Boolean = false
+)
 
 sealed class GrabChoice {
     data class Link(val url: String) : GrabChoice()
@@ -39,11 +45,15 @@ object GrabContentPolicy {
         return parsed.toASCIIString()
     }
 
-    fun decide(packageName: String?, nodes: List<VisibleText>): GrabChoice {
+    fun decide(
+        packageName: String?, nodes: List<VisibleText>,
+        allowFocusedEditor: Boolean = false
+    ): GrabChoice {
         if (isBrowser(packageName)) {
             for (node in nodes.take(180)) {
                 if (node.password) continue
-                if (isAddressId(node.viewId)) {
+                if (isAddressId(node.viewId) ||
+                    (allowFocusedEditor && node.focused && node.editable)) {
                     safeWebUrl(node.text)?.let { return GrabChoice.Link(it) }
                 }
             }
