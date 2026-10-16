@@ -177,7 +177,7 @@ class TransferActivity : ComponentActivity() {
             homePromptVisible,
             advancedOpen
         )
-        if (!mayClose) return
+        if (!mayClose || !Settings.canDrawOverlays(this)) return
         queuedAutoHome = true
         main.postDelayed({
             queuedAutoHome = false
@@ -188,7 +188,7 @@ class TransferActivity : ComponentActivity() {
                     GlobalGestureService.transfer?.isConnected == true,
                     homePromptVisible,
                     advancedOpen
-                )) {
+                ) && Settings.canDrawOverlays(this)) {
                 moveTaskToBack(true)
             }
         }, 900)
@@ -237,7 +237,9 @@ class TransferActivity : ComponentActivity() {
             GlobalGestureService.isActive,
             GlobalGestureService.transfer?.isConnected == true
         )
-        val label = when (d.action) {
+        val overlayMissing = hasPermissions() && hasAccessibilityPermission() &&
+            !Settings.canDrawOverlays(this)
+        val label = if (overlayMissing) "開啟手勢與接收提示權限" else when (d.action) {
             tw.airgesture.transferbeta.core.HomeAction.GRANT_PERMISSION -> "開始設定 · 允許必要權限"
             tw.airgesture.transferbeta.core.HomeAction.ENABLE_ACCESSIBILITY -> "繼續設定 · 啟用隔空抓取"
             tw.airgesture.transferbeta.core.HomeAction.START -> "啟用隔空抓取"
@@ -245,7 +247,9 @@ class TransferActivity : ComponentActivity() {
             tw.airgesture.transferbeta.core.HomeAction.BACKGROUND -> "返回桌面 · 開始使用"
         }
         primaryAction.text = label
-        titleHint.text = when (d.state) {
+        titleHint.text = if (overlayMissing)
+            "尚未允許懸浮顯示：看不到已偵測手、張掌、握拳和接收通知"
+        else when (d.state) {
             tw.airgesture.transferbeta.core.HomeState.NEED_PERMISSION -> "尚差一步：開啟權限"
             tw.airgesture.transferbeta.core.HomeState.NEED_ACCESSIBILITY -> "尚差一步：開啟隔空抓取服務"
             tw.airgesture.transferbeta.core.HomeState.NEED_START -> "設定已完成，按下方啟用"
@@ -306,6 +310,12 @@ class TransferActivity : ComponentActivity() {
             text = "開始設定"
             minHeight = (resources.displayMetrics.density * 64).toInt()
             setOnClickListener {
+                if (hasPermissions() && hasAccessibilityPermission() &&
+                    !Settings.canDrawOverlays(this@TransferActivity)) {
+                    startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:" + packageName)))
+                    return@setOnClickListener
+                }
                 when (tw.airgesture.transferbeta.core.HomeScreenPolicy.decide(
                     hasPermissions(), hasAccessibilityPermission(),
                     GlobalGestureService.isActive,
