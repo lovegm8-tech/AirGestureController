@@ -1,0 +1,1 @@
+User explicitly authorized signed AirGrab v0.2.2 APK for testing. Includes 30-second countdown, air-grab hand animations, simplified first-run app, trusted-device reconnect. Use existing keystore and keep separate from main branch.
