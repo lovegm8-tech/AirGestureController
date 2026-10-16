@@ -19,6 +19,7 @@ import org.json.JSONObject
 import tw.airgesture.transferbeta.core.GrabContentPolicy
 import tw.airgesture.transferbeta.core.TransferPolicy
 import tw.airgesture.transferbeta.core.PeerIdentityProtocol
+import tw.airgesture.transferbeta.core.OfferDeliveryTracker
 import java.security.KeyPair
 import tw.airgesture.transferbeta.core.VisualEvent
 import tw.airgesture.transferbeta.core.VisualPhase
@@ -55,6 +56,8 @@ class BackgroundTransferManager(private val app: Context) {
     private var started = false
     private var busy = false
     private var session = ""
+    private var outgoingOffer: JSONObject? = null
+    private var offerDelivery: OfferDeliveryTracker? = null
     private var payloadOutgoing = -1L
     private var payloadIncoming = -1L
     private var incomingFile: Payload? = null
@@ -355,6 +358,7 @@ class BackgroundTransferManager(private val app: Context) {
         connected = false
         resetAuthentication()
         busy = false
+        clearOfferDelivery()
         offered = null
         clearIncomingPrompt()
         setReceiveArmed(false)
@@ -501,6 +505,7 @@ class BackgroundTransferManager(private val app: Context) {
                 resetAuthentication()
                 searchCycle++
                 busy = false
+                clearOfferDelivery()
                 offered = null
                 clearIncomingPrompt()
                 setReceiveArmed(false)
@@ -551,6 +556,33 @@ class BackgroundTransferManager(private val app: Context) {
         }
     }
 
+    private fun clearOfferDelivery() {
+        outgoingOffer = null
+        offerDelivery = null
+    }
+
+    /**
+     * Delivery confirmation is separate from "file/link prepared" and from
+     * actual successful transfer. Retry ONLY the same session payload.
+     */
+    private fun sendAndRetryOffer(offer: JSONObject) {
+        val sid = offer.optString("sid")
+        val tracker = OfferDeliveryTracker(sid, SystemClock.uptimeMillis())
+        outgoingOffer = offer
+        offerDelivery = tracker
+        if (tracker.recordAttempt(SystemClock.uptimeMillis())) control(offer)
+        for (delayMs in listOf(1400L, 3200L, 6200L, 11000L, 17000L, 24000L)) {
+            main.postDelayed({
+                if (connected && busy && session == sid &&
+                    outgoingOffer === offer && offerDelivery === tracker &&
+                    tracker.recordAttempt(SystemClock.uptimeMillis())) {
+                    ui("對方尚未確認請求，重新發送（第 " + tracker.attempts + " 次）")
+                    control(offer)
+                }
+            }, delayMs)
+        }
+    }
+
     private fun control(value: JSONObject) {
         val id = endpoint ?: return
         client.sendPayload(id, Payload.fromBytes(value.toString().toByteArray(Charsets.UTF_8)))
@@ -562,15 +594,19 @@ class BackgroundTransferManager(private val app: Context) {
         if (!connected || busy) { ui("無法傳送：未連線或已有傳輸進行中"); return }
         busy = true
         session = UUID.randomUUID().toString()
-        control(JSONObject().put("type", "link_offer").put("sid", session).put("url", url))
+        sendAndRetryOffer(JSONObject().put("type", "link_offer").put("sid", session).put("url", url))
         ui("網址已取得，等待對方確認（30 秒）")
         visual(VisualPhase.WAITING_FOR_RECEIVER, "已取得連結 · 尚未送達")
         val key = ++generation
         main.postDelayed({
             if (generation == key && busy) {
+                val acknowledged = offerDelivery?.wasAcknowledged() == true
                 busy = false
-                ui("網址分享逾時")
-                visual(VisualPhase.FAILURE, "對方未在 30 秒內接收")
+                clearOfferDelivery()
+                ui(if (acknowledged) "對方已收到請求，但 30 秒內未確認接收"
+                    else "對方未收到傳送請求，已逾時")
+                visual(VisualPhase.FAILURE,
+                    if (acknowledged) "接收端沒有完成接收" else "請求未送達對方")
             }
         }, TransferPolicy.OFFER_TIMEOUT_MS)
     }
@@ -591,15 +627,20 @@ class BackgroundTransferManager(private val app: Context) {
                     session = UUID.randomUUID().toString()
                     outgoing = candidate
                     payloadOutgoing = -1
-                    control(JSONObject().put("type", "file_offer").put("sid", session)
+                    sendAndRetryOffer(JSONObject().put("type", "file_offer").put("sid", session)
                         .put("name", name).put("size", candidate.length()).put("hash", sum))
                     ui("已取得：" + name + "；等待對方接收")
                     visual(VisualPhase.WAITING_FOR_RECEIVER, "已取得檔案 · 等待對方")
                     val key = ++generation
                     main.postDelayed({
                         if (generation == key && busy && payloadOutgoing < 0) {
-                            busy = false; ui("檔案接收等待逾時")
-                            visual(VisualPhase.FAILURE, "等待接收逾時")
+                            val acknowledged = offerDelivery?.wasAcknowledged() == true
+                            busy = false
+                            clearOfferDelivery()
+                            ui(if (acknowledged) "已送達接收端，但未在 30 秒內接收"
+                                else "未收到接收端的請求確認")
+                            visual(VisualPhase.FAILURE,
+                                if (acknowledged) "接收端未確認" else "對方未收到傳送請求")
                         }
                     }, TransferPolicy.OFFER_TIMEOUT_MS)
                 }
@@ -745,13 +786,23 @@ class BackgroundTransferManager(private val app: Context) {
         val sid = j.optString("sid")
         when (j.optString("type")) {
             "offer_seen" -> if (sid == session && busy) {
-                ui("接收手機已收到請求，等待接收手勢")
-                visual(VisualPhase.WAITING_FOR_RECEIVER, "對方已看到請求 · 等待接收")
+                val tracker = offerDelivery
+                if (tracker != null && tracker.acknowledge(sid)) {
+                    ui("接收手機已收到請求，等待接收手勢")
+                    visual(VisualPhase.WAITING_FOR_RECEIVER, "對方已收到 · 等待接收")
+                }
             }
             "file_offer" -> {
                 val name = j.optString("name")
                 val count = j.optLong("size", -1)
                 val sum = j.optString("hash")
+                val duplicate = offered as? Offer.FileOffer
+                if (duplicate != null && duplicate.sid == sid &&
+                    duplicate.name == TransferPolicy.safeName(name) &&
+                    duplicate.size == count && duplicate.hash == sum) {
+                    control(JSONObject().put("type", "offer_seen").put("sid", sid))
+                    return
+                }
                 if (busy || offered != null || !TransferPolicy.validFileOffer(sid, name, count, sum)) {
                     control(JSONObject().put("type", "busy").put("sid", sid)); return
                 }
@@ -766,6 +817,11 @@ class BackgroundTransferManager(private val app: Context) {
             }
             "link_offer" -> {
                 val url = j.optString("url")
+                val duplicate = offered as? Offer.LinkOffer
+                if (duplicate != null && duplicate.sid == sid && duplicate.url == url) {
+                    control(JSONObject().put("type", "offer_seen").put("sid", sid))
+                    return
+                }
                 if (busy || offered != null || !TransferPolicy.validLinkOffer(sid, url)) {
                     control(JSONObject().put("type", "busy").put("sid", sid)); return
                 }
@@ -779,6 +835,7 @@ class BackgroundTransferManager(private val app: Context) {
             }
             "file_ready" -> {
                 if (!busy || sid != session || payloadOutgoing != -1L) return
+                clearOfferDelivery()
                 val candidate = outgoing ?: return
                 try {
                     val p = Payload.fromFile(candidate)
@@ -789,20 +846,24 @@ class BackgroundTransferManager(private val app: Context) {
                 } catch (t: Exception) { busy = false; ui("傳送失敗：" + t.message) }
             }
             "file_verified" -> if (busy && sid == session) {
+                clearOfferDelivery()
                 busy = false; ++generation
                 ui("✓ 原檔 SHA-256 完整驗證，傳送成功")
                 visual(VisualPhase.SEND_COMPLETE, "傳送完成 · 對方已驗證")
             }
             "file_invalid" -> if (sid == session) {
+                clearOfferDelivery()
                 busy = false; ui("接收端檔案完整性檢查失敗")
                 visual(VisualPhase.FAILURE, "接收端驗證失敗")
             }
             "link_ack" -> if (sid == session) {
+                clearOfferDelivery()
                 busy = false; ++generation
                 ui("✓ 對方已接收網址")
                 visual(VisualPhase.SEND_COMPLETE, "網址已交給對方")
             }
             "busy" -> if (sid == session) {
+                clearOfferDelivery()
                 busy = false; ++generation
                 ui("接收端忙碌或無法接收")
                 visual(VisualPhase.FAILURE, "接收端暫時無法接收")
