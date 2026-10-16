@@ -22,6 +22,9 @@ import tw.airgesture.transferbeta.core.PeerIdentityProtocol
 import tw.airgesture.transferbeta.core.OfferDeliveryTracker
 import tw.airgesture.transferbeta.core.MediaFilePolicy
 import tw.airgesture.transferbeta.core.MediaKind
+import tw.airgesture.transferbeta.core.VideoCompatibilityPolicy
+import tw.airgesture.transferbeta.core.VideoDescription
+import tw.airgesture.transferbeta.core.VideoSendMode
 import java.security.KeyPair
 import tw.airgesture.transferbeta.core.VisualEvent
 import tw.airgesture.transferbeta.core.VisualPhase
@@ -65,6 +68,12 @@ class BackgroundTransferManager(private val app: Context) {
     private var incomingFile: Payload? = null
     private var incomingFinished = false
     private var outgoing: File? = null
+    private data class PendingVideo(
+        val sid: String, val source: File, val name: String,
+        val description: VideoDescription, val mode: VideoSendMode
+    )
+    private var pendingVideo: PendingVideo? = null
+    private var activeTranscoder: CompatibilityVideoTranscoder? = null
     private var offered: Offer? = null
     private var generation = 0
     private var lastDisplayedPercent = -1
@@ -360,6 +369,9 @@ class BackgroundTransferManager(private val app: Context) {
         connected = false
         resetAuthentication()
         busy = false
+        pendingVideo = null
+        activeTranscoder?.cancel()
+        activeTranscoder = null
         clearOfferDelivery()
         offered = null
         clearIncomingPrompt()
@@ -507,6 +519,9 @@ class BackgroundTransferManager(private val app: Context) {
                 resetAuthentication()
                 searchCycle++
                 busy = false
+                pendingVideo = null
+                activeTranscoder?.cancel()
+                activeTranscoder = null
                 clearOfferDelivery()
                 offered = null
                 clearIncomingPrompt()
@@ -614,20 +629,101 @@ class BackgroundTransferManager(private val app: Context) {
         }, TransferPolicy.OFFER_TIMEOUT_MS)
     }
 
+    /** Video transfer stays pending during capability preflight and local export.
+     * The existing 30-second receive countdown starts only after an offer exists. */
     fun offerFile(candidate: File, originalName: String) {
         if (!connected || busy) {
             ui("無法傳送：未連線或正在傳送")
             visual(VisualPhase.FAILURE, "原檔已取得，但連線忙碌或已斷線")
             return
         }
-        if (!candidate.isFile || candidate.length() > TransferPolicy.MAX_BYTES) {
-            ui("檔案不存在或超過 256MB")
-            visual(VisualPhase.FAILURE, "原始檔案無法傳送：檔案不存在或太大")
+        if (!candidate.isFile || candidate.length() == 0L ||
+            candidate.length() > TransferPolicy.MAX_BYTES) {
+            ui("檔案不存在、空白或超過 256MB")
+            visual(VisualPhase.FAILURE, "原始檔案無法傳送：大小不符合限制")
             return
         }
         val name = TransferPolicy.safeName(originalName)
             ?: run { ui("檔案名稱無效"); return }
         busy = true
+        val key = ++generation
+        val mode = VideoSendMode.fromKey(
+            app.getSharedPreferences("video_transfer", Context.MODE_PRIVATE)
+                .getString("mode", "auto"))
+        worker.execute {
+            val description = VideoFormatInspector.inspect(candidate)
+            main.post {
+                if (key != generation || !started || !connected || !busy) return@post
+                val supportedMp4 = name.endsWith(".mp4", true) ||
+                    name.endsWith(".m4v", true) || name.endsWith(".mov", true)
+                if (description != null && mode != VideoSendMode.ORIGINAL && supportedMp4) {
+                    val pending = PendingVideo(UUID.randomUUID().toString(), candidate, name,
+                        description, mode)
+                    pendingVideo = pending
+                    ui("正在確認接收裝置的影片相容性…")
+                    visual(VisualPhase.CAPTURING, "正在確認影片格式…")
+                    control(JSONObject().put("type", "video_probe").put("sid", pending.sid)
+                        .put("mime", description.mime).put("width", description.width)
+                        .put("height", description.height).put("hdr", description.hdr))
+                    // A missing reply must not block the normal transfer forever.
+                    main.postDelayed({
+                        if (pendingVideo === pending) decideVideoTransfer(pending, null)
+                    }, 2400L)
+                } else {
+                    if (description != null && mode == VideoSendMode.COMPATIBLE &&
+                        !supportedMp4) {
+                        failVideo("相容轉檔目前支援 MP4／MOV；請改用原檔模式傳送此格式")
+                    } else prepareFileOffer(candidate, name)
+                }
+            }
+        }
+    }
+
+    private fun decideVideoTransfer(pending: PendingVideo, receiverCanDecode: Boolean?) {
+        if (pendingVideo !== pending) return
+        pendingVideo = null
+        if (!busy || !connected || !started) return
+        if (!VideoCompatibilityPolicy.shouldConvert(
+                pending.mode, pending.description, receiverCanDecode)) {
+            ui("接收端可使用原始影片 · 準備傳送")
+            prepareFileOffer(pending.source, pending.name)
+            return
+        }
+        ui("影片可能不相容，正在轉成 H.264／MP4（原檔保留）")
+        visual(VisualPhase.CAPTURING, "影片轉檔中 · 請稍候…")
+        val encoder = CompatibilityVideoTranscoder(app)
+        activeTranscoder = encoder
+        encoder.export(pending.source, pending.description, { output ->
+            if (!started || !connected || !busy || activeTranscoder !== encoder) {
+                output.delete()
+            } else {
+                activeTranscoder = null
+                if (output.length() > TransferPolicy.MAX_BYTES) {
+                    output.delete()
+                    failVideo("相容影片超過 256MB，請選擇較短的影片")
+                } else {
+                    ui("已完成 H.264 相容轉檔，準備傳送")
+                    prepareFileOffer(output,
+                        VideoCompatibilityPolicy.compatibleName(pending.name))
+                }
+            }
+        }, { reason ->
+            if (activeTranscoder === encoder) {
+                activeTranscoder = null
+                failVideo("影片轉檔失敗：" + reason)
+            }
+        })
+    }
+
+    private fun failVideo(reason: String) {
+        busy = false
+        pendingVideo = null
+        ++generation
+        ui(reason)
+        visual(VisualPhase.FAILURE, reason.take(72))
+    }
+
+    private fun prepareFileOffer(candidate: File, name: String) {
         worker.execute {
             try {
                 val sum = hash(candidate)
@@ -655,13 +751,12 @@ class BackgroundTransferManager(private val app: Context) {
                 }
             } catch (e: Exception) {
                 main.post {
-                    busy = false
-                    ui("無法讀取原始檔案：" + e.message)
-                    visual(VisualPhase.FAILURE, "無法讀取原始檔案")
+                    failVideo("無法讀取待傳送檔案：" + e.message)
                 }
             }
         }
     }
+
     fun confirmReceive() {
         if (!connected || busy) { ui("接收端未連線或正在傳輸"); return }
         val current = offered ?: run {
@@ -798,6 +893,24 @@ class BackgroundTransferManager(private val app: Context) {
     private fun onControl(j: JSONObject) {
         val sid = j.optString("sid")
         when (j.optString("type")) {
+            "video_probe" -> {
+                val mime = j.optString("mime")
+                val width = j.optInt("width", 0)
+                val height = j.optInt("height", 0)
+                if (sid.length !in 12..100 || !mime.startsWith("video/") ||
+                    width !in 1..8192 || height !in 1..8192) return
+                val info = VideoDescription(mime, width, height, j.optBoolean("hdr", false))
+                val supported = VideoFormatInspector.receiverCanDecode(info) &&
+                    !VideoCompatibilityPolicy.isRiskyVideo(info)
+                control(JSONObject().put("type", "video_probe_result").put("sid", sid)
+                    .put("compatible", supported))
+            }
+            "video_probe_result" -> {
+                val pending = pendingVideo
+                if (pending != null && pending.sid == sid) {
+                    decideVideoTransfer(pending, j.optBoolean("compatible", false))
+                }
+            }
             "offer_seen" -> if (sid == session && busy) {
                 val tracker = offerDelivery
                 if (tracker != null && tracker.acknowledge(sid)) {
