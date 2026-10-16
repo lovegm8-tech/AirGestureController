@@ -12,6 +12,7 @@ import com.google.mediapipe.tasks.vision.gesturerecognizer.GestureRecognizer
 import tw.airgesture.controller.core.AdaptiveFrameScheduler
 import tw.airgesture.controller.core.GestureDecisionEngine
 import tw.airgesture.controller.core.HandVisualState
+import tw.airgesture.controller.core.HandVisualClassifier
 import tw.airgesture.controller.core.PointerDwellEngine
 import tw.airgesture.controller.core.TiltedPalmAssist
 import tw.airgesture.controller.core.YouTubeGestureRouter
@@ -107,18 +108,10 @@ class GestureCameraAnalyzer(
             val effectiveConfidence = if (angleResult.useLandmarkFallback) .65f else score
 
             // UI-only recognition feedback. Do not alter GestureDecisionEngine input.
-            val recognized = effectiveConfidence >= .65f
-            val handState = when {
-                recognized && shape == GestureDecisionEngine.Shape.OPEN_PALM ->
-                    HandVisualState.OPEN_PALM
-                recognized && shape == GestureDecisionEngine.Shape.CLOSED_FIST ->
-                    HandVisualState.CLOSED_FIST
-                categoryName == "Pointing_Up" && score >= .65f && foundHand ->
-                    HandVisualState.INDEX_FINGER
-                foundHand -> HandVisualState.HAND_DETECTED
-                else -> HandVisualState.NO_HAND
-            }
-            onHandState(handState)
+            onHandState(HandVisualClassifier.classify(
+                shape, effectiveConfidence, foundHand,
+                categoryName == "Pointing_Up" && score >= .65f
+            ))
 
             // The camera analyzer is not a mirrored Preview; make screen-right
             // movement screen-right for the front-facing camera.
