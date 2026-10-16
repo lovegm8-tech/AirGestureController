@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Native scalable launcher version of the futuristic air-gesture mark. -->
+    <path android:pathData="M23,53 A31,31 0,1 1,80 70"
+        android:strokeColor="#2CD7FF" android:strokeWidth="2.6"
+        android:strokeLineCap="round" android:fillColor="@android:color/transparent" />
+    <path android:pathData="M26,53 A25,25 0,0 1,65 31"
+        android:strokeColor="#80F7FF" android:strokeWidth="1.2"
+        android:strokeLineCap="round" android:fillColor="@android:color/transparent" android:strokeAlpha="0.65" />
+    <!-- Open palm: four raised fingers, thumb and broad cuff. -->
+    <path android:pathData="M30,84 L29,68 Q27,62 24,57 Q21,51 24,49 Q27,47 30,53 L36,63 L35,37 Q35,32 39,32 Q42,32 42,37 L43,54 L43,30 Q43,25 47,25 Q51,25 51,30 L51,53 L53,32 Q54,27 58,28 Q61,29 60,34 L59,57 L64,43 Q66,38 70,40 Q73,42 70,47 L63,67 Q68,62 73,60 Q78,59 80,63 Q81,67 76,70 L65,80 Q60,85 52,85 L30,84 Z"
+        android:fillColor="#EAFBFF"
+        android:strokeColor="#38CFFF"
+        android:strokeWidth="1.5" android:strokeLineJoin="round" />
+    <path android:pathData="M33,82 Q49,87 64,78"
+        android:strokeColor="#42BDFE" android:strokeWidth="2"
+        android:strokeLineCap="round" android:fillColor="@android:color/transparent" />
+    <!-- Sensing pulses and compact control mark to the right. -->
+    <path android:pathData="M73,40 Q82,47 81,58"
+        android:strokeColor="#72E5FF" android:strokeWidth="2.6"
+        android:strokeLineCap="round" android:fillColor="@android:color/transparent" />
+    <path android:pathData="M76,34 Q91,46 88,62"
+        android:strokeColor="#22C7FF" android:strokeWidth="1.8"
+        android:strokeLineCap="round" android:fillColor="@android:color/transparent" />
+    <path android:pathData="M80,26 L90,26 Q94,26 94,30 L94,38 Q94,42 90,42 L82,42"
+        android:strokeColor="#85F4FF" android:strokeWidth="1.4"
+        android:strokeLineJoin="round" android:strokeLineCap="round"
+        android:fillColor="@android:color/transparent" />
+    <path android:pathData="M84,30 L89,34 L84,38 Z" android:fillColor="#E9FFFF" />
+    <path android:pathData="M91,30 L91,38"
+        android:strokeColor="#E9FFFF" android:strokeWidth="1.8"
+        android:fillColor="@android:color/transparent" />
+    <path android:pathData="M83,68 L89,68 M86,65 L89,68 L86,71"
+        android:strokeColor="#82E7FF" android:strokeWidth="1.8"
+        android:strokeLineCap="round" android:fillColor="@android:color/transparent" />
+</vector>
