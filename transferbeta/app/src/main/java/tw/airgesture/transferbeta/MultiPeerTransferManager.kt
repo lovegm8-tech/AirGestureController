@@ -8,6 +8,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -57,6 +58,7 @@ class MultiPeerTransferManager(private val app: Context) {
     }
 
     private class Peer(val endpoint: String, val hint: String) {
+        var modelLabel = hint
         var nearbyReady = false
         var verified = false
         var authPending = false
@@ -124,6 +126,8 @@ class MultiPeerTransferManager(private val app: Context) {
     val rememberedDeviceIds: List<String> get() = trusted.rememberedIds()
     val connectedDeviceIds: List<String> get() =
         peers.values.filter { it.verified }.map { it.hint }
+    val connectedDeviceNames: Map<String, String> get() =
+        peers.values.filter { it.verified }.associate { it.hint to it.modelLabel }
 
     var status = "未啟動"
         private set
@@ -390,6 +394,13 @@ class MultiPeerTransferManager(private val app: Context) {
         }
         updateConnectionCount()
         if (displayedPair == null) showNextPairRequest()
+        if (!isConnected && active == null && busy && offered == null) {
+            ++epoch // abandon an unfinished file hashing/transcode request
+            pendingVideo = null
+            transcoder?.cancel()
+            transcoder = null
+            busy = false
+        }
         if (started && peers.isEmpty()) ui("附近裝置已斷線，正在繼續搜尋")
     }
 
@@ -411,6 +422,7 @@ class MultiPeerTransferManager(private val app: Context) {
                         .put("type", "auth_hello")
                         .put("v", PeerIdentityProtocol.PROTOCOL_VERSION)
                         .put("id", deviceId).put("pub", pub).put("nonce", nonce)
+                        .put("model", Build.MODEL.take(40))
                     sendControl(p, hello())
                     for (delay in listOf(450L, 1100L, 2400L, 4300L)) {
                         main.postDelayed({
@@ -432,7 +444,9 @@ class MultiPeerTransferManager(private val app: Context) {
     }
 
     private fun handleHello(p: Peer, json: JSONObject) {
-        if (!p.authPending || json.optInt("v") != PeerIdentityProtocol.PROTOCOL_VERSION) {
+        // Delayed copies of a hello are normal after the peer is authenticated.
+        if (p.verified || !p.authPending) return
+        if (json.optInt("v") != PeerIdentityProtocol.PROTOCOL_VERSION) {
             dropPeer(p, "身份驗證協定不相容")
             return
         }
@@ -459,6 +473,8 @@ class MultiPeerTransferManager(private val app: Context) {
         }
         p.remotePublic = pub
         p.remoteNonce = nonce
+        p.modelLabel = json.optString("model").trim().take(32)
+            .ifBlank { p.hint }
         sendLocalProof(p)
         verifyRemoteProof(p)
     }
@@ -526,7 +542,8 @@ class MultiPeerTransferManager(private val app: Context) {
         p.authPending = false
         p.verified = true
         updateConnectionCount()
-        ui("已安全連線 " + connectedDeviceIds.size + " 台裝置")
+        ui("已安全連線 " + connectedDeviceIds.size + " 台裝置（" +
+            connectedDeviceNames.values.joinToString("、") + "）")
         // A newly authenticated peer may still join the open 30-second offer.
         active?.let { announceToPeer(it, p) }
     }
@@ -817,7 +834,7 @@ class MultiPeerTransferManager(private val app: Context) {
                             if (bytes.size > 16_384) return@post
                             val json = JSONObject(String(bytes, Charsets.UTF_8))
                             when (json.optString("type")) {
-                                "auth_hello" -> handleHello(p, json)
+                                "auth_hello" -> if (p.authPending) handleHello(p, json)
                                 "auth_proof" -> if (p.authPending) {
                                     val proof = json.optString("sig")
                                     if (proof.length in 40..512) {
@@ -900,7 +917,7 @@ class MultiPeerTransferManager(private val app: Context) {
                         if (percent != p.lastProgress) {
                             p.lastProgress = percent
                             ui(if (isReceiving) "接收中 " + percent + "%"
-                                else "正在傳給 " + p.hint.take(12) + "：" + percent + "%")
+                                else "正在傳給 " + p.modelLabel + "：" + percent + "%")
                             if (isReceiving)
                                 visual(VisualPhase.RECEIVING, "接收中 " + percent + "%", percent)
                         }
@@ -990,7 +1007,7 @@ class MultiPeerTransferManager(private val app: Context) {
                 val batch = active ?: return
                 if (batch.sid != sid || batch.file == null) return
                 if (batch.policy.accept(p.endpoint, SystemClock.uptimeMillis())) {
-                    ui(p.hint.take(12) + " 已加入傳輸佇列")
+                    ui(p.modelLabel + " 已加入傳輸佇列")
                     sendControl(p, JSONObject().put("type", "file_queued").put("sid", sid))
                     startNextFile()
                 } else {
@@ -1009,7 +1026,8 @@ class MultiPeerTransferManager(private val app: Context) {
                 val ok = json.optString("type") == "file_verified"
                 if (ok) {
                     if (batch.policy.complete(p.endpoint)) {
-                        ui("已驗證 " + batch.policy.completedCount() + " 台裝置")
+                        ui(p.modelLabel + " 已完成驗證，成功 " +
+                            batch.policy.completedCount() + " 台裝置")
                         visual(VisualPhase.SEND_COMPLETE,
                             "裝置接收成功 · 其他接收者繼續")
                     }
@@ -1057,7 +1075,7 @@ class MultiPeerTransferManager(private val app: Context) {
                         "無法送出檔案：" + it.message)
                 }
             }
-            ui("開始傳給 " + p.hint.take(12) +
+            ui("開始傳給 " + p.modelLabel +
                 "；其他接收端已排隊，互不影響")
         } catch (e: Exception) {
             failRecipient(batch, next, "檔案無法開啟：" + e.message)
