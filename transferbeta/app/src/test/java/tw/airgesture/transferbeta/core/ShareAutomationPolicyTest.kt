@@ -129,4 +129,47 @@ class ShareAutomationPolicyTest {
         assertEquals(0,ShareAutomationPolicy.match(s,
             listOf(ActionNode("com.google.android.youtube:id/share_button", null, clickable=true))))
     }
+    @Test fun chromeEllipsisShareMenuAndGoogleShareLinkAreSupported() {
+        val chrome = ShareAutomationPolicy.plan("com.android.chrome")!!
+        assertEquals(0, ShareAutomationPolicy.match(chrome.steps.first(), listOf(
+            ActionNode(null, "Share…", clickable = true),
+            ActionNode(null, "Settings", clickable = true))))
+        assertEquals(0, ShareAutomationPolicy.match(chrome.steps.first(), listOf(
+            ActionNode(null, "分享...", clickable = true))))
+        assertEquals(0, ShareAutomationPolicy.match(chrome.steps.first(), listOf(
+            ActionNode(null, "分享網頁", clickable = true))))
+        val google = ShareAutomationPolicy.plan("com.google.android.googlequicksearchbox")!!
+        assertEquals(0, ShareAutomationPolicy.match(google.steps.first(), listOf(
+            ActionNode(null, "Share link", clickable = true),
+            ActionNode(null, "Open in browser", clickable = true))))
+        assertEquals(0, ShareAutomationPolicy.match(google.steps.first(), listOf(
+            ActionNode("com.google.android.googlequicksearchbox:id/share_button", null,
+                clickable = true))))
+    }
+    @Test fun browserShareNeverAutoclicksAmbiguousTargets() {
+        val step = ShareAutomationPolicy.plan("com.android.chrome")!!.steps.first()
+        assertNull(ShareAutomationPolicy.match(step, listOf(
+            ActionNode(null, "Share…", clickable = true),
+            ActionNode(null, "Share link", clickable = true))))
+        assertNull(ShareAutomationPolicy.match(step, listOf(
+            ActionNode(null, "Share…", clickable = false))))
+    }
+    @Test fun chromeSharingHubRequiresRecognizedVisibleState() {
+        val open = listOf("List of sharing options opened at half height.")
+        assertTrue(ShareAutomationPolicy.isChromeSharingHub("com.android.chrome", open))
+        assertFalse(ShareAutomationPolicy.isChromeSharingHub("com.android.chrome",
+            listOf("List of sharing options is closed.")))
+        assertFalse(ShareAutomationPolicy.isChromeSharingHub("com.google.android.googlequicksearchbox", open))
+        assertFalse(ShareAutomationPolicy.isChromeSharingHub("com.android.chrome",
+            listOf("More", "AirGrab")))
+        val target = ActionNode(null, null, clickable = true, texts = listOf("AirGrab"))
+        assertEquals(0, ShareAutomationPolicy.browserHubTarget(listOf(target)))
+        assertNull(ShareAutomationPolicy.browserHubTarget(listOf(target, target)))
+        assertEquals(0, ShareAutomationPolicy.browserHubMore(listOf(
+            ActionNode(null, "More", clickable = true))))
+        assertNull(ShareAutomationPolicy.browserHubMore(listOf(
+            ActionNode(null, "More", clickable = true),
+            ActionNode(null, "更多", clickable = true))))
+    }
+
 }
