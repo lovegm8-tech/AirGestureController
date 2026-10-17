@@ -136,8 +136,8 @@ class PalmCircleEngine(
         val hasActualBend = absDegrees > 32f
         // If a user swipes a straight line, release the held swipe as soon as
         // displacement is clear. No circular-volume event can follow that stroke.
-        if (!firedOnce && !hasActualBend &&
-            straightDistance > .115f && pointCount >= 3) {
+        if (!firedOnce && absDegrees < 15f &&
+            straightDistance > .115f && pointCount >= 4) {
             straight = true
             return Result(Phase.STRAIGHT, x, y)
         }
