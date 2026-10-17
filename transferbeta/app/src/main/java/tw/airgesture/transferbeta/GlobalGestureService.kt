@@ -157,6 +157,7 @@ class GlobalGestureService : LifecycleService() {
         cameraBound = false
         cameraRetryCount = 0
         power.screenChanged(false)
+        connections.setDiscoveryEnabled(false)
         provider?.unbindAll()
         overlay.dismissHand()
         GlobalGrabAccessibilityService.setCursor(null)
@@ -179,6 +180,7 @@ class GlobalGestureService : LifecycleService() {
                 // Allow face authentication to fully close its camera session.
                 // This is only reached after Keyguard is genuinely gone.
                 power.screenChanged(true)
+                connections.setDiscoveryEnabled(true)
                 bindCamera()
             } else if (++cameraRetryCount <= 25) {
                 // Infrequent checks handle devices that do not dispatch
@@ -255,6 +257,7 @@ class GlobalGestureService : LifecycleService() {
             }
         }
         GlobalGrabBridge.onReceiveGesture = { main.post { connections.confirmReceive() } }
+        connections.setDiscoveryEnabled(false)
         connections.start()
         power.start()
         // A foreground start from the unlocked dashboard may bind after a
