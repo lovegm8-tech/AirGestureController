@@ -244,19 +244,9 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
             }
             else -> Unit
         }
-        // Chrome and Google have app-owned Share controls that often open a
-        // native Share Hub instead of exposing a URL editor. Prefer the
-        // user-initiated app share path when a unique known button/menu exists.
-        // Samsung's confirmed-working address capture remains unchanged.
-        if (pkg == "com.android.chrome" ||
-            pkg == "com.google.android.googlequicksearchbox") {
-            val plan = ShareAutomationPolicy.plan(pkg)
-            if (plan != null && (ShareAutomationPolicy.match(plan.steps.first(), tree.first) != null ||
-                    ShareAutomationPolicy.browserOverflow(tree.first) != null)) {
-                beginShare(pkg, root)
-                return
-            }
-        }
+        // Prefer the address editor for Chrome and Google: the current-page
+        // card has the specific Share icon confirmed on both devices. The
+        // browser's usual Share/overflow menu remains the fallback below.
         if (GrabContentPolicy.isBrowser(pkg)) {
             // Chromium/Samsung often show only the host in the address pill.
             // Clicking the known address control exposes a complete URL in its
