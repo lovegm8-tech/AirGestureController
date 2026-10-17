@@ -3,7 +3,9 @@ package tw.airgesture.transferbeta
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityService.ScreenshotResult
 import android.accessibilityservice.AccessibilityService.TakeScreenshotCallback
+import android.accessibilityservice.GestureDescription
 import android.graphics.Bitmap
+import android.graphics.Path
 import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
@@ -329,36 +331,67 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * When YouTube's own share app carousel is not fully visible, request a
-     * bounded accessibility scroll only from a wide scrollable row within
-     * the confirmed lower-half share panel. No blind swipes or page scrolling.
+     * Reveal later apps in YouTube's horizontally scrolling share row.
+     * First ask a unique accessible carousel to scroll right. If YouTube does
+     * not expose a scrollable row, dispatch one bounded leftward swipe inside
+     * the screenshot-confirmed lower-half share sheet. This runs only after
+     * a user grab gesture and after the native YouTube sheet is verified.
      */
     private fun scrollYouTubeShareRow(root: AccessibilityNodeInfo): Boolean {
+        if (root.packageName?.toString() != YouTubeLinkPolicy.PACKAGE) return false
         val height = resources.displayMetrics.heightPixels
         val width = resources.displayMetrics.widthPixels
-        val queue = ArrayDeque<Pair<AccessibilityNodeInfo, Int>>()
-        queue.add(root to 0)
-        val rows = ArrayList<AccessibilityNodeInfo>()
-        while (queue.isNotEmpty()) {
-            val (node, depth) = queue.removeFirst()
-            if (node.isScrollable && node.isVisibleToUser) {
-                val bounds = Rect().also { node.getBoundsInScreen(it) }
-                val isShareCarousel =
-                    bounds.top >= (height * 0.48f).toInt() &&
-                    bounds.top <= (height * 0.83f).toInt() &&
+        val nodes = ArrayDeque<Pair<AccessibilityNodeInfo, Int>>()
+        nodes.add(root to 0)
+        val candidates = ArrayList<AccessibilityNodeInfo>()
+        var shareSheetMarkerInLowerHalf = false
+        var inspected = 0
+        while (nodes.isNotEmpty() && inspected++ < 260) {
+            val (node, depth) = nodes.removeFirst()
+            if (!node.isVisibleToUser || node.isPassword) continue
+            val bounds = Rect().also { node.getBoundsInScreen(it) }
+            if (bounds.width() > 0 && bounds.height() > 0 &&
+                bounds.top >= (height * 0.48f).toInt() &&
+                bounds.top < (height * 0.94f).toInt() &&
+                YouTubeLinkPolicy.isShareSheet(YouTubeLinkPolicy.PACKAGE,
+                    listOfNotNull(node.text?.toString(),
+                        node.contentDescription?.toString()))) {
+                shareSheetMarkerInLowerHalf = true
+            }
+            if (node.isScrollable) {
+                val inBottomSheet = bounds.top >= (height * 0.48f).toInt() &&
+                    bounds.top <= (height * 0.82f).toInt() &&
                     bounds.bottom <= height &&
                     bounds.width() >= (width * 0.55f).toInt() &&
                     bounds.height() <= (height * 0.32f).toInt()
-                if (isShareCarousel) rows.add(node)
+                if (inBottomSheet) candidates.add(node)
             }
-            if (depth < 16 && queue.size < 240) {
+            if (depth < 16) {
                 for (i in 0 until node.childCount) {
-                    node.getChild(i)?.let { queue.add(it to (depth + 1)) }
+                    node.getChild(i)?.let { nodes.add(it to (depth + 1)) }
                 }
             }
         }
-        if (rows.size != 1) return false
-        return rows.single().performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+        // Never swipe the underlying video or progress bar if the sheet is gone.
+        if (!shareSheetMarkerInLowerHalf) return false
+        if (candidates.size == 1) {
+            val row = candidates.single()
+            if (row.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_RIGHT.id) ||
+                row.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) return true
+        }
+        // Some versions of YouTube omit scroll actions from the carousel.
+        // Layout observed: share panel starts around 55% height; horizontal app
+        // icons occupy around 62-72%. Avoid vertical gestures and screen edges.
+        val y = height * 0.67f
+        val path = Path().apply {
+            moveTo(width * 0.83f, y)
+            lineTo(width * 0.23f, y)
+        }
+        return dispatchGesture(
+            GestureDescription.Builder()
+                .addStroke(GestureDescription.StrokeDescription(path, 0L, 330L))
+                .build(), null, null
+        )
     }
 
     private fun advanceFlow() {
@@ -400,10 +433,13 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
                             "已點選 YouTube「其他項目」；正在尋找系統分享清單的 AirGrab"))
                         return
                     }
-                } else if (flow.youtubeShareScrolls < 2 &&
+                } else if (flow.youtubeShareScrolls < 4 &&
                     scrollYouTubeShareRow(root)) {
                     flow.youtubeShareScrolls++
                     flow.lastAction = now
+                    GlobalGrabBridge.result(GrabResult.ShareStarted(
+                        "正在橫向滑動 YouTube 分享 App 清單，尋找「其他項目」 " +
+                            "(${flow.youtubeShareScrolls}/4)"))
                     return
                 }
             }
