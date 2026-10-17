@@ -16,6 +16,7 @@ object Settings {
     private const val KEY_LONG_FIST = "long_fist"
     private const val KEY_ANIMATED_HAND_FEEDBACK = "animated_hand_feedback"
     private const val KEY_SMART_LIT_POWER = "smart_lit_power"
+    private const val KEY_CIRCLE_VOLUME = "circle_volume"
 
     fun sensitivity(context: Context): Int = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         .getInt(KEY_SENSITIVITY, 1).coerceIn(0, 2)
@@ -77,6 +78,11 @@ object Settings {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getBoolean(KEY_SMART_LIT_POWER, true)
 
+    /** Experimental palm-circle volume controls; user can disable independently. */
+    fun circleVolume(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_CIRCLE_VOLUME, true)
+
     fun save(
         context: Context,
         sensitivity: Int,
@@ -90,7 +96,8 @@ object Settings {
         pointerDwellIndex: Int = pointerDwellIndex(context),
         longFistIndex: Int = longFistIndex(context),
         animatedHandFeedback: Boolean = animatedHandFeedback(context),
-        smartLitPower: Boolean = smartLitPower(context)
+        smartLitPower: Boolean = smartLitPower(context),
+        circleVolume: Boolean = circleVolume(context)
     ) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putInt(KEY_SENSITIVITY, sensitivity.coerceIn(0, 2))
@@ -105,6 +112,7 @@ object Settings {
             .putInt(KEY_LONG_FIST, longFistIndex.coerceIn(0, 2))
             .putBoolean(KEY_ANIMATED_HAND_FEEDBACK, animatedHandFeedback)
             .putBoolean(KEY_SMART_LIT_POWER, smartLitPower)
+            .putBoolean(KEY_CIRCLE_VOLUME, circleVolume)
             .apply()
     }
 
