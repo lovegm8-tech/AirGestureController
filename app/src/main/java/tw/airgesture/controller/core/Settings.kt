@@ -17,6 +17,8 @@ object Settings {
     private const val KEY_ANIMATED_HAND_FEEDBACK = "animated_hand_feedback"
     private const val KEY_SMART_LIT_POWER = "smart_lit_power"
     private const val KEY_PALM_POSITION_OVERLAY = "palm_position_overlay"
+    private const val KEY_MOTION_STANDBY = "motion_standby"
+    private const val KEY_LOW_RESOLUTION = "low_resolution_active"
 
     fun sensitivity(context: Context): Int = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         .getInt(KEY_SENSITIVITY, 1).coerceIn(0, 2)
@@ -83,6 +85,16 @@ object Settings {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getBoolean(KEY_PALM_POSITION_OVERLAY, true)
 
+    /** Opt-out: smaller motion sentinel plus sparse AI when no hand is visible. */
+    fun motionStandby(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_MOTION_STANDBY, true)
+
+    /** Optional preview experiment: keep 640x480 by default for finger accuracy. */
+    fun lowResolutionActive(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_LOW_RESOLUTION, false)
+
     fun save(
         context: Context,
         sensitivity: Int,
@@ -97,7 +109,9 @@ object Settings {
         longFistIndex: Int = longFistIndex(context),
         animatedHandFeedback: Boolean = animatedHandFeedback(context),
         smartLitPower: Boolean = smartLitPower(context),
-        palmPositionOverlay: Boolean = palmPositionOverlay(context)
+        palmPositionOverlay: Boolean = palmPositionOverlay(context),
+        motionStandby: Boolean = motionStandby(context),
+        lowResolutionActive: Boolean = lowResolutionActive(context)
     ) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putInt(KEY_SENSITIVITY, sensitivity.coerceIn(0, 2))
@@ -113,6 +127,8 @@ object Settings {
             .putBoolean(KEY_ANIMATED_HAND_FEEDBACK, animatedHandFeedback)
             .putBoolean(KEY_SMART_LIT_POWER, smartLitPower)
             .putBoolean(KEY_PALM_POSITION_OVERLAY, palmPositionOverlay)
+            .putBoolean(KEY_MOTION_STANDBY, motionStandby)
+            .putBoolean(KEY_LOW_RESOLUTION, lowResolutionActive)
             .apply()
     }
 
