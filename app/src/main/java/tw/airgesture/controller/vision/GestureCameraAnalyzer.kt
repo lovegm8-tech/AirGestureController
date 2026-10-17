@@ -33,7 +33,7 @@ class GestureCameraAnalyzer(
     private val circle: PalmCircleEngine? = if (circleVolumeEnabled) PalmCircleEngine() else null
     private var delayedSwipe: GestureDecisionEngine.Action? = null
     private var lastCircleActive = false
-    private val youtubeRouter = YouTubeGestureRouter(options.longFistSecondClickMs, options.longFistMaximumFrameGapMs)
+    private val youtubeRouter = YouTubeGestureRouter()
     private val pointer = PointerDwellEngine(pointerDwellMs)
     private val tiltAssist = TiltedPalmAssist(angleAssistEnabled)
     private val useAngleAssist = angleAssistEnabled
@@ -154,6 +154,12 @@ class GestureCameraAnalyzer(
             )
             val confirmedShape = if (effectiveConfidence < .65f)
                 GestureDecisionEngine.Shape.NO_HAND else shape
+            // Run YouTube's independent palm-to-fist state machine on EVERY
+            // camera frame, before circle/swipe arbitration can suppress the
+            // original TAP_CENTER. This fixes the lost command in v0.3.0.
+            val youtubeAction = youtubeRouter.route(
+                confirmedShape, now, action, isYouTubeForeground()
+            )
 
             if (circular?.intercept == true) {
                 if (action == GestureDecisionEngine.Action.SWIPE_UP ||
@@ -169,18 +175,27 @@ class GestureCameraAnalyzer(
                         GestureDecisionEngine.Action.VOLUME_UP
                     else GestureDecisionEngine.Action.VOLUME_DOWN)
                 }
-                lastCircleActive = true
+                // A confirmed YouTube fist has priority even if a previous
+                // static palm was being considered for circle-volume control.
+                if (youtubeAction == GestureDecisionEngine.Action.MEDIA_PLAY_PAUSE) {
+                    delayedSwipe = null
+                    lastCircleActive = false
+                    onAction(youtubeAction)
+                } else {
+                    lastCircleActive = true
+                }
             } else {
-                // Discard an unfinished arc when palm disappears; release only
-                // on a deliberate straight stroke while palm remains confirmed.
-                val output = if (circular?.cancelledToStraight == true)
-                    delayedSwipe ?: action
+                // Only defer ordinary swipe/click actions. NEVER defer an
+                // independently confirmed YouTube media command on fist closure.
+                val output = if (youtubeAction == GestureDecisionEngine.Action.MEDIA_PLAY_PAUSE)
+                    youtubeAction
+                else if (circular?.cancelledToStraight == true)
+                    delayedSwipe ?: youtubeAction
                 else if (lastCircleActive) null
-                else action
+                else youtubeAction
                 delayedSwipe = null
                 lastCircleActive = false
-                youtubeRouter.route(confirmedShape, now, output,
-                    isYouTubeForeground())?.let(onAction)
+                output?.let(onAction)
                 if (circular?.cancelledToStraight == false &&
                     circular.phase == PalmCircleEngine.Phase.IDLE) {
                     // The former circle session must not leave a blocked
