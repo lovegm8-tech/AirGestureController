@@ -242,9 +242,10 @@ class MultiPeerTransferManager(private val app: Context) {
         main.postDelayed({
             if (!started || cycle != scanEpoch) return@postDelayed
             client.stopDiscovery()
+            client.stopAdvertising()
             scanning = false
             main.postDelayed({
-                if (started && cycle == scanEpoch) search()
+                if (started && discoveryEnabled && cycle == scanEpoch) search()
             }, 12_000L)
         }, 18_000L)
     }
