@@ -1,14 +1,14 @@
-name: Floating Control Integration Code Tests (No APK)
+name: Floating Control Code Tests Only (No APK)
 on:
   push:
     branches:
       - experiment/floating-control-integration
     paths:
-      - 'transferbeta/app/src/**'
-      - 'transferbeta/app/build.gradle.kts'
-      - 'transferbeta/build.gradle.kts'
-      - 'transferbeta/settings.gradle.kts'
-      - '.github/workflows/floating-control-tests.yml'
+      - transferbeta/app/src/**
+      - transferbeta/app/build.gradle.kts
+      - transferbeta/build.gradle.kts
+      - transferbeta/settings.gradle.kts
+      - .github/workflows/floating-control-tests.yml
   workflow_dispatch:
 permissions:
   contents: read
@@ -17,6 +17,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   code-tests:
+    if: github.ref == 'refs/heads/experiment/floating-control-integration'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -34,5 +35,5 @@ jobs:
       - name: Android SDK for unit-test compilation only
         run: |
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35"
-      - name: Unit tests only: no assemble, no APK, no signing
+      - name: Kotlin + Java unit tests only; NO assemble, packaging, signing or APK
         run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
