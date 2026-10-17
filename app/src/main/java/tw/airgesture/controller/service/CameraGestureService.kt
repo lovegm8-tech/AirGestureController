@@ -82,6 +82,7 @@ class CameraGestureService : LifecycleService() {
     private var wakeEnabled = false
     private var powerMode = 0
     private var smartLitPower = false
+    private var lowResolutionActive = false
     // Only ranges explicitly advertised by the device are considered.
     private val preferredLowFps: Range<Int>? by lazy { queryLowFpsRange() }
     private var screenOffStartMs = -1L
@@ -154,16 +155,20 @@ class CameraGestureService : LifecycleService() {
         wakeEnabled = Settings.screenWake(this)
         powerMode = Settings.wakePowerMode(this)
         smartLitPower = Settings.smartLitPower(this)
+        lowResolutionActive = Settings.lowResolutionActive(this) && smartLitPower
         status = "準備前鏡頭與辨識模型…"
         phase = if (!power.isInteractive) Phase.SCREEN_SLEEP else Phase.ACTIVE
         WakeDiagnosticLog.add(this, "手勢服務啟動；熄屏喚醒=${wakeEnabled}；省電模式=${powerMode}")
+        WakeDiagnosticLog.add(this,
+            "亮屏省電：智慧=${smartLitPower}，動態待機=${smartLitPower && Settings.motionStandby(this)}，低解析度=${lowResolutionActive}")
         executor.execute {
             try {
                 val model = GestureCameraAnalyzer(
                     this, Settings.engineOptions(this),
                     Settings.performanceMode(this), Settings.tiltedPalmAssist(this),
                     Settings.pointerDwellMs(this),
-                    smartLitPower, Settings.palmPositionOverlay(this)
+                    smartLitPower, Settings.palmPositionOverlay(this),
+                    Settings.motionStandby(this)
                 )
                 main.post {
                     if (running) {
@@ -220,7 +225,8 @@ class CameraGestureService : LifecycleService() {
     private fun createImageAnalysis(lowFps: Boolean): ImageAnalysis {
         val wake = phase == Phase.SCREEN_SCAN
         val builder = ImageAnalysis.Builder()
-            .setTargetResolution(if (wake) Size(480, 360) else Size(640, 480))
+            .setTargetResolution(if (wake || lowResolutionActive)
+                Size(480, 360) else Size(640, 480))
             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
         if (lowFps) {
