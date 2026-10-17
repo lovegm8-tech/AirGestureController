@@ -6,10 +6,10 @@ package tw.airgesture.transferbeta.core
  * or an offered file's receive gesture.
  */
 class AdaptivePowerPolicy(
-    private val idleIntervalMs: Long = 950L,
-    private val deepIdleIntervalMs: Long = 1250L,
+    private val idleIntervalMs: Long = 1550L,
+    private val deepIdleIntervalMs: Long = 2100L,
     private val deepIdleAfterMs: Long = 60_000L,
-    private val activeIntervalMs: Long = 115L,
+    private val activeIntervalMs: Long = 165L,
     private val activeKeepAliveMs: Long = 2200L
 ) {
     enum class Mode { STOPPED, ECO, ACTIVE }
@@ -54,13 +54,13 @@ class AdaptivePowerPolicy(
     fun shouldInfer(nowMs: Long): Boolean {
         val interval = when (mode(nowMs)) {
             Mode.STOPPED -> return false
-            Mode.ACTIVE -> when(policy){0->170L;2->90L;else->activeIntervalMs}
+            Mode.ACTIVE -> when(policy){0->220L;2->115L;else->activeIntervalMs}
             Mode.ECO -> {
                 if (idleSince == Long.MIN_VALUE || nowMs < idleSince)
                     idleSince = nowMs
                 if(nowMs-idleSince>=deepIdleAfterMs)
-                    when(policy){0->1900L;2->950L;else->deepIdleIntervalMs}
-                else when(policy){0->1350L;2->650L;else->idleIntervalMs}
+                    when(policy){0->2600L;2->1250L;else->deepIdleIntervalMs}
+                else when(policy){0->1950L;2->950L;else->idleIntervalMs}
             }
         }
         if (lastInference != Long.MIN_VALUE && nowMs >= lastInference &&
