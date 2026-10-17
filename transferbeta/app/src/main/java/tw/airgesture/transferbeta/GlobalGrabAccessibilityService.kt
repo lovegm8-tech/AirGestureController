@@ -7,6 +7,12 @@ import android.accessibilityservice.GestureDescription
 import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Rect
+import android.graphics.Point
+import android.media.AudioManager
+import android.app.KeyguardManager
+import android.os.PowerManager
+import android.view.KeyEvent
+import android.view.WindowManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -29,7 +35,40 @@ import java.util.concurrent.Executors
  * does not silently change document access, and refuses ambiguous share buttons.
  */
 class GlobalGrabAccessibilityService : AccessibilityService() {
+    companion object {
+        @Volatile private var current: WeakReference<GlobalGrabAccessibilityService>? = null
+        @Volatile var foregroundPackage: String? = null
+            private set
+        private const val YOUTUBE = "com.google.android.youtube"
+
+        fun isYouTubeForeground(): Boolean = foregroundPackage == YOUTUBE
+        fun sendControl(command: FloatingControlRouter.Command) {
+            current?.get()?.let { service ->
+                service.main.post {
+                    if (current?.get() === service) service.executeControl(command)
+                }
+            }
+        }
+        fun setCursor(cursor: PointerDwellEngine.Result?) {
+            current?.get()?.let { service ->
+                service.main.post {
+                    if (current?.get() !== service) return@post
+                    if (cursor == null) {
+                        service.pointerOverlay?.hide()
+                    } else {
+                        if (service.pointerOverlay == null)
+                            service.pointerOverlay = FloatingPointerOverlay(service)
+                        val position = service.pointerOverlay?.update(cursor.x, cursor.y,
+                            cursor.progress, cursor.click)
+                        if (cursor.click && position != null)
+                            service.performControlTap(position.first, position.second)
+                    }
+                }
+            }
+        }
+    }
     private val io = Executors.newSingleThreadExecutor()
+    private var pointerOverlay: FloatingPointerOverlay? = null
     private val main = Handler(Looper.getMainLooper())
     private var pending: RunningShare? = null
     private var nextAttempt: Runnable? = null
@@ -52,11 +91,15 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         GlobalGrabBridge.accessibility = WeakReference(this)
+        current = WeakReference(this)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         // Expensive node traversal only while a bounded, user-initiated share is pending.
-        if (event == null || (pending == null && browserCapture == null)) return
+        if (event == null) return
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED)
+            foregroundPackage = event.packageName?.toString()
+        if (pending == null && browserCapture == null) return
         if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
             event.eventType != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
             event.eventType != AccessibilityEvent.TYPE_WINDOWS_CHANGED) return
@@ -749,8 +792,76 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
             })
     }
 
+    @Suppress("DEPRECATION")
+    private fun screenSize(): Point = Point().also {
+        (getSystemService(WINDOW_SERVICE) as WindowManager).defaultDisplay.getRealSize(it)
+    }
+
+    private fun controlAllowed(): Boolean {
+        val power = getSystemService(POWER_SERVICE) as PowerManager
+        val keyguard = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
+        return power.isInteractive && !keyguard.isKeyguardLocked &&
+            foregroundPackage != packageName && pending == null && browserCapture == null
+    }
+
+    private fun performControlTap(x: Float, y: Float) {
+        if (!controlAllowed()) return
+        val stroke = GestureDescription.StrokeDescription(
+            Path().apply { moveTo(x, y) }, 0L, 80L
+        )
+        dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
+    }
+
+    private fun executeControl(command: FloatingControlRouter.Command) {
+        if (!controlAllowed()) return
+        if (command == FloatingControlRouter.Command.MEDIA_PLAY_PAUSE) {
+            if (foregroundPackage != YOUTUBE) return
+            val audio = getSystemService(AUDIO_SERVICE) as AudioManager
+            val now = SystemClock.uptimeMillis()
+            audio.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN,
+                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, 0))
+            audio.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP,
+                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, 0))
+            return
+        }
+        val size = screenSize()
+        if (size.x < 1 || size.y < 1) return
+        val x = size.x * .5f
+        val y = size.y * .5f
+        val path = Path()
+        val duration = when (command) {
+            FloatingControlRouter.Command.SWIPE_UP -> {
+                path.moveTo(x, size.y * .74f)
+                path.lineTo(x, size.y * .30f)
+                320L
+            }
+            FloatingControlRouter.Command.SWIPE_DOWN -> {
+                path.moveTo(x, size.y * .30f)
+                path.lineTo(x, size.y * .74f)
+                320L
+            }
+            FloatingControlRouter.Command.SWIPE_BACK -> {
+                path.moveTo(size.x * .015f, y)
+                path.lineTo(size.x * .60f, y)
+                310L
+            }
+            FloatingControlRouter.Command.TAP -> {
+                path.moveTo(x, y)
+                80L
+            }
+            else -> return
+        }
+        dispatchGesture(GestureDescription.Builder().addStroke(
+            GestureDescription.StrokeDescription(path, 0L, duration)
+        ).build(), null, null)
+    }
+
     override fun onDestroy() {
         clearPending()
+        pointerOverlay?.hide()
+        pointerOverlay = null
+        if (current?.get() === this) current = null
+        foregroundPackage = null
         GlobalGrabBridge.accessibility = null
         io.shutdown()
         super.onDestroy()
