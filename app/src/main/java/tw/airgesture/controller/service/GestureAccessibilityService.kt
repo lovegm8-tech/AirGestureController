@@ -93,8 +93,17 @@ class GestureAccessibilityService : AccessibilityService() {
             val instance = current ?: return
             instance.mainHandler.post {
                 if (current === instance) {
-                    instance.execute(action)
-                    instance.indicator?.flashAction()
+                    // Do not show a success message for a YouTube command when
+                    // the foreground activity has switched away.
+                    if (action == GestureDecisionEngine.Action.MEDIA_PLAY_PAUSE) {
+                        if (instance.activePackage == YOUTUBE_PACKAGE) {
+                            instance.execute(action)
+                            instance.indicator?.flashMediaToggle()
+                        }
+                    } else {
+                        instance.execute(action)
+                        instance.indicator?.flashAction()
+                    }
                 }
             }
         }
