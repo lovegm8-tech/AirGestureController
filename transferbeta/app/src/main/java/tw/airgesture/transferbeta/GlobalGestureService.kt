@@ -464,9 +464,15 @@ class GlobalGestureService : LifecycleService() {
             when (val command = output.command) {
                 FloatingControlRouter.Command.SEND -> {
                     actionCount++
-                    lastGestureAction = "握拳抓取（已送至分享服務）"
-                    overlay.showState(VisualEvent(VisualPhase.CAPTURING, "正在抓取目前內容…"))
-                    GlobalGrabBridge.onGrabGesture()
+                    if (!connections.isConnected) {
+                        lastGestureAction = "無法傳送：尚未連線附近裝置"
+                        connections.reportCaptureFailure(
+                            "尚未連線附近裝置，請在兩台手機啟用懸浮操作，完成配對後再試")
+                    } else {
+                        lastGestureAction = "握拳抓取（已送至分享服務）"
+                        overlay.showState(VisualEvent(VisualPhase.CAPTURING, "正在抓取目前內容…"))
+                        GlobalGrabBridge.onGrabGesture()
+                    }
                 }
                 FloatingControlRouter.Command.RECEIVE -> {
                     actionCount++
