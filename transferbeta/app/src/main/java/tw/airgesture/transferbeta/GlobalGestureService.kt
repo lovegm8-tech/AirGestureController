@@ -41,7 +41,6 @@ import tw.airgesture.transferbeta.core.HandFeedbackPolicy
 import tw.airgesture.transferbeta.core.FloatingControlRouter
 import tw.airgesture.transferbeta.core.TiltedPalmAssist
 import tw.airgesture.transferbeta.core.FloatingSettings
-import tw.airgesture.transferbeta.core.PalmPositionTracker
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
 
@@ -79,6 +78,17 @@ class GlobalGestureService : LifecycleService() {
             private set
         @Volatile var lastRecognitionError = "無"
             private set
+        @Volatile private var actionOverlay: GestureStatusOverlay? = null
+        @Volatile private var actionCueEnabled = true
+
+        /** Called only after Android accepts a real control command. */
+        fun showAcceptedControlAction(command: FloatingControlRouter.Command) {
+            if (actionCueEnabled) actionOverlay?.showControlAction(command)
+        }
+
+        fun showAcceptedPointerTap() {
+            if (actionCueEnabled) actionOverlay?.showPointerClick()
+        }
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -88,12 +98,7 @@ class GlobalGestureService : LifecycleService() {
     private val motionSampler = IdleMotionSampler()
     private val handFeedback = HandFeedbackPolicy()
     private var unified = FloatingControlRouter()
-    private val palmTrail = PalmPositionTracker()
-    @Volatile private var showPalm = false
-    private var lastPalmUiAt = 0L
-    private var lastPalmUiX = Float.NaN
-    private var lastPalmUiY = Float.NaN
-    private var palmShown = false
+    // Gesture visual feedback is now event-driven, not a camera-frame trail.
     private var cursorShown = false
     private val tiltedPalm = TiltedPalmAssist(enabled = true)
     private val cameraExecutor = Executors.newSingleThreadExecutor()
@@ -182,14 +187,9 @@ class GlobalGestureService : LifecycleService() {
         provider?.unbindAll()
         overlay.dismissHand()
         GlobalGrabAccessibilityService.setCursor(null)
-        GlobalGrabAccessibilityService.setPalm(null)
+        overlay.dismissAction()
         cameraExecutor.execute {
-            palmShown = false
             cursorShown = false
-            lastPalmUiAt = 0L
-            lastPalmUiX = Float.NaN
-            lastPalmUiY = Float.NaN
-            palmTrail.clear()
             handFeedback.reset()
             unified.reset()
         }
@@ -226,6 +226,7 @@ class GlobalGestureService : LifecycleService() {
         reloadFloatingSettings()
         connections = MultiPeerTransferManager(applicationContext)
         overlay = GestureStatusOverlay(applicationContext)
+        actionOverlay = overlay
         connections.onVisualEvent = { event -> overlay.showState(event) }
         connections.onReceiverOfferState = { awaiting ->
             if (receivingOffer != awaiting) {
@@ -245,20 +246,18 @@ class GlobalGestureService : LifecycleService() {
 
     private fun reloadFloatingSettings() {
         power.setPowerMode(FloatingSettings.power(this))
-        showPalm = FloatingSettings.showPalm(this)
-        power.setPalmAnimationEnabled(showPalm)
+        // v1.0.3 battery cadence remains unchanged; no high-frequency ML
+        // solely to animate a decorative palm trail.
+        power.setPalmAnimationEnabled(false)
+        actionCueEnabled = FloatingSettings.actionFeedback(this)
         val dwell = FloatingSettings.dwellMs(this)
         val sensitivity = FloatingSettings.sensitivity(this)
         cameraExecutor.execute {
             unified = FloatingControlRouter(dwell, sensitivity)
-            palmShown = false
             cursorShown = false
-            lastPalmUiAt = 0L
-            lastPalmUiX = Float.NaN
-            lastPalmUiY = Float.NaN
-            palmTrail.clear()
         }
-        if(!showPalm) GlobalGrabAccessibilityService.setPalm(null)
+        // Hide any old v1.0.3 palm marker after upgrading.
+        GlobalGrabAccessibilityService.setPalm(null)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -475,37 +474,6 @@ class GlobalGestureService : LifecycleService() {
             val py = if (marks != null && marks.size > 17)
                 (marks[0].y() + marks[5].y() + marks[9].y() +
                     marks[13].y() + marks[17].y()) / 5f else null
-            if (showPalm) {
-                val confirmedPalm = pose == "Open_Palm" && trustedScore >= .58f
-                // Confirmed different gesture: hide immediately. One dropped
-                // detection frame should not make the visual jump/disappear.
-                val otherGesture = pose.isNotBlank() && pose != "None" &&
-                    pose != "Open_Palm"
-                val snapshot = if (otherGesture) {
-                    palmTrail.clear()
-                    null
-                } else palmTrail.observe(px, py, confirmedPalm, now)
-                if (snapshot == null) {
-                    if (palmShown) {
-                        GlobalGrabAccessibilityService.setPalm(null)
-                        palmShown = false
-                        lastPalmUiX = Float.NaN
-                        lastPalmUiY = Float.NaN
-                    }
-                } else {
-                    val moved = !lastPalmUiX.isFinite() ||
-                        kotlin.math.abs(snapshot.x - lastPalmUiX) >= .004f ||
-                        kotlin.math.abs(snapshot.y - lastPalmUiY) >= .004f
-                    val due = now - lastPalmUiAt >= if (moved) 80L else 280L
-                    if (!palmShown || due) {
-                        GlobalGrabAccessibilityService.setPalm(snapshot)
-                        palmShown = true
-                        lastPalmUiAt = now
-                        lastPalmUiX = snapshot.x
-                        lastPalmUiY = snapshot.y
-                    }
-                }
-            }
             val index = if (pose == "Pointing_Up" && marks != null &&
                 marks.size > 8) marks[8] else null
             val output = unified.accept(pose, trustedScore, px, py,
@@ -604,6 +572,7 @@ class GlobalGestureService : LifecycleService() {
         cameraGeneration++
         isActive = false
         transfer = null
+        actionOverlay = null
         GlobalGrabBridge.onGrabResult = null
         GlobalGrabBridge.onReceiveGesture = null
         connections.onVisualEvent = null
@@ -612,6 +581,7 @@ class GlobalGestureService : LifecycleService() {
         connections.stop()
         overlay.dismiss()
         overlay.dismissHand()
+        overlay.dismissAction()
         GlobalGrabAccessibilityService.setCursor(null)
         GlobalGrabAccessibilityService.setPalm(null)
         power.stop()
