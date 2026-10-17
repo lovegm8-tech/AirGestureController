@@ -88,7 +88,10 @@ class GlobalGestureService : LifecycleService() {
     private val handFeedback = HandFeedbackPolicy()
     private var unified = FloatingControlRouter()
     private val palmTrail = PalmPositionTracker()
-    @Volatile private var showPalm = true
+    @Volatile private var showPalm = false
+    private var lastPalmUiAt = 0L
+    private var palmShown = false
+    private var cursorShown = false
     private val tiltedPalm = TiltedPalmAssist(enabled = true)
     private val cameraExecutor = Executors.newSingleThreadExecutor()
     private var provider: ProcessCameraProvider? = null
@@ -178,6 +181,9 @@ class GlobalGestureService : LifecycleService() {
         GlobalGrabAccessibilityService.setCursor(null)
         GlobalGrabAccessibilityService.setPalm(null)
         cameraExecutor.execute {
+            palmShown = false
+            cursorShown = false
+            lastPalmUiAt = 0L
             palmTrail.clear()
             handFeedback.reset()
             unified.reset()
@@ -239,6 +245,9 @@ class GlobalGestureService : LifecycleService() {
         val sensitivity = FloatingSettings.sensitivity(this)
         cameraExecutor.execute {
             unified = FloatingControlRouter(dwell, sensitivity)
+            palmShown = false
+            cursorShown = false
+            lastPalmUiAt = 0L
             palmTrail.clear()
         }
         if(!showPalm) GlobalGrabAccessibilityService.setPalm(null)
@@ -452,10 +461,20 @@ class GlobalGestureService : LifecycleService() {
             val py = if (marks != null && marks.size > 17)
                 (marks[0].y() + marks[5].y() + marks[9].y() +
                     marks[13].y() + marks[17].y()) / 5f else null
-            val snapshot = if(showPalm)
-                palmTrail.observe(px, py, pose == "Open_Palm" && trustedScore >= .65f, now)
-            else { palmTrail.clear(); null }
-            GlobalGrabAccessibilityService.setPalm(snapshot)
+            if (showPalm) {
+                val snapshot = palmTrail.observe(px, py,
+                    pose == "Open_Palm" && trustedScore >= .65f, now)
+                if (snapshot == null) {
+                    if (palmShown) {
+                        GlobalGrabAccessibilityService.setPalm(null)
+                        palmShown = false
+                    }
+                } else if (!palmShown || now - lastPalmUiAt >= 250L) {
+                    GlobalGrabAccessibilityService.setPalm(snapshot)
+                    palmShown = true
+                    lastPalmUiAt = now
+                }
+            }
             val index = if (pose == "Pointing_Up" && marks != null &&
                 marks.size > 8) marks[8] else null
             val output = unified.accept(pose, trustedScore, px, py,
@@ -486,7 +505,15 @@ class GlobalGestureService : LifecycleService() {
                     GlobalGrabAccessibilityService.sendControl(command)
                 }
             }
-            GlobalGrabAccessibilityService.setCursor(output.pointer)
+            // The old code posted null overlay updates to the main thread on
+            // every recognition. Hide only once when a visible pointer leaves.
+            if (output.pointer != null) {
+                GlobalGrabAccessibilityService.setCursor(output.pointer)
+                cursorShown = true
+            } else if (cursorShown) {
+                GlobalGrabAccessibilityService.setCursor(null)
+                cursorShown = false
+            }
             // Telemetry deliberately stores no frame or hand identity.
             if (now - lastHint > 1500L) lastHint = now
         } finally { if (image !== sourceBitmap) image.recycle() }
