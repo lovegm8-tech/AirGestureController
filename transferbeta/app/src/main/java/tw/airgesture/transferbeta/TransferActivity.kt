@@ -79,7 +79,7 @@ class TransferActivity : ComponentActivity() {
     private lateinit var progress: ProgressBar
     private var provider: ProcessCameraProvider? = null
     private var recognizer: GestureRecognizer? = null
-    private val sequence = GestureSequence(holdMillis = 230L, unknownGraceMillis = 480L)
+    private val sequence = GestureSequence(holdMillis = 2_000L, unknownGraceMillis = 480L)
     @Volatile private var enhancedMode = true
     private var endpoint: String? = null
     private var connected = false
@@ -342,7 +342,7 @@ class TransferActivity : ComponentActivity() {
             }
         }
         root.addView(primaryAction)
-        root.addView(text("抓取：張開手掌 → 握拳\n\n接收：握拳 → 張開手掌", 16f))
+        root.addView(text("抓取：握拳維持 2 秒\n\n接收：收到分享後，握拳維持 2 秒", 16f))
         root.addView(text("完成連線後，可以直接使用相簿、影片或網頁，不必停留在 AirGrab。", 14f))
         val advancedToggle = Button(this).apply { text = "進階設定與測試  ▾" }
         root.addView(advancedToggle)
@@ -733,7 +733,7 @@ class TransferActivity : ComponentActivity() {
                 }
                 linkOffer = LinkOffer(sid, checked)
                 val current = ++offerEpoch
-                flash("收到網址：請握拳 → 張掌，開啟對方影片／網頁")
+                flash("收到網址：請握拳維持 2 秒，接收對方影片／網頁")
                 main.postDelayed({
                     if (offerEpoch == current && linkOffer?.session == sid && !receiving) {
                         linkOffer = null; flash("網址接收等待逾時")
@@ -754,7 +754,7 @@ class TransferActivity : ComponentActivity() {
                 }
                 offer = Offer(sid, safeName(name), length, hash)
                 val check = ++offerEpoch
-                flash("接收請求：" + safeName(name) + "\n請握拳 → 張掌")
+                flash("接收請求：" + safeName(name) + "\n請握拳維持 2 秒")
                 main.postDelayed({
                     if (check == offerEpoch && offer?.session == sid && !receiving) {
                         offer = null; flash("接收等待逾時")
@@ -926,7 +926,7 @@ class TransferActivity : ComponentActivity() {
             val score = cat?.score() ?: 0f
             val threshold = if (enhancedMode) 0.58f else 0.70f
             val pose = if (score >= threshold) cat?.categoryName() ?: "" else ""
-            when (sequence.accept(pose, now)) {
+            when (sequence.accept(pose, now, receiveAvailable = offer != null || linkOffer != null)) {
                 GestureSequence.Result.SEND -> main.post { sendGesture() }
                 GestureSequence.Result.RECEIVE -> main.post { receiveGesture() }
                 else -> {}
@@ -956,63 +956,56 @@ class TransferActivity : ComponentActivity() {
 }
 
 /**
- * A stable transition detector tolerant of brief missed frames.
- * Unknown observations never synthesize a gesture; they only preserve an existing
- * candidate briefly so a low-confidence frame does not restart the hold timer.
+ * One deliberate closed fist held for 2 seconds triggers one action.
+ * An outstanding incoming offer makes the gesture RECEIVE; otherwise it is SEND.
+ * A brief unrecognized camera frame is tolerated, but never starts a gesture.
+ * The fist must be released before it can trigger again.
  */
 class GestureSequence(
-    private val holdMillis: Long = 230L,
-    private val unknownGraceMillis: Long = 480L
+    private val holdMillis: Long = 2_000L,
+    private val unknownGraceMillis: Long = 550L
 ) {
     enum class Result { NONE, SEND, RECEIVE }
 
-    private var candidate = ""
-    private var candidateSince = 0L
-    private var candidateLastSeen = 0L
-    private var confirmed = ""
-    private var confirmedAt = 0L
-    private var cooldownUntil = 0L
+    private var fistSince = -1L
+    private var lastFistSeen = -1L
+    private var palmSince = -1L
+    private var fired = false
+
     fun reset() {
-        candidate = ""
-        candidateSince = 0L
-        candidateLastSeen = 0L
-        confirmed = ""
-        confirmedAt = 0L
-        cooldownUntil = 0L
+        fistSince = -1L
+        lastFistSeen = -1L
+        palmSince = -1L
+        fired = false
     }
 
-    fun accept(raw: String, now: Long): Result {
-        val pose = if (raw == "Open_Palm" || raw == "Closed_Fist") raw else ""
-        if (pose.isEmpty()) {
-            if (candidate.isNotEmpty() && now - candidateLastSeen > unknownGraceMillis) {
-                candidate = ""
+    fun accept(raw: String, now: Long, receiveAvailable: Boolean = false): Result {
+        when (raw) {
+            "Closed_Fist" -> {
+                palmSince = -1L
+                if (fistSince < 0L || lastFistSeen < 0L || now < lastFistSeen ||
+                    now - lastFistSeen > unknownGraceMillis) {
+                    fistSince = now
+                    fired = false
+                }
+                lastFistSeen = now
+                if (fired || now - fistSince < holdMillis) return Result.NONE
+                fired = true
+                return if (receiveAvailable) Result.RECEIVE else Result.SEND
             }
-            if (confirmed.isNotEmpty() && now - confirmedAt > 3000L) confirmed = ""
-            return Result.NONE
+            "Open_Palm" -> {
+                // Do not re-arm on one accidental open-palm classification.
+                if (palmSince < 0L) palmSince = now
+                if (now - palmSince >= 250L) reset()
+            }
+            else -> {
+                palmSince = -1L
+                if (lastFistSeen >= 0L &&
+                    (now < lastFistSeen || now - lastFistSeen > unknownGraceMillis)) {
+                    reset()
+                }
+            }
         }
-        if (pose != candidate || now - candidateLastSeen > unknownGraceMillis) {
-            candidate = pose
-            candidateSince = now
-        }
-        candidateLastSeen = now
-        if (now < cooldownUntil || now - candidateSince < holdMillis || pose == confirmed) {
-            return Result.NONE
-        }
-        val previous = confirmed
-        val gap = now - confirmedAt
-        confirmed = pose
-        confirmedAt = now
-        if (previous.isEmpty() || gap > 3000L) return Result.NONE
-        val result = when {
-            previous == "Open_Palm" && pose == "Closed_Fist" -> Result.SEND
-            previous == "Closed_Fist" && pose == "Open_Palm" -> Result.RECEIVE
-            else -> Result.NONE
-        }
-        if (result != Result.NONE) {
-            cooldownUntil = now + 1600L
-            candidate = ""
-            confirmed = ""
-        }
-        return result
+        return Result.NONE
     }
 }
