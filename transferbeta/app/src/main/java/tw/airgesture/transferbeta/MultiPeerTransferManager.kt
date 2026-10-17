@@ -168,10 +168,28 @@ class MultiPeerTransferManager(private val app: Context) {
         }
     }
 
+    /** Suspend radio discovery while the screen is locked; preserve live endpoints. */
+    @Volatile private var discoveryEnabled = true
+
+    fun setDiscoveryEnabled(enabled: Boolean) {
+        if (discoveryEnabled == enabled) return
+        discoveryEnabled = enabled
+        if (!started) return
+        if (!enabled) {
+            // Invalidate both old discovery and its scheduled future wakeup.
+            scanEpoch++
+            client.stopDiscovery()
+            client.stopAdvertising()
+            scanning = false
+            ui("熄屏省電：暫停搜尋附近手機，現有連線仍保留")
+        } else search()
+    }
+
     fun start() {
         if (started) return
         started = true
-        search()
+        if (discoveryEnabled) search()
+        else ui("熄屏省電：待解鎖後搜尋附近手機")
     }
 
     fun stop() {
@@ -207,7 +225,7 @@ class MultiPeerTransferManager(private val app: Context) {
     /** Keep advertising, so an already-connected sender can meet another device.
      * Duty-cycle discovery to limit radio power when no new peers arrive. */
     private fun search() {
-        if (!started) return
+        if (!started || !discoveryEnabled) return
         val cycle = ++scanEpoch
         val name = "Beta|" + deviceId
         val options = Strategy.P2P_CLUSTER
@@ -232,7 +250,9 @@ class MultiPeerTransferManager(private val app: Context) {
     }
 
     fun refresh() {
-        if (started) search() else ui("請先啟動 AirGrab")
+        if (started && discoveryEnabled) search()
+        else ui(if (started) "請先解鎖螢幕，附近搜尋會自動恢復"
+            else "請先啟動懸浮操作")
     }
 
     fun forgetTrustedDevice() {
