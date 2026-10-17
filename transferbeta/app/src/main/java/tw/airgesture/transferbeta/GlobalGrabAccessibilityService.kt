@@ -175,6 +175,31 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         }, 480L)
     }
 
+    /**
+     * The address editor can display a card for the CURRENT page with a Share
+     * icon even when its URL text is ellipsized. Only consider controls in the
+     * upper-right area; do not click similarly named search suggestions.
+     * We reach this method only after AirGrab tapped a trusted address bar.
+     */
+    private fun addressCardShareIndex(
+        pkg: String,
+        tree: Pair<List<ActionNode>, List<AccessibilityNodeInfo>>
+    ): Int? {
+        if (pkg != "com.android.chrome" &&
+            pkg != "com.google.android.googlequicksearchbox") return null
+        val width = resources.displayMetrics.widthPixels
+        val height = resources.displayMetrics.heightPixels
+        val topLimit = (height * 0.45f).toInt()
+        val leftLimit = (width * 0.45f).toInt()
+        val restricted = tree.first.mapIndexed { index, node ->
+            val rect = Rect().also { tree.second[index].getBoundsInScreen(it) }
+            val onCurrentPageCard = rect.width() > 0 && rect.height() > 0 &&
+                rect.top >= 0 && rect.top <= topLimit && rect.centerX() >= leftLimit
+            if (onCurrentPageCard) node else node.copy(visible = false)
+        }
+        return ShareAutomationPolicy.addressCardShare(pkg, restricted)
+    }
+
     private fun advanceBrowserCapture() {
         val capture = browserCapture ?: return
         val root = rootInActiveWindow
@@ -185,6 +210,15 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
                 clearPending()
                 performGlobalAction(GLOBAL_ACTION_BACK)
                 GlobalGrabBridge.result(GrabResult.Link(result.url))
+                return
+            }
+            // The screenshot-confirmed Chrome/Google current-page row exposes
+            // Share beside Copy/Edit without exposing an untruncated URL.
+            if (addressCardShareIndex(capture.origin, collect(root)) != null) {
+                browserCapture = null
+                nextAttempt?.let { main.removeCallbacks(it) }
+                nextAttempt = null
+                beginShare(capture.origin, root, fromAddressCard = true)
                 return
             }
         }
@@ -236,7 +270,7 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
             if (index != null && tree.second[index].performAction(
                     AccessibilityNodeInfo.ACTION_CLICK)) {
                 val now = SystemClock.uptimeMillis()
-                browserCapture = BrowserCapture(pkg, now + 1800L)
+                browserCapture = BrowserCapture(pkg, now + 3000L)
                 GlobalGrabBridge.result(GrabResult.ShareStarted(
                     "正在讀取瀏覽器完整網址…"))
                 schedulePendingCheck()
@@ -246,7 +280,9 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         beginShare(pkg, root)
     }
 
-    private fun beginShare(pkg: String, root: AccessibilityNodeInfo) {
+    private fun beginShare(
+        pkg: String, root: AccessibilityNodeInfo, fromAddressCard: Boolean = false
+    ) {
         val tree = collect(root)
         val plan = ShareAutomationPolicy.plan(pkg)
         if (plan == null) {
@@ -254,8 +290,9 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
                 "此 App 目前無已驗證的分享規則；請用分享選單或手動選取原檔。"))
             return
         }
-        val direct = ShareAutomationPolicy.match(plan.steps.first(), tree.first)
-        val menu = if (direct == null && GrabContentPolicy.isBrowser(pkg))
+        val direct = if (fromAddressCard) addressCardShareIndex(pkg, tree)
+            else ShareAutomationPolicy.match(plan.steps.first(), tree.first)
+        val menu = if (!fromAddressCard && direct == null && GrabContentPolicy.isBrowser(pkg))
             ShareAutomationPolicy.browserOverflow(tree.first) else null
         val index = direct ?: menu
         if (index == null) {
@@ -286,7 +323,8 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         if (tree.second[index].performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
             GlobalGrabBridge.result(GrabResult.ShareStarted(
                 if (GrabContentPolicy.isBrowser(pkg))
-                    if (direct != null) "已開啟瀏覽器分享 · 正在找 AirGrab"
+                    if (fromAddressCard) "已點選目前網頁旁的分享圖示 · 正在找 AirGrab"
+                    else if (direct != null) "已開啟瀏覽器分享 · 正在找 AirGrab"
                     else "已展開瀏覽器選單 · 正在找分享功能"
                 else "已開啟三星相簿分享選單；正在找 AirGrab（尚未取得照片原檔）"))
             schedulePendingCheck()
