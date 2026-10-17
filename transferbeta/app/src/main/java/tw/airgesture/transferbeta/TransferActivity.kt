@@ -89,7 +89,7 @@ class TransferActivity : ComponentActivity() {
     private lateinit var progress: ProgressBar
     private var provider: ProcessCameraProvider? = null
     private var recognizer: GestureRecognizer? = null
-    private val sequence = GestureSequence(holdMillis = 2_000L, unknownGraceMillis = 480L)
+    private val sequence = GestureSequence(holdMillis = 2_000L, unknownGraceMillis = 850L)
     @Volatile private var enhancedMode = true
     private var endpoint: String? = null
     private var connected = false
@@ -573,10 +573,23 @@ class TransferActivity : ComponentActivity() {
                     Uri.parse("package:" + packageName)))
             } else flash("已允許懸浮動畫", true)
         }
-        extraButton("辨識與效能資訊") {
-            flash("影格：" + GlobalGestureService.framesSeen +
-                "／辨識：" + GlobalGestureService.inferences +
-                "／鏡頭 FPS：" + GlobalGestureService.requestedSensorFps)
+        extraButton("辨識與操作診斷") {
+            AlertDialog.Builder(this)
+                .setTitle("懸浮操作 · 動作診斷")
+                .setMessage(
+                    "無障礙服務：" +
+                        (if (GlobalGrabAccessibilityService.isConnected) "已連線" else "未連線，請重新啟用") +
+                    "\n最近辨識：" + GlobalGestureService.lastPose +
+                    "\n已發出指令：" + GlobalGestureService.actionCount + " 次" +
+                    "\n最後指令：" + GlobalGestureService.lastGestureAction +
+                    "\n操作結果：" + GlobalGrabAccessibilityService.lastControlStatus +
+                    "\n鏡頭影格：" + GlobalGestureService.framesSeen +
+                    "\nAI辨識：" + GlobalGestureService.inferences +
+                    "\n鏡頭 FPS：" + GlobalGestureService.requestedSensorFps +
+                    "\n辨識異常：" + GlobalGestureService.lastRecognitionError +
+                    "\n附近裝置連線：" +
+                        (if (GlobalGestureService.transfer?.isConnected == true) "已連線" else "尚未連線")
+                ).setPositiveButton("完成", null).show()
         }
         extraButton("停止懸浮操作") {
             homePrefs.edit().putBoolean("auto_run", false).apply()

@@ -71,6 +71,14 @@ class GlobalGestureService : LifecycleService() {
             private set
         @Volatile var requestedSensorFps = "由裝置決定"
             private set
+        @Volatile var lastPose = "尚未辨識"
+            private set
+        @Volatile var lastGestureAction = "尚無指令"
+            private set
+        @Volatile var actionCount = 0L
+            private set
+        @Volatile var lastRecognitionError = "無"
+            private set
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -272,6 +280,9 @@ class GlobalGestureService : LifecycleService() {
             return START_NOT_STICKY
         }
         foregroundNotification()
+        lastGestureAction = "等待操作"
+        actionCount = 0L
+        lastRecognitionError = "無"
         isActive = true
         transfer = connections
         GlobalGrabBridge.onGrabResult = { result ->
@@ -375,8 +386,11 @@ class GlobalGestureService : LifecycleService() {
                 }
                 val analysis = b.build()
                 analysis.setAnalyzer(cameraExecutor) { frame ->
-                    try { infer(frame) } catch (_: Exception) { /* fail closed */ }
-                    finally { frame.close() }
+                    try { infer(frame) } catch (error: Exception) {
+                        lastRecognitionError = error.javaClass.simpleName +
+                            ": " + (error.message?.take(90) ?: "unknown")
+                        android.util.Log.w("FloatingControl", "手勢辨識錯誤", error)
+                    } finally { frame.close() }
                 }
                 provider = future.get()
                 provider?.unbindAll()
@@ -429,6 +443,8 @@ class GlobalGestureService : LifecycleService() {
             val pose = if (tilt.useLandmarkFallback) "Open_Palm"
                 else if (score >= .58f) name ?: "" else ""
             val trustedScore = if (tilt.useLandmarkFallback) .65f else score
+            lastPose = (if (pose.isBlank()) "未分類" else pose) +
+                " " + (trustedScore * 100f).toInt() + "%"
             handFeedback.observe(handSeen, pose, now)?.let(overlay::showHandFeedback)
             val px = if (marks != null && marks.size > 17)
                 1f - (marks[0].x() + marks[5].x() + marks[9].x() +
@@ -447,12 +463,22 @@ class GlobalGestureService : LifecycleService() {
                 GlobalGrabAccessibilityService.isYouTubeForeground())
             when (val command = output.command) {
                 FloatingControlRouter.Command.SEND -> {
+                    actionCount++
+                    lastGestureAction = "握拳抓取（已送至分享服務）"
                     overlay.showState(VisualEvent(VisualPhase.CAPTURING, "正在抓取目前內容…"))
                     GlobalGrabBridge.onGrabGesture()
                 }
-                FloatingControlRouter.Command.RECEIVE -> GlobalGrabBridge.onReleaseGesture()
+                FloatingControlRouter.Command.RECEIVE -> {
+                    actionCount++
+                    lastGestureAction = "握拳接收（已送至傳檔服務）"
+                    GlobalGrabBridge.onReleaseGesture()
+                }
                 null -> Unit
-                else -> GlobalGrabAccessibilityService.sendControl(command)
+                else -> {
+                    actionCount++
+                    lastGestureAction = "隔空操作指令：" + command.name
+                    GlobalGrabAccessibilityService.sendControl(command)
+                }
             }
             GlobalGrabAccessibilityService.setCursor(output.pointer)
             // Telemetry deliberately stores no frame or hand identity.

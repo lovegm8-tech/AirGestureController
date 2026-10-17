@@ -96,6 +96,30 @@ class FloatingControlRouterTest {
         assertFalse(step(r, "Pointing_Up", 3200L, ix = .4f, iy = .5f).pointer?.click ?: true)
     }
 
+    @Test fun classifiedHandAt60PercentCanStillTriggerTwoSecondGrab() {
+        val r = FloatingControlRouter()
+        var count = 0
+        for (i in 0..30) {
+            val decision = r.accept("Closed_Fist", .60f, null, null, null, null,
+                1000L + i * 100L, false, false)
+            if (decision.command == FloatingControlRouter.Command.SEND) count++
+        }
+        assertEquals(1, count)
+    }
+
+    @Test fun openPalmSwipeAt60PercentMatchesHandStatus() {
+        val r = FloatingControlRouter()
+        val first = r.accept("Open_Palm", .60f, .50f, .85f, null, null,
+            1000L, false, false)
+        val second = r.accept("Open_Palm", .60f, .50f, .85f, null, null,
+            1100L, false, false)
+        val third = r.accept("Open_Palm", .60f, .50f, .50f, null, null,
+            1250L, false, false)
+        assertNull(first.command)
+        assertNull(second.command)
+        assertEquals(FloatingControlRouter.Command.SWIPE_UP, third.command)
+    }
+
     @Test fun noGestureOnWeakRecognition() {
         val r = FloatingControlRouter()
         val results = (0..30).map {

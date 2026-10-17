@@ -39,14 +39,22 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         @Volatile private var current: WeakReference<GlobalGrabAccessibilityService>? = null
         @Volatile var foregroundPackage: String? = null
             private set
+        @Volatile var isConnected = false
+            private set
+        @Volatile var lastControlStatus = "尚未連線無障礙服務"
+            private set
         private const val YOUTUBE = "com.google.android.youtube"
 
         fun isYouTubeForeground(): Boolean = foregroundPackage == YOUTUBE
         fun sendControl(command: FloatingControlRouter.Command) {
-            current?.get()?.let { service ->
-                service.main.post {
-                    if (current?.get() === service) service.executeControl(command)
-                }
+            val service = current?.get()
+            if (service == null) {
+                lastControlStatus = "指令未執行：無障礙服務尚未連線"
+                return
+            }
+            service.main.post {
+                if (current?.get() === service) service.executeControl(command)
+                else lastControlStatus = "指令未執行：無障礙服務已中斷"
             }
         }
         fun setPalm(snapshot:PalmPositionTracker.Snapshot?) {
@@ -103,6 +111,8 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         GlobalGrabBridge.accessibility = WeakReference(this)
         current = WeakReference(this)
+        isConnected = true
+        lastControlStatus = "無障礙服務已連線，等待手勢操作"
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -811,8 +821,14 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
     private fun controlAllowed(): Boolean {
         val power = getSystemService(POWER_SERVICE) as PowerManager
         val keyguard = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
-        return power.isInteractive && !keyguard.isKeyguardLocked &&
+        val ok = power.isInteractive && !keyguard.isKeyguardLocked &&
             foregroundPackage != packageName && pending == null && browserCapture == null
+        if (!ok) lastControlStatus = when {
+            !power.isInteractive || keyguard.isKeyguardLocked -> "螢幕未解鎖，已停止操作"
+            foregroundPackage == packageName -> "目前是設定首頁，已防止誤觸"
+            else -> "傳檔流程處理中，暫不執行觸控操作"
+        }
+        return ok
     }
 
     private fun performControlTap(x: Float, y: Float) {
@@ -820,19 +836,24 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         val stroke = GestureDescription.StrokeDescription(
             Path().apply { moveTo(x, y) }, 0L, 80L
         )
-        dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
+        val sent = dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
+        lastControlStatus = if (sent) "食指停留點擊已送出" else "食指停留點擊被系統拒絕"
     }
 
     private fun executeControl(command: FloatingControlRouter.Command) {
         if (!controlAllowed()) return
         if (command == FloatingControlRouter.Command.MEDIA_PLAY_PAUSE) {
-            if (foregroundPackage != YOUTUBE) return
+            if (foregroundPackage != YOUTUBE) {
+                lastControlStatus = "YouTube 未在前景，未發送播放鍵"
+                return
+            }
             val audio = getSystemService(AUDIO_SERVICE) as AudioManager
             val now = SystemClock.uptimeMillis()
             audio.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN,
                 KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, 0))
             audio.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP,
                 KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, 0))
+            lastControlStatus = "已發送 YouTube 播放／暫停鍵"
             return
         }
         val size = screenSize()
@@ -862,9 +883,11 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
             }
             else -> return
         }
-        dispatchGesture(GestureDescription.Builder().addStroke(
+        val sent = dispatchGesture(GestureDescription.Builder().addStroke(
             GestureDescription.StrokeDescription(path, 0L, duration)
         ).build(), null, null)
+        lastControlStatus = if (sent) "已送出操作：" + command.name
+            else "系統拒絕操作：" + command.name
     }
 
     override fun onDestroy() {
@@ -874,6 +897,8 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         palmOverlay?.hide()
         palmOverlay = null
         if (current?.get() === this) current = null
+        isConnected = false
+        lastControlStatus = "無障礙服務已中斷"
         foregroundPackage = null
         GlobalGrabBridge.accessibility = null
         io.shutdown()

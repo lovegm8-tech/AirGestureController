@@ -14,9 +14,11 @@ class FloatingControlRouter(pointerDwellMs:Long=2000L, sensitivity:Int=1) {
         val pointer: PointerDwellEngine.Result? = null
     )
 
-    private val fist = GestureSequence(holdMillis = 2_000L, unknownGraceMillis = 550L)
+    private val fist = GestureSequence(holdMillis = 2_000L, unknownGraceMillis = 900L)
     private val swipes = GestureDecisionEngine(
-        GestureDecisionEngine.Options(fastSwipeAssistEnabled = true, swipeDistance = when(sensitivity){ 0->.18f;2->.09f;else->.13f })
+        GestureDecisionEngine.Options(fastSwipeAssistEnabled = true,
+            minimumConfidence = .58f,
+            swipeDistance = when(sensitivity){ 0->.18f;2->.09f;else->.13f })
     )
     private val pointer = PointerDwellEngine(dwellMs = pointerDwellMs)
     private var palmFrames = 0
@@ -63,7 +65,8 @@ class FloatingControlRouter(pointerDwellMs:Long=2000L, sensitivity:Int=1) {
         receivingOffer: Boolean,
         youtubeForeground: Boolean
     ): Decision {
-        val shape = if (confidence >= .65f) category else null
+        // This must match the hand-recognition badge and the service's pose threshold.
+        val shape = if (confidence >= .58f) category else null
         val hold = fist.accept(
             if (shape == "Closed_Fist" || shape == "Open_Palm") shape else "",
             nowMs, receiveAvailable = receivingOffer
@@ -84,7 +87,7 @@ class FloatingControlRouter(pointerDwellMs:Long=2000L, sensitivity:Int=1) {
         val swipe = swipes.accept(GestureDecisionEngine.Frame(
             s, palmY, if (shape == null) 0f else confidence, palmX
         ), nowMs)
-        val cursor = if (shape == "Pointing_Up" &&
+        val cursor = if (shape == "Pointing_Up" && confidence >= .65f &&
             indexX != null && indexY != null) {
             pointer.accept(indexX, indexY, nowMs)
         } else {
