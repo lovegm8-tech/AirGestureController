@@ -115,10 +115,23 @@ class GlobalGestureService : LifecycleService() {
         }
     }
 
-    private fun screenIsUnlocked(): Boolean = try {
-        powerManager.isInteractive && !keyguard.isKeyguardLocked && !keyguard.isDeviceLocked
+    private data class UnlockState(
+        val interactive: Boolean,
+        val keyguardLocked: Boolean,
+        val deviceLocked: Boolean
+    )
+    private fun currentUnlockState(): UnlockState = try {
+        UnlockState(powerManager.isInteractive, keyguard.isKeyguardLocked,
+            keyguard.isDeviceLocked)
     } catch (_: Exception) {
-        false
+        // Unknown lock state is treated as locked; never compete with face ID.
+        UnlockState(false, true, true)
+    }
+
+    private fun mayBindCamera(): Boolean {
+        val state = currentUnlockState()
+        return unlockGate.canUseCamera(state.interactive,
+            state.keyguardLocked, state.deviceLocked)
     }
 
     private fun cancelUnlockCheck() {
@@ -151,8 +164,9 @@ class GlobalGestureService : LifecycleService() {
         val check = Runnable {
             cameraResumeCheck = null
             if (!isActive || !isScreenOn || cameraGeneration != expectedGeneration) return@Runnable
-            val unlocked = screenIsUnlocked()
-            if (unlockGate.confirmUnlocked(unlocked, !unlocked, !unlocked)) {
+            val state = currentUnlockState()
+            if (unlockGate.confirmUnlocked(state.interactive,
+                    state.keyguardLocked, state.deviceLocked)) {
                 // Allow face authentication to fully close its camera session.
                 // This is only reached after Keyguard is genuinely gone.
                 power.screenChanged(true)
@@ -286,13 +300,13 @@ class GlobalGestureService : LifecycleService() {
 
     private fun bindCamera() {
         if (cameraBindPending || cameraBound || !isActive || !isScreenOn ||
-            !screenIsUnlocked()) return
+            !mayBindCamera()) return
         val generation = cameraGeneration
         cameraBindPending = true
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             if (cameraGeneration != generation || !isActive || !isScreenOn ||
-                !screenIsUnlocked()) {
+                !mayBindCamera()) {
                 if (cameraGeneration == generation) cameraBindPending = false
                 return@addListener
             }
