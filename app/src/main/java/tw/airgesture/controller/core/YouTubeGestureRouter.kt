@@ -1,35 +1,54 @@
 package tw.airgesture.controller.core
 
 /**
- * Converts the existing palm-to-fist click into distinct short/long actions
- * only when the official YouTube app is actually foreground.
+ * The official YouTube app uses one dedicated gesture:
  *
- * The first normal TAP_CENTER is *withheld* in YouTube, so a long fist never
- * taps the video before issuing the play/pause media key. Other apps receive
- * their original v0.2.7 actions completely unchanged.
+ *       stable open palm -> confirmed closed fist -> MEDIA_PLAY_PAUSE
  *
- * The long hold duration starts after the original engine's first confirmed
- * fist click, matching the time selector introduced in v0.2.7.
+ * The media key is emitted on the SECOND good fist frame (usually ~100-200 ms
+ * after the fist is seen), never after an additional "long hold" timer.
+ *
+ * No central touch is ever substituted for an incomplete fist. A single fist
+ * can emit at most one key until the hand has visibly reopened long enough to
+ * re-arm the gesture. In all other apps legacy actions pass through unchanged.
+ *
+ * This is independent of the original GestureDecisionEngine's tap state, so
+ * circular-volume arbitration and previous swipe cooldown cannot lose a media
+ * play/pause action.
  */
 class YouTubeGestureRouter(
-    private val longHoldMs: Long = 700L,
-    private val maximumFrameGapMs: Long = 550L,
-    private val releaseConfirmationMs: Long = 130L
+    private val maxFrameGapMs: Long = 480L,
+    private val palmToFistWindowMs: Long = 1200L,
+    private val rearmPalmMs: Long = 320L,
+    private val minTriggerGapMs: Long = 650L
 ) {
-    private var pending = false
-    private var finishedLongFist = false
-    private var fistStartMs = Long.MIN_VALUE
-    private var lastFistMs = Long.MIN_VALUE
-    private var nonFistStartMs = Long.MIN_VALUE
+    private enum class Stage { SEEK_PALM, ARMED, FIRED }
+
+    private var stage = Stage.SEEK_PALM
     private var youtubePreviously = false
+    private var lastSeenAt = Long.MIN_VALUE
+    private var lastPalmAt = Long.MIN_VALUE
+    private var openFrames = 0
+    private var fistFrames = 0
+    private var lastFistAt = Long.MIN_VALUE
+    private var rearmPalmSince = Long.MIN_VALUE
+    private var triggeredAt = Long.MIN_VALUE
 
     fun reset() {
-        pending = false
-        finishedLongFist = false
-        fistStartMs = Long.MIN_VALUE
-        lastFistMs = Long.MIN_VALUE
-        nonFistStartMs = Long.MIN_VALUE
+        stage = Stage.SEEK_PALM
         youtubePreviously = false
+        lastSeenAt = Long.MIN_VALUE
+        lastPalmAt = Long.MIN_VALUE
+        openFrames = 0
+        fistFrames = 0
+        lastFistAt = Long.MIN_VALUE
+        rearmPalmSince = Long.MIN_VALUE
+        triggeredAt = Long.MIN_VALUE
+    }
+
+    private fun beginYoutube() {
+        reset()
+        youtubePreviously = true
     }
 
     fun route(
@@ -39,69 +58,89 @@ class YouTubeGestureRouter(
         youtubeForeground: Boolean
     ): GestureDecisionEngine.Action? {
         if (!youtubeForeground) {
-            // Never let a YouTube click leak into a newly foreground app.
             reset()
             return action
         }
-        if (!youtubePreviously) {
-            reset()
-            youtubePreviously = true
-        }
+        if (!youtubePreviously) beginYoutube()
 
-        if (finishedLongFist) {
-            // Ignore stale v0.2.7 long-fist repeat while a fist is still held.
-            if (shape != GestureDecisionEngine.Shape.CLOSED_FIST) {
-                finishedLongFist = false
+        // Suppress ALL v0.2.7 tap and long-fist clicks on YouTube. No accidental
+        // touch is sent if the fist fails confirmation.
+        val otherwise = if (action == GestureDecisionEngine.Action.TAP_CENTER)
+            null else action
+
+        if (lastSeenAt != Long.MIN_VALUE &&
+            (nowMs < lastSeenAt || nowMs - lastSeenAt > 1600L)) {
+            beginYoutube()
+        }
+        lastSeenAt = nowMs
+
+        if (stage == Stage.FIRED) {
+            // A motionless fist must NEVER toggle twice. Re-arming requires
+            // multiple real OPEN_PALM observations spaced over >=320ms.
+            if (shape == GestureDecisionEngine.Shape.OPEN_PALM) {
+                if (rearmPalmSince == Long.MIN_VALUE) rearmPalmSince = nowMs
+                if (nowMs - rearmPalmSince >= rearmPalmMs &&
+                    triggeredAt != Long.MIN_VALUE &&
+                    nowMs - triggeredAt >= minTriggerGapMs) {
+                    stage = Stage.ARMED
+                    lastPalmAt = nowMs
+                    openFrames = 2
+                    fistFrames = 0
+                    lastFistAt = Long.MIN_VALUE
+                }
+            } else if (shape == GestureDecisionEngine.Shape.CLOSED_FIST) {
+                rearmPalmSince = Long.MIN_VALUE
+            } else if (rearmPalmSince != Long.MIN_VALUE &&
+                nowMs - rearmPalmSince > maxFrameGapMs) {
+                rearmPalmSince = Long.MIN_VALUE
             }
-            return if (action == GestureDecisionEngine.Action.TAP_CENTER) null else action
+            return otherwise
         }
 
-        if (pending) {
-            when (shape) {
-                GestureDecisionEngine.Shape.CLOSED_FIST -> {
-                    val gap = nowMs - lastFistMs
-                    if (gap < 0 || gap > maximumFrameGapMs) {
-                        reset()
-                        youtubePreviously = true
-                        return null
-                    }
-                    lastFistMs = nowMs
-                    nonFistStartMs = Long.MIN_VALUE
-                    if (nowMs - fistStartMs >= longHoldMs) {
-                        pending = false
-                        finishedLongFist = true
-                        return GestureDecisionEngine.Action.MEDIA_PLAY_PAUSE
-                    }
-                }
-                GestureDecisionEngine.Shape.OPEN_PALM,
-                GestureDecisionEngine.Shape.OTHER -> {
-                    if (nonFistStartMs == Long.MIN_VALUE) nonFistStartMs = nowMs
-                    if (nowMs - nonFistStartMs >= releaseConfirmationMs) {
-                        pending = false
-                        return GestureDecisionEngine.Action.TAP_CENTER
-                    }
-                }
-                GestureDecisionEngine.Shape.NO_HAND -> {
-                    // Brief model flicker does not count as a released fist.
-                    if (nowMs - lastFistMs >= maximumFrameGapMs) {
-                        pending = false
-                        return GestureDecisionEngine.Action.TAP_CENTER
-                    }
-                }
+        if (shape == GestureDecisionEngine.Shape.OPEN_PALM) {
+            if (lastPalmAt == Long.MIN_VALUE ||
+                nowMs < lastPalmAt || nowMs - lastPalmAt > maxFrameGapMs) {
+                openFrames = 0
             }
-            return null
+            lastPalmAt = nowMs
+            openFrames++
+            if (openFrames >= 2) stage = Stage.ARMED
+            fistFrames = 0
+            lastFistAt = Long.MIN_VALUE
+            return otherwise
         }
 
-        if (action == GestureDecisionEngine.Action.TAP_CENTER &&
-            shape == GestureDecisionEngine.Shape.CLOSED_FIST
-        ) {
-            pending = true
-            fistStartMs = nowMs
-            lastFistMs = nowMs
-            nonFistStartMs = Long.MIN_VALUE
-            return null
+        if (stage != Stage.ARMED) return otherwise
+
+        // Once an open palm has been confirmed, an actual fist must appear
+        // shortly afterwards. Brief model flicker is fine; a stale hand isn't.
+        if (lastPalmAt == Long.MIN_VALUE ||
+            nowMs < lastPalmAt || nowMs - lastPalmAt > palmToFistWindowMs) {
+            stage = Stage.SEEK_PALM
+            fistFrames = 0
+            return otherwise
         }
-        // Swipes and pointer actions are unchanged in YouTube.
-        return action
+        if (shape == GestureDecisionEngine.Shape.CLOSED_FIST) {
+            if (lastFistAt == Long.MIN_VALUE ||
+                nowMs < lastFistAt || nowMs - lastFistAt > maxFrameGapMs) {
+                fistFrames = 0
+            }
+            lastFistAt = nowMs
+            fistFrames++
+            if (fistFrames >= 2) {
+                stage = Stage.FIRED
+                triggeredAt = nowMs
+                rearmPalmSince = Long.MIN_VALUE
+                return GestureDecisionEngine.Action.MEDIA_PLAY_PAUSE
+            }
+        } else if (shape == GestureDecisionEngine.Shape.OTHER) {
+            // Bad pose isn't a verified fist. Preserve the preceding palm
+            // briefly, but require two fresh fist frames after the blur.
+            fistFrames = 0
+            lastFistAt = Long.MIN_VALUE
+        }
+        // NO_HAND is allowed as a short interruption; timeout above still
+        // prevents stale hands and repeated toggles.
+        return otherwise
     }
 }
