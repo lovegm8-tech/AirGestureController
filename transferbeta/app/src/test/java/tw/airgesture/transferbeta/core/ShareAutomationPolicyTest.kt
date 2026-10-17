@@ -205,7 +205,7 @@ class ShareAutomationPolicyTest {
     @Test fun samsungChooserLineBreaksInAirGrabLabel() {
         assertEquals(0, ShareAutomationPolicy.onlyUniqueChooserTarget(
             "com.samsung.android.app.sharelive", listOf(
-                ActionNode(null, "AirGrab 隔空抓取".replace(" ", "\\n"), clickable = true))))
+                ActionNode(null, "AirGrab 隔空抓取".replace(" ", System.lineSeparator()), clickable = true))))
         assertNull(ShareAutomationPolicy.onlyUniqueChooserTarget(
             "com.google.android.youtube", listOf(
                 ActionNode(null, "AirGrab 隔空抓取", clickable = true))))
