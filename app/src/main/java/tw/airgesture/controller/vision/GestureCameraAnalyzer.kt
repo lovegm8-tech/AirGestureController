@@ -14,7 +14,7 @@ import tw.airgesture.controller.core.GestureDecisionEngine
 import tw.airgesture.controller.core.HandVisualState
 import tw.airgesture.controller.core.HandVisualClassifier
 import tw.airgesture.controller.core.PointerDwellEngine
-import tw.airgesture.controller.core.PalmCircleEngine
+import tw.airgesture.controller.core.PalmPositionTracker
 import tw.airgesture.controller.core.TiltedPalmAssist
 import tw.airgesture.controller.core.YouTubeGestureRouter
 import java.nio.ByteBuffer
@@ -27,12 +27,11 @@ class GestureCameraAnalyzer(
     angleAssistEnabled: Boolean = false,
     pointerDwellMs: Long = 2000L,
     smartLitPower: Boolean = false,
-    circleVolumeEnabled: Boolean = true
+    palmPositionOverlayEnabled: Boolean = true
 ) : AutoCloseable {
     private val decision = GestureDecisionEngine(options)
-    private val circle: PalmCircleEngine? = if (circleVolumeEnabled) PalmCircleEngine() else null
-    private var delayedSwipe: GestureDecisionEngine.Action? = null
-    private var lastCircleActive = false
+    private val palmTracker: PalmPositionTracker? = if (palmPositionOverlayEnabled)
+        PalmPositionTracker() else null
     private val youtubeRouter = YouTubeGestureRouter()
     private val pointer = PointerDwellEngine(pointerDwellMs)
     private val tiltAssist = TiltedPalmAssist(angleAssistEnabled)
@@ -65,7 +64,7 @@ class GestureCameraAnalyzer(
         onAction: (GestureDecisionEngine.Action) -> Unit,
         onHandState: (HandVisualState) -> Unit,
         onPointer: (PointerDwellEngine.Result?) -> Unit,
-        onCircle: (PalmCircleEngine.Result) -> Unit = {},
+        onPalmPosition: (PalmPositionTracker.Snapshot?) -> Unit = {},
         isYouTubeForeground: () -> Boolean = { false }
     ) {
         val now = SystemClock.uptimeMillis()
@@ -139,72 +138,23 @@ class GestureCameraAnalyzer(
                 onPointer(null)
             }
 
-            // The circle recognizer never runs during screen-off face-unlock scan.
-            // An open palm held steadily first arms the overlay and temporarily
-            // defers competing swipes. A clearly straight stroke releases the
-            // original action; a round stroke suppresses it until completion.
-            val circular = circle?.observe(
+            // Visual-only palm location tracking. No circle interpretation, no
+            // gesture-action arbitration, and no delayed taps/swipes.
+            if (palmTracker != null) onPalmPosition(palmTracker.observe(
                 palmX, palmY,
-                shape == GestureDecisionEngine.Shape.OPEN_PALM && effectiveConfidence >= .65f,
+                shape == GestureDecisionEngine.Shape.OPEN_PALM &&
+                    effectiveConfidence >= .65f,
                 now
-            )
-            if (circular != null) onCircle(circular)
+            ))
             val action = decision.accept(
                 GestureDecisionEngine.Frame(shape, palmY, effectiveConfidence, palmX), now
             )
             val confirmedShape = if (effectiveConfidence < .65f)
                 GestureDecisionEngine.Shape.NO_HAND else shape
-            // Run YouTube's independent palm-to-fist state machine on EVERY
-            // camera frame, before circle/swipe arbitration can suppress the
-            // original TAP_CENTER. This fixes the lost command in v0.3.0.
-            val youtubeAction = youtubeRouter.route(
-                confirmedShape, now, action, isYouTubeForeground()
-            )
-
-            if (circular?.intercept == true) {
-                if (action == GestureDecisionEngine.Action.SWIPE_UP ||
-                    action == GestureDecisionEngine.Action.SWIPE_DOWN ||
-                    action == GestureDecisionEngine.Action.SWIPE_BACK) {
-                    if (delayedSwipe == null) delayedSwipe = action
-                }
-                if (circular.volumeStep != 0) {
-                    delayedSwipe = null
-                    decision.reset()
-                    youtubeRouter.reset()
-                    onAction(if (circular.volumeStep > 0)
-                        GestureDecisionEngine.Action.VOLUME_UP
-                    else GestureDecisionEngine.Action.VOLUME_DOWN)
-                }
-                // A confirmed YouTube fist has priority even if a previous
-                // static palm was being considered for circle-volume control.
-                if (youtubeAction == GestureDecisionEngine.Action.MEDIA_PLAY_PAUSE) {
-                    delayedSwipe = null
-                    lastCircleActive = false
-                    onAction(youtubeAction)
-                } else {
-                    lastCircleActive = true
-                }
-            } else {
-                // Only defer ordinary swipe/click actions. NEVER defer an
-                // independently confirmed YouTube media command on fist closure.
-                val output = if (youtubeAction == GestureDecisionEngine.Action.MEDIA_PLAY_PAUSE)
-                    youtubeAction
-                else if (circular?.cancelledToStraight == true)
-                    delayedSwipe ?: youtubeAction
-                else if (lastCircleActive) null
-                else youtubeAction
-                delayedSwipe = null
-                lastCircleActive = false
-                output?.let(onAction)
-                if (circular?.cancelledToStraight == false &&
-                    circular.phase == PalmCircleEngine.Phase.IDLE) {
-                    // The former circle session must not leave a blocked
-                    // or partially armed swipe for the next gesture.
-                    if (action == null && confirmedShape == GestureDecisionEngine.Shape.NO_HAND) {
-                        decision.reset()
-                    }
-                }
-            }
+            // YouTube gets its own verified palm -> fist media key immediately.
+            // Every normal swipe / other app fist passes through unchanged.
+            youtubeRouter.route(confirmedShape, now, action,
+                isYouTubeForeground())?.let(onAction)
         } finally {
             converter.release(frame)
         }
