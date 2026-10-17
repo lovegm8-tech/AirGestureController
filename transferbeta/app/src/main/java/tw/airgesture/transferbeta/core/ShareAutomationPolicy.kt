@@ -153,7 +153,9 @@ object ShareAutomationPolicy {
             "airgrab｜隔空抓取", "隔空抓取", "隔空傳檔測試版")
         val matches = nodes.withIndex().filter { (_, n) ->
             n.visible && n.clickable && !n.password &&
-                labels(n).any { it.trim().lowercase() in appLabels }
+                labels(n).any {
+                    it.trim().lowercase().replace(Regex("\\s+"), " ") in appLabels
+                }
         }
         return matches.singleOrNull()?.index
     }
