@@ -172,4 +172,34 @@ class ShareAutomationPolicyTest {
             ActionNode(null, "更多", clickable = true))))
     }
 
+    @Test fun currentPageShareCardForChromeAndGoogle() {
+        val cardShare = listOf(
+            ActionNode(null, "Stay in touch", clickable = false),
+            ActionNode("com.android.chrome:id/share_button", "分享", clickable = true),
+            ActionNode(null, "複製", clickable = true),
+            ActionNode(null, "編輯", clickable = true)
+        )
+        assertEquals(1, ShareAutomationPolicy.addressCardShare("com.android.chrome", cardShare))
+        val googleShare = listOf(
+            ActionNode(null, "分享連結", clickable = true),
+            ActionNode(null, "複製", clickable = true)
+        )
+        assertEquals(0, ShareAutomationPolicy.addressCardShare(
+            "com.google.android.googlequicksearchbox", googleShare))
+        assertNull(ShareAutomationPolicy.addressCardShare(
+            "com.sec.android.app.sbrowser", cardShare))
+    }
+
+    @Test fun currentPageShareMustBeUniqueAndVisible() {
+        assertNull(ShareAutomationPolicy.addressCardShare("com.android.chrome", listOf(
+            ActionNode(null, "分享", clickable = true),
+            ActionNode(null, "Share", clickable = true))))
+        assertNull(ShareAutomationPolicy.addressCardShare("com.android.chrome", listOf(
+            ActionNode(null, "分享", clickable = true, visible = false))))
+        assertNull(ShareAutomationPolicy.addressCardShare("com.android.chrome", listOf(
+            ActionNode(null, "分享", clickable = true, password = true))))
+        assertNull(ShareAutomationPolicy.addressCardShare("com.android.chrome", listOf(
+            ActionNode(null, "最近的搜尋", clickable = true))))
+    }
+
 }
