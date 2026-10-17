@@ -35,6 +35,13 @@ data class ActionNode(
 
 object ShareAutomationPolicy {
     private val shareWords = listOf("分享", "share")
+    // Chrome's menu uses "Share…" while Google in-app pages often use "Share link".
+    // Restrict these variants to known browser packages, not image/file shares.
+    private val browserShareWords = listOf(
+        "分享", "分享…", "分享...", "分享連結", "分享網址", "分享網頁",
+        "分享頁面", "分享這個網頁", "分享链接",
+        "share", "share…", "share...", "share link", "share page", "share this page"
+    )
     private val sendWords = listOf("傳送副本", "傳送檔案", "send a copy", "send file", "share a copy")
     private val moreWords = listOf("更多選項", "更多", "more options", "more")
     private val exportWords = listOf("共用與匯出", "分享與匯出", "share & export", "share and export")
@@ -46,7 +53,8 @@ object ShareAutomationPolicy {
         "com.brave.browser", "com.microsoft.emmx", "org.mozilla.firefox",
         "com.google.android.googlequicksearchbox" ->
             SharePlan(GrabKind.BROWSER, WantedResult.LINK,
-                listOf(step(shareWords, ":id/share", ":id/action_share")),
+                listOf(step(browserShareWords, ":id/share", ":id/action_share",
+                    ":id/share_button", ":id/share_icon")),
                 description = "網址欄不提供完整網址時，改由瀏覽器分享")
         "com.sec.android.gallery3d", "com.google.android.apps.photos" ->
             SharePlan(GrabKind.PHOTO, WantedResult.FILE,
@@ -133,4 +141,37 @@ object ShareAutomationPolicy {
         }
         return matches.singleOrNull()?.index
     }
+    /**
+     * Chrome's native Sharing Hub belongs to the browser package rather than
+     * the Android intent resolver. It must be identified before selecting a
+     * target; finding "AirGrab" in an arbitrary web page is not authorization.
+     */
+    fun isChromeSharingHub(pkg: String?, descriptions: List<String>): Boolean {
+        if (pkg != "com.android.chrome") return false
+        return descriptions.any { value ->
+            val t = value.trim().lowercase()
+            t.startsWith("list of sharing options") ||
+                t.startsWith("分享選項清單") ||
+                t.startsWith("分享選項列表")
+        }
+    }
+
+    fun browserHubTarget(nodes: List<ActionNode>): Int? {
+        val names = setOf("airgrab", "airgrab 隔空抓取",
+            "airgrab｜隔空抓取", "隔空抓取", "隔空傳檔測試版")
+        return nodes.withIndex().filter { (_, n) ->
+            n.visible && n.clickable && !n.password &&
+                labels(n).any { it.trim().lowercase() in names }
+        }.singleOrNull()?.index
+    }
+
+    fun browserHubMore(nodes: List<ActionNode>): Int? {
+        val names = setOf("更多", "更多選項", "more", "more apps", "see all",
+            "顯示更多應用程式", "查看所有應用程式")
+        return nodes.withIndex().filter { (_, n) ->
+            n.visible && n.clickable && !n.password &&
+                labels(n).any { it.trim().lowercase() in names }
+        }.singleOrNull()?.index
+    }
+
 }
