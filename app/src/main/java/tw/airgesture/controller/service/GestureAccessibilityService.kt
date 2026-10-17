@@ -17,7 +17,7 @@ import tw.airgesture.controller.core.GestureDecisionEngine
 import tw.airgesture.controller.core.HandVisualState
 import tw.airgesture.controller.core.Settings
 import tw.airgesture.controller.core.PointerDwellEngine
-import tw.airgesture.controller.core.PalmCircleEngine
+import tw.airgesture.controller.core.PalmPositionTracker
 import tw.airgesture.controller.core.WakeDiagnosticLog
 
 /** Injects only user-requested touch gestures; it never reads view contents. */
@@ -26,7 +26,7 @@ class GestureAccessibilityService : AccessibilityService() {
     @Volatile private var activePackage: String? = null
     private var indicator: HandIndicator? = null
     private var cursor: PointerOverlay? = null
-    private var circleOverlay: CircleVolumeOverlay? = null
+    private var palmOverlay: PalmPositionOverlay? = null
 
     companion object {
         @Volatile private var current: GestureAccessibilityService? = null
@@ -54,22 +54,21 @@ class GestureAccessibilityService : AccessibilityService() {
                     service.indicator?.hide()
                     service.indicator = null // Re-read display setting when service restarts.
                     service.cursor?.hide()
-                    service.circleOverlay?.hide()
-                    service.circleOverlay = null
+                    service.palmOverlay?.hide()
+                    service.palmOverlay = null
                 }
             } }
         }
 
-        fun circleUpdated(result: PalmCircleEngine.Result) {
+        fun palmPositionUpdated(snapshot: PalmPositionTracker.Snapshot?) {
             current?.let { service -> service.mainHandler.post {
                 if (current !== service) return@post
-                if (result.phase == PalmCircleEngine.Phase.IDLE ||
-                    result.phase == PalmCircleEngine.Phase.STRAIGHT) {
-                    service.circleOverlay?.hide()
+                if (snapshot == null) {
+                    service.palmOverlay?.hide()
                 } else {
-                    if (service.circleOverlay == null)
-                        service.circleOverlay = CircleVolumeOverlay(service)
-                    service.circleOverlay?.update(result)
+                    if (service.palmOverlay == null)
+                        service.palmOverlay = PalmPositionOverlay(service)
+                    service.palmOverlay?.update(snapshot)
                 }
             } }
         }
@@ -127,8 +126,8 @@ class GestureAccessibilityService : AccessibilityService() {
         indicator = null
         cursor?.hide()
         cursor = null
-        circleOverlay?.hide()
-        circleOverlay = null
+        palmOverlay?.hide()
+        palmOverlay = null
         if (current === this) current = null
         super.onDestroy()
     }
@@ -154,22 +153,9 @@ class GestureAccessibilityService : AccessibilityService() {
                     KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, 0)
                 audio.dispatchMediaKeyEvent(down)
                 audio.dispatchMediaKeyEvent(up)
-                WakeDiagnosticLog.add(this, "YouTube 長握拳：已發送媒體播放／暫停鍵")
+                WakeDiagnosticLog.add(this, "YouTube 張掌握拳：已發送媒體播放／暫停鍵")
             } catch (e: Exception) {
                 WakeDiagnosticLog.add(this, "YouTube 媒體播放／暫停鍵失敗：${e.javaClass.simpleName}")
-            }
-            return
-        }
-        if (action == GestureDecisionEngine.Action.VOLUME_UP ||
-            action == GestureDecisionEngine.Action.VOLUME_DOWN) {
-            val audio = getSystemService(AUDIO_SERVICE) as AudioManager
-            try {
-                audio.adjustStreamVolume(AudioManager.STREAM_MUSIC,
-                    if (action == GestureDecisionEngine.Action.VOLUME_UP)
-                        AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER,
-                    0)
-            } catch (e: Exception) {
-                WakeDiagnosticLog.add(this, "畫圈調音量失敗：${e.javaClass.simpleName}")
             }
             return
         }
@@ -195,9 +181,7 @@ class GestureAccessibilityService : AccessibilityService() {
                 path.moveTo(x, y)
                 duration = 80L
             }
-            GestureDecisionEngine.Action.MEDIA_PLAY_PAUSE,
-            GestureDecisionEngine.Action.VOLUME_UP,
-            GestureDecisionEngine.Action.VOLUME_DOWN -> return
+            GestureDecisionEngine.Action.MEDIA_PLAY_PAUSE -> return
             GestureDecisionEngine.Action.SWIPE_BACK -> {
                 // Android back-gesture edge: from the extreme left toward the right.
                 path.moveTo(size.x * .015f, y)
