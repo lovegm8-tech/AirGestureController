@@ -42,20 +42,20 @@ class AdaptivePowerPolicyTest {
         assertTrue(save.shouldInfer(0L))
         assertFalse(save.shouldInfer(1800L))
         assertTrue(save.shouldInfer(1950L))
-        save.observeHand(true, 2000L)
-        assertTrue(save.shouldInfer(2000L))
-        assertFalse(save.shouldInfer(2200L))
-        assertTrue(save.shouldInfer(2220L))
+        save.observeHand(true, 2250L)
+        assertTrue(save.shouldInfer(2250L))
+        assertFalse(save.shouldInfer(2400L))
+        assertTrue(save.shouldInfer(2470L))
 
         val quick = AdaptivePowerPolicy()
         quick.setPowerMode(2)
         quick.start(); quick.screenChanged(true)
         assertTrue(quick.shouldInfer(0L))
         assertTrue(quick.shouldInfer(950L))
-        quick.observeHand(true, 1000L)
-        assertTrue(quick.shouldInfer(1000L))
-        assertFalse(quick.shouldInfer(1110L))
-        assertTrue(quick.shouldInfer(1115L))
+        quick.observeHand(true, 1100L)
+        assertTrue(quick.shouldInfer(1100L))
+        assertFalse(quick.shouldInfer(1210L))
+        assertTrue(quick.shouldInfer(1215L))
     }
 
     @Test fun receivingOfferDoesNotRequireWaitingForDeepIdle() {
