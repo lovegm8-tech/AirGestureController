@@ -73,7 +73,7 @@ class GlobalGestureService : LifecycleService() {
     private lateinit var overlay: GestureStatusOverlay
     private val power = AdaptivePowerPolicy()
     private val handFeedback = HandFeedbackPolicy()
-    private val sequence = GestureSequence(holdMillis = 240L, unknownGraceMillis = 550L)
+    private val sequence = GestureSequence(holdMillis = 2_000L, unknownGraceMillis = 550L)
     private val cameraExecutor = Executors.newSingleThreadExecutor()
     private var provider: ProcessCameraProvider? = null
     private var recognizer: GestureRecognizer? = null
@@ -383,7 +383,7 @@ class GlobalGestureService : LifecycleService() {
             handFeedback.observe(handSeen, shape, now)?.let { hint ->
                 overlay.showHandFeedback(hint)
             }
-            when (sequence.accept(shape, now)) {
+            when (sequence.accept(shape, now, receiveAvailable = receivingOffer)) {
                 GestureSequence.Result.SEND -> {
                     overlay.showState(VisualEvent(VisualPhase.CAPTURING, "正在抓取目前內容…"))
                     GlobalGrabBridge.onGrabGesture()
