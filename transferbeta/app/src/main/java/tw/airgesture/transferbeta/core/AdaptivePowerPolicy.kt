@@ -14,10 +14,7 @@ class AdaptivePowerPolicy(
 ) {
     enum class Mode { STOPPED, ECO, ACTIVE }
     @Volatile private var policy=1
-    @Volatile private var animatePalm = false
     fun setPowerMode(mode:Int){policy=mode.coerceIn(0,2)}
-    /** Fast ML only while a palm is visible AND its optional animation is enabled. */
-    fun setPalmAnimationEnabled(enabled:Boolean) { animatePalm = enabled }
     @Volatile private var enabled = false
     @Volatile private var screenOn = true
     @Volatile private var receiverAwaiting = false
@@ -69,8 +66,7 @@ class AdaptivePowerPolicy(
         }
         val interval = when (mode(nowMs)) {
             Mode.STOPPED -> return false
-            Mode.ACTIVE -> if (animatePalm) when(policy){0->150L;2->90L;else->115L}
-                else when(policy){0->220L;2->115L;else->activeIntervalMs}
+            Mode.ACTIVE -> when(policy){0->220L;2->115L;else->activeIntervalMs}
             Mode.ECO -> {
                 if (idleSince == Long.MIN_VALUE || nowMs < idleSince)
                     idleSince = nowMs
