@@ -17,6 +17,7 @@ import tw.airgesture.controller.core.PointerDwellEngine
 import tw.airgesture.controller.core.PalmPositionTracker
 import tw.airgesture.controller.core.TiltedPalmAssist
 import tw.airgesture.controller.core.YouTubeGestureRouter
+import tw.airgesture.controller.core.WakeDiagnosticLog
 import java.nio.ByteBuffer
 
 /** CameraX feeds a single analysis executor. Inference is local and throttled. */
@@ -27,7 +28,8 @@ class GestureCameraAnalyzer(
     angleAssistEnabled: Boolean = false,
     pointerDwellMs: Long = 2000L,
     smartLitPower: Boolean = false,
-    palmPositionOverlayEnabled: Boolean = true
+    palmPositionOverlayEnabled: Boolean = true,
+    motionStandbyEnabled: Boolean = false
 ) : AutoCloseable {
     private val decision = GestureDecisionEngine(options)
     private val palmTracker: PalmPositionTracker? = if (palmPositionOverlayEnabled)
@@ -37,8 +39,16 @@ class GestureCameraAnalyzer(
     private val tiltAssist = TiltedPalmAssist(angleAssistEnabled)
     private val useAngleAssist = angleAssistEnabled
     private val useFastSwipeAssist = options.fastSwipeAssistEnabled
+    private val appContext = context.applicationContext
+    private val motionSentinel = if (smartLitPower && motionStandbyEnabled)
+        IdleMotionSampler() else null
+    private var statStartedAt = Long.MIN_VALUE
+    private var statFrameCount = 0L
+    private var statInferenceCount = 0L
+    private var statMotionWakeCount = 0L
     private val scheduler = AdaptiveFrameScheduler(
-        AdaptiveFrameScheduler.Mode.fromIndex(performanceMode), smartLitPower
+        AdaptiveFrameScheduler.Mode.fromIndex(performanceMode), smartLitPower,
+        motionStandbyEnabled
     )
     private val converter = ReusableFrameConverter()
     private val recognizer: GestureRecognizer
@@ -68,7 +78,26 @@ class GestureCameraAnalyzer(
         isYouTubeForeground: () -> Boolean = { false }
     ) {
         val now = SystemClock.uptimeMillis()
-        if (!scheduler.shouldAnalyze(now)) return
+        if (statStartedAt == Long.MIN_VALUE) statStartedAt = now
+        statFrameCount++
+        val movement = if (motionSentinel != null && scheduler.isDeepIdle(now)) {
+            motionSentinel.observe(proxy, now)
+        } else {
+            motionSentinel?.reset()
+            false
+        }
+        if (movement) statMotionWakeCount++
+        if (now - statStartedAt >= 300_000L && now >= statStartedAt) {
+            // Count-only, once every 5 min. No photos or gestures are saved.
+            WakeDiagnosticLog.add(appContext,
+                "亮屏省電5分鐘：收到影格=$statFrameCount；完整AI辨識=$statInferenceCount；動態加速=$statMotionWakeCount")
+            statStartedAt = now
+            statFrameCount = 0
+            statInferenceCount = 0
+            statMotionWakeCount = 0
+        }
+        if (!scheduler.shouldAnalyze(now, movement)) return
+        statInferenceCount++
 
         // Do not allocate/copy a Bitmap at all when a frame is skipped.
         val frame = converter.convert(proxy)
