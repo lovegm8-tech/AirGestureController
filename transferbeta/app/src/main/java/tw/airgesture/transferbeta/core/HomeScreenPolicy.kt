@@ -16,13 +16,13 @@ object HomeScreenPolicy {
         !hasPermissions -> HomeDecision(HomeState.NEED_PERMISSION,
             HomeAction.GRANT_PERMISSION, "第 1 步：允許相機與附近裝置")
         !accessibilityEnabled -> HomeDecision(HomeState.NEED_ACCESSIBILITY,
-            HomeAction.ENABLE_ACCESSIBILITY, "第 2 步：啟用隔空抓取服務")
+            HomeAction.ENABLE_ACCESSIBILITY, "第 2 步：啟用懸浮操作服務")
         !serviceRunning -> HomeDecision(HomeState.NEED_START,
-            HomeAction.START, "開啟隔空抓取")
+            HomeAction.START, "開啟懸浮操作")
         !connected -> HomeDecision(HomeState.SEARCHING,
-            HomeAction.WAIT, "正在搜尋附近手機，請保持兩台手機已啟用 AirGrab")
+            HomeAction.BACKGROUND, "隔空操作已啟用；傳檔另需附近手機連線")
         else -> HomeDecision(HomeState.READY,
-            HomeAction.BACKGROUND, "已連線，可以直接切換到其他 App 使用")
+            HomeAction.BACKGROUND, "隔空操作與傳檔均已就緒")
     }
     /** Never send a pairing prompt into the background. */
     fun shouldAutoBackground(
@@ -30,5 +30,5 @@ object HomeScreenPolicy {
         serviceRunning: Boolean, connected: Boolean,
         pairingPromptOpen: Boolean, advancedOpen: Boolean
     ): Boolean = userEnabledAutoRun && normalLauncherEntry && serviceRunning &&
-        connected && !pairingPromptOpen && !advancedOpen
+        !pairingPromptOpen && !advancedOpen
 }
