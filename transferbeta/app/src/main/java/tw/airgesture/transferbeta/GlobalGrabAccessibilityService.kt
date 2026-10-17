@@ -3,7 +3,6 @@ package tw.airgesture.transferbeta
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityService.ScreenshotResult
 import android.accessibilityservice.AccessibilityService.TakeScreenshotCallback
-import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Rect
 import android.os.Build
@@ -41,7 +40,8 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         val expires: Long,
         var lastAction: Long,
         var hubMoreClicked: Boolean = false,
-        var targetClicked: Boolean = false
+        var targetClicked: Boolean = false,
+        var youtubeShareScrolls: Int = 0
     )
 
     override fun onServiceConnected() {
@@ -306,7 +306,7 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
                     if (GrabContentPolicy.isBrowser(pkg))
                     "瀏覽器分享選單尚未把連結交給 AirGrab；請確認分享介面有 AirGrab"
                 else if (pkg == YouTubeLinkPolicy.PACKAGE)
-                    "YouTube 分享面板未提供可辨識的「複製連結」；請先確認分享選單"
+                    "YouTube 分享選單沒有開啟「其他項目」；請檢查分享面板"
                 else "來源 App 分享選單未能自動交付檔案；請手動選 AirGrab 測試"))
             }
         }
@@ -319,13 +319,46 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
                     else if (direct != null) "已開啟瀏覽器分享 · 正在找 AirGrab"
                     else "已展開瀏覽器選單 · 正在找分享功能"
                 else if (pkg == YouTubeLinkPolicy.PACKAGE)
-                    "已開啟 YouTube 分享面板；正在尋找「複製連結」"
+                    "已開啟 YouTube 分享面板；正在尋找「其他項目」"
                 else "已開啟來源 App 分享選單；正在找 AirGrab（尚未取得原檔）"))
             schedulePendingCheck()
         } else {
             clearPending()
             GlobalGrabBridge.result(GrabResult.Unavailable("系統拒絕操作原 App 的分享按鈕"))
         }
+    }
+
+    /**
+     * When YouTube's own share app carousel is not fully visible, request a
+     * bounded accessibility scroll only from a wide scrollable row within
+     * the confirmed lower-half share panel. No blind swipes or page scrolling.
+     */
+    private fun scrollYouTubeShareRow(root: AccessibilityNodeInfo): Boolean {
+        val height = resources.displayMetrics.heightPixels
+        val width = resources.displayMetrics.widthPixels
+        val queue = ArrayDeque<Pair<AccessibilityNodeInfo, Int>>()
+        queue.add(root to 0)
+        val rows = ArrayList<AccessibilityNodeInfo>()
+        while (queue.isNotEmpty()) {
+            val (node, depth) = queue.removeFirst()
+            if (node.isScrollable && node.isVisibleToUser) {
+                val bounds = Rect().also { node.getBoundsInScreen(it) }
+                val isShareCarousel =
+                    bounds.top >= (height * 0.48f).toInt() &&
+                    bounds.top <= (height * 0.83f).toInt() &&
+                    bounds.bottom <= height &&
+                    bounds.width() >= (width * 0.55f).toInt() &&
+                    bounds.height() <= (height * 0.32f).toInt()
+                if (isShareCarousel) rows.add(node)
+            }
+            if (depth < 16 && queue.size < 240) {
+                for (i in 0 until node.childCount) {
+                    node.getChild(i)?.let { queue.add(it to (depth + 1)) }
+                }
+            }
+        }
+        if (rows.size != 1) return false
+        return rows.single().performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
     }
 
     private fun advanceFlow() {
@@ -337,7 +370,7 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
                 if (GrabContentPolicy.isBrowser(flow.origin))
                     "網頁連結分享逾時；未能把連結交給 AirGrab"
                 else if (flow.origin == YouTubeLinkPolicy.PACKAGE)
-                    "YouTube 分享面板未找到可信的「複製連結」；已停止抓取"
+                    "YouTube 分享面板或系統分享清單逾時；未取得影片連結"
                 else "來源 App 分享選單等待逾時；尚未收到原始檔案"))
             return
         }
@@ -351,35 +384,26 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         val root = rootInActiveWindow ?: return
         val pkg = root.packageName?.toString()
         val (nodes, clickable) = collect(root)
-        // YouTube has its own app-local Share sheet, screenshot-confirmed to
-        // contain "複製連結". Avoid copying from an arbitrary page element.
+        // The YouTube app's own panel (screenshots show "其他項目") opens
+        // the Android system chooser, where AirGrab is an ACTION_SEND target.
+        // This does not require reading the clipboard or leaving YouTube.
         if (flow.origin == YouTubeLinkPolicy.PACKAGE &&
-            pkg == YouTubeLinkPolicy.PACKAGE && !flow.targetClicked) {
-            val copyIndex = YouTubeLinkPolicy.copyLinkTarget(
-                pkg, nodes, readable(root).mapNotNull { it.text })
-            if (copyIndex != null) {
-                val clickedAt = System.currentTimeMillis()
-                if (clickable[copyIndex].performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-                    flow.targetClicked = true
-                    clearPending()
-                    GlobalGrabBridge.result(GrabResult.ShareStarted(
-                        "已選擇 YouTube 複製連結；正在確認本次影片網址"))
-                    // Reading the clipboard from a background Service is
-                    // prohibited by Android 10+. A temporary focused Activity
-                    // performs one read and returns to the existing video task.
-                    main.postDelayed({
-                        try {
-                            startActivity(Intent(this, YouTubeClipboardImportActivity::class.java)
-                                .putExtra(YouTubeClipboardImportActivity.EXTRA_CLICKED_AT, clickedAt)
-                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or
-                                    Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
-                                    Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS or
-                                    Intent.FLAG_ACTIVITY_NO_ANIMATION))
-                        } catch (_: Exception) {
-                            GlobalGrabBridge.result(GrabResult.Unavailable(
-                                "Android 不允許開啟剪貼簿讀取視窗；請手動分享影片連結"))
-                        }
-                    }, 220L)
+            pkg == YouTubeLinkPolicy.PACKAGE && !flow.hubMoreClicked) {
+            val visibleText = readable(root).mapNotNull { it.text }
+            if (YouTubeLinkPolicy.isShareSheet(pkg, visibleText)) {
+                val more = YouTubeLinkPolicy.moreAppsTarget(pkg, nodes, visibleText)
+                if (more != null) {
+                    if (clickable[more].performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                        flow.hubMoreClicked = true
+                        flow.lastAction = now
+                        GlobalGrabBridge.result(GrabResult.ShareStarted(
+                            "已點選 YouTube「其他項目」；正在尋找系統分享清單的 AirGrab"))
+                        return
+                    }
+                } else if (flow.youtubeShareScrolls < 2 &&
+                    scrollYouTubeShareRow(root)) {
+                    flow.youtubeShareScrolls++
+                    flow.lastAction = now
                     return
                 }
             }
