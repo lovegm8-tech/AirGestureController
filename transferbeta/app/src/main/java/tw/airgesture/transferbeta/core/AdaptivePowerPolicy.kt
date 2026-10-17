@@ -1,45 +1,75 @@
 package tw.airgesture.transferbeta.core
 
-/** Inference throttle only: an open camera sensor still consumes power. */
+/**
+ * Adaptive inference scheduling only; the physical camera sensor stays active
+ * while the screen is unlocked. This must not block the first recognized hand
+ * or an offered file's receive gesture.
+ */
 class AdaptivePowerPolicy(
     private val idleIntervalMs: Long = 950L,
+    private val deepIdleIntervalMs: Long = 1250L,
+    private val deepIdleAfterMs: Long = 60_000L,
     private val activeIntervalMs: Long = 115L,
-    private val activeKeepAliveMs: Long = 4500L
+    private val activeKeepAliveMs: Long = 2200L
 ) {
     enum class Mode { STOPPED, ECO, ACTIVE }
-    private var enabled = false
-    private var screenOn = true
+    @Volatile private var enabled = false
+    @Volatile private var screenOn = true
     @Volatile private var receiverAwaiting = false
     private var lastInference = Long.MIN_VALUE
-    private var activeUntil = Long.MIN_VALUE
+    @Volatile private var activeUntil = Long.MIN_VALUE
+    @Volatile private var idleSince = Long.MIN_VALUE
 
-    fun start() { enabled = true; lastInference = Long.MIN_VALUE }
-    fun stop() { enabled = false; receiverAwaiting = false }
-    /** Keep the camera AI responsive only when a legitimate receive offer exists. */
+    fun start() {
+        enabled = true
+        lastInference = Long.MIN_VALUE
+        idleSince = Long.MIN_VALUE
+    }
+    fun stop() {
+        enabled = false
+        receiverAwaiting = false
+        idleSince = Long.MIN_VALUE
+        activeUntil = Long.MIN_VALUE
+    }
+
+    /** Incoming transfer offers must remain instantly responsive. */
     fun setReceiverAwaiting(awaiting: Boolean) { receiverAwaiting = awaiting }
+
     fun screenChanged(on: Boolean) {
         screenOn = on
         lastInference = Long.MIN_VALUE
+        idleSince = Long.MIN_VALUE
         if (!on) activeUntil = Long.MIN_VALUE
     }
+
     fun mode(nowMs: Long): Mode = when {
         !enabled || !screenOn -> Mode.STOPPED
         receiverAwaiting -> Mode.ACTIVE
         activeUntil != Long.MIN_VALUE && nowMs <= activeUntil -> Mode.ACTIVE
         else -> Mode.ECO
     }
+
     fun shouldInfer(nowMs: Long): Boolean {
         val interval = when (mode(nowMs)) {
             Mode.STOPPED -> return false
-            Mode.ECO -> idleIntervalMs
             Mode.ACTIVE -> activeIntervalMs
+            Mode.ECO -> {
+                if (idleSince == Long.MIN_VALUE || nowMs < idleSince)
+                    idleSince = nowMs
+                if (nowMs - idleSince >= deepIdleAfterMs)
+                    deepIdleIntervalMs else idleIntervalMs
+            }
         }
         if (lastInference != Long.MIN_VALUE && nowMs >= lastInference &&
             nowMs - lastInference < interval) return false
         lastInference = nowMs
         return true
     }
+
     fun observeHand(found: Boolean, nowMs: Long) {
-        if (found && enabled && screenOn) activeUntil = nowMs + activeKeepAliveMs
+        if (found && enabled && screenOn) {
+            idleSince = nowMs
+            activeUntil = nowMs + activeKeepAliveMs
+        }
     }
 }
