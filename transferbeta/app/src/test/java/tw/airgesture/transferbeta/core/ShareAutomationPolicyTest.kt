@@ -102,6 +102,14 @@ class ShareAutomationPolicyTest {
         assertNull(ShareAutomationPolicy.onlyUniqueChooserTarget("com.fake.app", nodes))
         assertEquals(0, ShareAutomationPolicy.onlyUniqueChooserTarget("android", nodes))
     }
+    @Test fun unifiedAppBrandIsRecognizedInTrustedChooserAndChromeHub() {
+        val item = ActionNode(null, "懸浮操作", clickable = true)
+        assertEquals(0, ShareAutomationPolicy.onlyUniqueChooserTarget("android", listOf(item)))
+        assertEquals(0, ShareAutomationPolicy.onlyUniqueChooserTarget("com.samsung.android.app.sharelive", listOf(item)))
+        assertEquals(0, ShareAutomationPolicy.browserHubTarget(listOf(item)))
+        assertNull(ShareAutomationPolicy.onlyUniqueChooserTarget("com.sec.android.gallery3d", listOf(item)))
+        assertNull(ShareAutomationPolicy.onlyUniqueChooserTarget("android", listOf(item, item)))
+    }
     @Test fun brandedNameIsRecognizedOnSharesheet() {
         val nodes=listOf(ActionNode(null, "AirGrab 隔空抓取", clickable=true))
         assertEquals(0,ShareAutomationPolicy.onlyUniqueChooserTarget("android",nodes))
