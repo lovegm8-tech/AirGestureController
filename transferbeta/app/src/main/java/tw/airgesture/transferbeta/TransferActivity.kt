@@ -503,11 +503,12 @@ class TransferActivity : ComponentActivity() {
                     d.dismiss()
                 }.setNegativeButton("取消", null).show()
         }
-        extraButton("手掌位置軌跡動畫（開／關）") {
-            val newValue = !FloatingSettings.showPalm(this)
-            FloatingSettings.saveBool(this, "palm_overlay", newValue)
+        extraButton("操作方向確認動畫（開／關，預設開啟）") {
+            val newValue = !FloatingSettings.actionFeedback(this)
+            FloatingSettings.saveBool(this, "action_feedback_enabled", newValue)
             reloadLiveSettings()
-            flash(if(newValue) "已開啟手掌位置動畫" else "已關閉手掌位置動畫", true)
+            flash(if (newValue) "已開啟操作確認動畫：成功送出手勢時短暫提示方向"
+                else "已關閉操作確認動畫（手勢仍可正常使用）", true)
         }
         extraButton("附近裝置自動搜尋（開／關）") {
             val newValue = !FloatingSettings.nearby(this)
