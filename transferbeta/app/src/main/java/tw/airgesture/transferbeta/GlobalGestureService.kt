@@ -84,6 +84,8 @@ class GlobalGestureService : LifecycleService() {
     // CameraX often provides a tightly packed direct ByteBuffer, requiring no
     // intermediate frame-sized ByteArray at all.
     private var rgbaScratch = ByteArray(0)
+    private var sourceBitmap: Bitmap? = null // reusable on the single camera worker
+    private val landmarkScratch = FloatArray(42)
     private val rotationMatrix = Matrix()
     private var lastHint = 0L
     private var isScreenOn = false
@@ -390,12 +392,11 @@ class GlobalGestureService : LifecycleService() {
             power.observeHand(handSeen, now)
             // Tilt fallback uses existing landmarks, not another ML inference.
             val xy = if (marks != null && marks.size >= 21) {
-                FloatArray(42).also { c ->
-                    for (i in 0 until 21) {
-                        c[2 * i] = marks[i].x()
-                        c[2 * i + 1] = marks[i].y()
-                    }
+                for (i in 0 until 21) {
+                    landmarkScratch[2 * i] = marks[i].x()
+                    landmarkScratch[2 * i + 1] = marks[i].y()
                 }
+                landmarkScratch
             } else null
             val tilt = tiltedPalm.resolve(name, score, xy, now)
             val pose = if (tilt.useLandmarkFallback) "Open_Palm"
@@ -425,7 +426,7 @@ class GlobalGestureService : LifecycleService() {
             GlobalGrabAccessibilityService.setCursor(output.pointer)
             // Telemetry deliberately stores no frame or hand identity.
             if (now - lastHint > 1500L) lastHint = now
-        } finally { image.recycle() }
+        } finally { if (image !== sourceBitmap) image.recycle() }
     }
 
     private fun frameToBitmap(proxy: ImageProxy): Bitmap {
@@ -459,7 +460,12 @@ class GlobalGestureService : LifecycleService() {
             }
             ByteBuffer.wrap(rgbaScratch)
         }
-        val image = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val image = sourceBitmap?.takeIf {
+            !it.isRecycled && it.width == w && it.height == h
+        } ?: Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also {
+            sourceBitmap?.recycle()
+            sourceBitmap = it
+        }
         image.copyPixelsFromBuffer(rgba)
         val rotation = proxy.imageInfo.rotationDegrees
         if (rotation == 0) return image
@@ -467,7 +473,9 @@ class GlobalGestureService : LifecycleService() {
             rotationMatrix.reset()
             rotationMatrix.postRotate(rotation.toFloat())
             Bitmap.createBitmap(image, 0, 0, w, h, rotationMatrix, false)
-        } finally { image.recycle() }
+        } catch (e: Exception) {
+            throw e
+        }
     }
 
     override fun onDestroy() {
@@ -487,7 +495,13 @@ class GlobalGestureService : LifecycleService() {
         power.stop()
         provider?.unbindAll()
         try { unregisterReceiver(screen) } catch (_: Exception) {}
-        recognizer?.close()
+        val closingRecognizer = recognizer
+        recognizer = null
+        cameraExecutor.execute {
+            closingRecognizer?.close()
+            sourceBitmap?.recycle()
+            sourceBitmap = null
+        }
         cameraExecutor.shutdown()
         super.onDestroy()
     }
