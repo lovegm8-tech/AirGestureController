@@ -179,7 +179,7 @@ class MainActivity : ComponentActivity() {
             textSize = 16f
         }
         content.addView(smartLitPower, LinearLayout.LayoutParams(-1, dip(54)))
-        label("啟用：無手先每 0.35 秒辨識一次，20 秒後每 0.9 秒一次；有手立即提高到約每 0.1 秒一次並保持 4.5 秒。會嘗試要求前鏡頭 12～15 FPS；關閉則恢復舊版亮屏頻率與鏡頭設定。", 13f)
+        label("啟用：無手先每 0.35 秒辨識一次；20 秒後每 0.9 秒一次，若同時開啟下方進階省電則每 1.5 秒一次並使用快速畫面變動偵測；有手約每 0.1 秒辨識一次並保持 4.5 秒。會嘗試要求前鏡頭 12～15 FPS。", 13f)
 
         label("進階省電（亮屏待機）", 19f, true)
         motionStandby = Switch(this).apply {
