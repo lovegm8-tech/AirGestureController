@@ -9,7 +9,8 @@ package tw.airgesture.controller.core
  */
 class AdaptiveFrameScheduler(
     mode: Mode = Mode.BALANCED,
-    private val smartPower: Boolean = false
+    private val smartPower: Boolean = false,
+    private val motionStandby: Boolean = false
 ) {
     enum class Mode(val idlePeriodMs: Long, val handPeriodMs: Long) {
         SAVER(333L, 140L),
@@ -28,10 +29,21 @@ class AdaptiveFrameScheduler(
     private var lastHandMs = Long.MIN_VALUE
     private var idleStartMs = Long.MIN_VALUE
 
-    fun shouldAnalyze(nowMs: Long): Boolean {
+    /** Camera-side 16x12 sampler should run only after >20s without a hand. */
+    fun isDeepIdle(nowMs: Long): Boolean =
+        smartPower && motionStandby &&
+            idleStartMs != Long.MIN_VALUE && nowMs >= idleStartMs &&
+            nowMs - idleStartMs >= 20_000L &&
+            (lastHandMs == Long.MIN_VALUE || nowMs - lastHandMs >= handHoldMs)
+
+    fun shouldAnalyze(nowMs: Long, significantMotion: Boolean = false): Boolean {
         if (lastProcessedMs == Long.MIN_VALUE || nowMs < lastProcessedMs) return true
         val handRecent = lastHandMs != Long.MIN_VALUE &&
             nowMs >= lastHandMs && nowMs - lastHandMs < handHoldMs
+        // Motion means an actual front-camera scene change, NOT a confirmed hand.
+        // A full MediaPipe verification is still required to execute any action.
+        if (isDeepIdle(nowMs) && significantMotion &&
+            nowMs - lastProcessedMs >= 240L) return true
         val period = if (!smartPower) {
             if (handRecent) handPeriodMs else idlePeriodMs
         } else if (handRecent) {
@@ -39,7 +51,9 @@ class AdaptiveFrameScheduler(
         } else {
             if (idleStartMs == Long.MIN_VALUE || idleStartMs > nowMs)
                 idleStartMs = nowMs
-            if (nowMs - idleStartMs >= 20_000L) 900L else 350L
+            if (nowMs - idleStartMs >= 20_000L)
+                (if (motionStandby) 1500L else 900L)
+            else 350L
         }
         return nowMs - lastProcessedMs >= period
     }
