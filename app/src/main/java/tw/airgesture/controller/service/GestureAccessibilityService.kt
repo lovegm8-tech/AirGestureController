@@ -17,6 +17,7 @@ import tw.airgesture.controller.core.GestureDecisionEngine
 import tw.airgesture.controller.core.HandVisualState
 import tw.airgesture.controller.core.Settings
 import tw.airgesture.controller.core.PointerDwellEngine
+import tw.airgesture.controller.core.PalmCircleEngine
 import tw.airgesture.controller.core.WakeDiagnosticLog
 
 /** Injects only user-requested touch gestures; it never reads view contents. */
@@ -25,6 +26,7 @@ class GestureAccessibilityService : AccessibilityService() {
     @Volatile private var activePackage: String? = null
     private var indicator: HandIndicator? = null
     private var cursor: PointerOverlay? = null
+    private var circleOverlay: CircleVolumeOverlay? = null
 
     companion object {
         @Volatile private var current: GestureAccessibilityService? = null
@@ -52,6 +54,22 @@ class GestureAccessibilityService : AccessibilityService() {
                     service.indicator?.hide()
                     service.indicator = null // Re-read display setting when service restarts.
                     service.cursor?.hide()
+                    service.circleOverlay?.hide()
+                    service.circleOverlay = null
+                }
+            } }
+        }
+
+        fun circleUpdated(result: PalmCircleEngine.Result) {
+            current?.let { service -> service.mainHandler.post {
+                if (current !== service) return@post
+                if (result.phase == PalmCircleEngine.Phase.IDLE ||
+                    result.phase == PalmCircleEngine.Phase.STRAIGHT) {
+                    service.circleOverlay?.hide()
+                } else {
+                    if (service.circleOverlay == null)
+                        service.circleOverlay = CircleVolumeOverlay(service)
+                    service.circleOverlay?.update(result)
                 }
             } }
         }
@@ -100,6 +118,8 @@ class GestureAccessibilityService : AccessibilityService() {
         indicator = null
         cursor?.hide()
         cursor = null
+        circleOverlay?.hide()
+        circleOverlay = null
         if (current === this) current = null
         super.onDestroy()
     }
@@ -131,6 +151,19 @@ class GestureAccessibilityService : AccessibilityService() {
             }
             return
         }
+        if (action == GestureDecisionEngine.Action.VOLUME_UP ||
+            action == GestureDecisionEngine.Action.VOLUME_DOWN) {
+            val audio = getSystemService(AUDIO_SERVICE) as AudioManager
+            try {
+                audio.adjustStreamVolume(AudioManager.STREAM_MUSIC,
+                    if (action == GestureDecisionEngine.Action.VOLUME_UP)
+                        AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER,
+                    0)
+            } catch (e: Exception) {
+                WakeDiagnosticLog.add(this, "畫圈調音量失敗：${e.javaClass.simpleName}")
+            }
+            return
+        }
         val manager = getSystemService(WINDOW_SERVICE) as WindowManager
         val size = Point().also { manager.defaultDisplay.getRealSize(it) }
         if (size.x <= 0 || size.y <= 0) return
@@ -153,7 +186,9 @@ class GestureAccessibilityService : AccessibilityService() {
                 path.moveTo(x, y)
                 duration = 80L
             }
-            GestureDecisionEngine.Action.MEDIA_PLAY_PAUSE -> return
+            GestureDecisionEngine.Action.MEDIA_PLAY_PAUSE,
+            GestureDecisionEngine.Action.VOLUME_UP,
+            GestureDecisionEngine.Action.VOLUME_DOWN -> return
             GestureDecisionEngine.Action.SWIPE_BACK -> {
                 // Android back-gesture edge: from the extreme left toward the right.
                 path.moveTo(size.x * .015f, y)
