@@ -24,6 +24,8 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.os.BatteryManager
+import android.content.IntentFilter
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.view.Gravity
@@ -585,6 +587,11 @@ class TransferActivity : ComponentActivity() {
             } else flash("已允許懸浮動畫", true)
         }
         extraButton("辨識與操作診斷") {
+            val batteryIntent = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val batteryTenths = batteryIntent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1) ?: -1
+            val batteryReading = if (batteryTenths >= 0)
+                String.format(java.util.Locale.TAIWAN, "%.1f °C", batteryTenths / 10.0)
+            else "無法讀取"
             AlertDialog.Builder(this)
                 .setTitle("懸浮操作 · 動作診斷")
                 .setMessage(
@@ -597,6 +604,7 @@ class TransferActivity : ComponentActivity() {
                     "\n鏡頭影格：" + GlobalGestureService.framesSeen +
                     "\nAI辨識：" + GlobalGestureService.inferences +
                     "\n鏡頭 FPS：" + GlobalGestureService.requestedSensorFps +
+                    "\n電池感測溫度：" + batteryReading +
                     "\n辨識異常：" + GlobalGestureService.lastRecognitionError +
                     "\n附近裝置連線：" +
                         (if (GlobalGestureService.transfer?.isConnected == true) "已連線" else "尚未連線") +
