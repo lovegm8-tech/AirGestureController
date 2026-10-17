@@ -9,8 +9,9 @@ import kotlin.math.hypot
  * The overlay intentionally never consumes a swipe, click, or YouTube media key.
  */
 class PalmPositionTracker(
-    private val maxTrailPoints: Int = 22,
-    private val maxGapMs: Long = 520L
+    private val maxTrailPoints: Int = 16,
+    private val maxGapMs: Long = 520L,
+    private val lostGraceMs: Long = 280L
 ) {
     data class Point(val x: Float, val y: Float)
     data class Snapshot(val x: Float, val y: Float, val trail: List<Point>)
@@ -26,6 +27,13 @@ class PalmPositionTracker(
     fun observe(x: Float?, y: Float?, confirmedPalm: Boolean, nowMs: Long): Snapshot? {
         if (!confirmedPalm || x == null || y == null ||
             x !in 0f..1f || y !in 0f..1f) {
+            // Do not flash the overlay off during a single dropped ML frame.
+            // Missing classification is never used as a gesture action.
+            val old = history.lastOrNull()
+            if (old != null && lastSeenAt != Long.MIN_VALUE &&
+                nowMs >= lastSeenAt && nowMs - lastSeenAt <= lostGraceMs) {
+                return Snapshot(old.x, old.y, history.toList())
+            }
             clear()
             return null
         }
