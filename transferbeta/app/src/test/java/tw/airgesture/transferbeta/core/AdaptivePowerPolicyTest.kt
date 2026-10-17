@@ -53,6 +53,24 @@ class AdaptivePowerPolicyTest {
         assertFalse(p.shouldInfer(30_000L, significantMotion = true))
     }
 
+    @Test fun animatedPalmRunsFasterOnlyWhileHandIsDetected() {
+        val p = AdaptivePowerPolicy()
+        p.start(); p.screenChanged(true)
+        p.setPalmAnimationEnabled(true)
+        assertTrue(p.shouldInfer(0L))
+        assertFalse(p.shouldInfer(1000L))
+        p.observeHand(true, 1550L)
+        assertTrue(p.shouldInfer(1550L))
+        assertFalse(p.shouldInfer(1660L))
+        assertTrue(p.shouldInfer(1665L))
+        assertEquals(AdaptivePowerPolicy.Mode.ECO, p.mode(3751L))
+        p.setPalmAnimationEnabled(false)
+        p.observeHand(true, 3800L)
+        assertTrue(p.shouldInfer(3800L))
+        assertFalse(p.shouldInfer(3940L))
+        assertTrue(p.shouldInfer(3965L))
+    }
+
     @Test fun powerModesTradeSpeedForEnergy() {
         val save = AdaptivePowerPolicy()
         save.setPowerMode(0)
