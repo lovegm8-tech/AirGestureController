@@ -90,6 +90,22 @@ object ShareAutomationPolicy {
         else -> null
     }
 
+    /**
+     * Chrome and Google search may expose an icon on the CURRENT PAGE card
+     * while the address editor is open. Only call after the app itself has
+     * opened its known address control; a random web page is not trusted.
+     * Screen-position checks are performed separately by AccessibilityService.
+     */
+    fun addressCardShare(pkg: String?, nodes: List<ActionNode>): Int? {
+        if (pkg != "com.android.chrome" &&
+            pkg != "com.google.android.googlequicksearchbox") return null
+        return match(step(listOf(
+            "分享", "分享連結", "分享網頁", "分享頁面", "分享此頁面",
+            "share", "share link", "share page", "share this page"
+        ), ":id/share", ":id/share_button", ":id/action_share",
+            ":id/url_bar_share", ":id/share_icon"), nodes)
+    }
+
     private fun labels(node: ActionNode): List<String> =
         listOfNotNull(node.label, node.hint) + node.texts
 
