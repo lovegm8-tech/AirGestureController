@@ -19,6 +19,9 @@ import tw.airgesture.transferbeta.core.TransferAnimationPolicy
 import tw.airgesture.transferbeta.core.VisualEvent
 import tw.airgesture.transferbeta.core.VisualPhase
 import tw.airgesture.transferbeta.core.HandHint
+import tw.airgesture.transferbeta.core.FloatingControlRouter
+import tw.airgesture.transferbeta.core.GestureActionCue
+import tw.airgesture.transferbeta.core.GestureActionCuePolicy
 
 /** Animated air-grab over any app: a hand absorbs or releases a document.
  * No continuously looping animation; waiting uses a 1-second countdown only. */
@@ -39,6 +42,83 @@ class GestureStatusOverlay(private val context: Context) {
     private var handBadge: TextView? = null
     private var handBadgeHide: Runnable? = null
     private var previousHandHint = HandHint.NONE
+    // Allocated only on an accepted command; no permanent redraw or timer.
+    private var actionBadge: TextView? = null
+    private var actionBadgeHide: Runnable? = null
+
+    /** An acknowledgement of an accepted Android command, NOT task completion.
+     * Does not block or delay the actual swipe, tap, or media-key event. */
+    fun showControlAction(command: FloatingControlRouter.Command) {
+        GestureActionCuePolicy.forControl(command)?.let(::showActionCue)
+    }
+
+    fun showPointerClick() = showActionCue(GestureActionCuePolicy.forPointerDwell())
+
+    private fun showActionCue(cue: GestureActionCue) {
+        if (!Settings.canDrawOverlays(context)) return
+        main.post {
+            dismissAction()
+            try {
+                val density = context.resources.displayMetrics.density
+                fun dp(n: Int) = (n * density + .5f).toInt()
+                val view = TextView(context).apply {
+                    gravity = Gravity.CENTER
+                    textSize = 17f
+                    setTextColor(Color.WHITE)
+                    text = cue.glyph + "  " + cue.label
+                    setPadding(dp(20), dp(10), dp(20), dp(10))
+                    background = GradientDrawable().apply {
+                        cornerRadius = dp(22).toFloat()
+                        setColor(0xf11b3044.toInt())
+                        setStroke(dp(1), 0xff60d5ed.toInt())
+                    }
+                    alpha = 0f
+                    scaleX = .88f
+                    scaleY = .88f
+                }
+                val params = WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                    PixelFormat.TRANSLUCENT
+                ).apply {
+                    gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                    y = dp(128)
+                }
+                wm.addView(view, params)
+                actionBadge = view
+                view.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                    .setDuration(110L).start()
+                val hide = Runnable {
+                    if (actionBadge === view) {
+                        view.animate().alpha(0f).setDuration(140L)
+                            .withEndAction {
+                                if (actionBadge === view) dismissAction()
+                            }.start()
+                    }
+                }
+                actionBadgeHide = hide
+                main.postDelayed(hide, 310L)
+            } catch (_: Exception) {
+                dismissAction()
+            }
+        }
+    }
+
+    fun dismissAction() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            main.post { dismissAction() }
+            return
+        }
+        actionBadgeHide?.let { main.removeCallbacks(it) }
+        actionBadgeHide = null
+        val existing = actionBadge
+        actionBadge = null
+        existing?.animate()?.cancel()
+        if (existing != null) try { wm.removeView(existing) } catch (_: Exception) {}
+    }
 
     /**
      * Camera feedback is not a transfer success. The badge sits below the main
