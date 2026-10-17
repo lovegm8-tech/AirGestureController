@@ -66,9 +66,11 @@ class YouTubeGestureRouterTest {
         assertEquals(media, r.route(fist, 420, null, true))
         assertNull(r.route(palm, 560, null, true))
         assertNull(r.route(palm, 760, null, true))
+        // Earliest next trigger is 650ms after the previous one.
         assertNull(r.route(palm, 940, null, true))
-        assertNull(r.route(fist, 1040, null, true))
-        assertEquals(media, r.route(fist, 1140, null, true))
+        assertNull(r.route(palm, 1110, null, true))
+        assertNull(r.route(fist, 1210, null, true))
+        assertEquals(media, r.route(fist, 1310, null, true))
     }
 
     @Test fun `brief palm model flicker does not rearm a held fist`() {
