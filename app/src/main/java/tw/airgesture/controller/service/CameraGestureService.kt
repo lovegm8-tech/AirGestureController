@@ -163,7 +163,7 @@ class CameraGestureService : LifecycleService() {
                     this, Settings.engineOptions(this),
                     Settings.performanceMode(this), Settings.tiltedPalmAssist(this),
                     Settings.pointerDwellMs(this),
-                    smartLitPower
+                    smartLitPower, Settings.circleVolume(this)
                 )
                 main.post {
                     if (running) {
@@ -241,6 +241,7 @@ class CameraGestureService : LifecycleService() {
                                 onAction = { GestureAccessibilityService.send(it) },
                                 onHandState = { GestureAccessibilityService.handStateChanged(it) },
                                 onPointer = { GestureAccessibilityService.pointerUpdated(it) },
+                                onCircle = { GestureAccessibilityService.circleUpdated(it) },
                                 isYouTubeForeground = { GestureAccessibilityService.isYouTubeForeground() }
                             )
                             Phase.SCREEN_SCAN -> engine.processForWake(image) { palm, hand, stamp ->
