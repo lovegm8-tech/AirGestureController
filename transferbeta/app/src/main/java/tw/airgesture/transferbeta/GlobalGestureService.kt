@@ -4,6 +4,8 @@ import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.KeyguardManager
+import android.os.PowerManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -32,6 +34,7 @@ import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.gesturerecognizer.GestureRecognizer
 import tw.airgesture.transferbeta.core.AdaptivePowerPolicy
+import tw.airgesture.transferbeta.core.CameraUnlockGate
 import tw.airgesture.transferbeta.core.VisualEvent
 import tw.airgesture.transferbeta.core.VisualPhase
 import tw.airgesture.transferbeta.core.HandFeedbackPolicy
@@ -41,7 +44,9 @@ import java.util.concurrent.Executors
 /**
  * Foreground camera service, started ONLY from visible TransferActivity.
  * ECO mode throttles ML inference; it cannot guarantee tiny camera sensor current.
- * Stops camera on screen off; manual user start is required if Android kills the service.
+ * Releases camera on screen off, only rebinds AFTER genuine unlock.
+ * Nearby connections remain active while locked; manual user start is required
+ * if Android kills the entire service.
  */
 class GlobalGestureService : LifecycleService() {
     companion object {
@@ -73,26 +78,94 @@ class GlobalGestureService : LifecycleService() {
     private var provider: ProcessCameraProvider? = null
     private var recognizer: GestureRecognizer? = null
     private var lastHint = 0L
-    private var isScreenOn = true
+    private var isScreenOn = false
+    private val unlockGate = CameraUnlockGate()
+    private val keyguard by lazy { getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager }
+    private val powerManager by lazy { getSystemService(Context.POWER_SERVICE) as PowerManager }
+    private var cameraGeneration = 0L
+    private var cameraBindPending = false
+    private var cameraBound = false
+    private var cameraResumeCheck: Runnable? = null
+    private var cameraRetryCount = 0
     @Volatile private var receivingOffer = false
 
     private val screen = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
-                Intent.ACTION_SCREEN_OFF -> {
-                    isScreenOn = false
-                    power.screenChanged(false)
-                    provider?.unbindAll()
-                    overlay.dismissHand()
-                    cameraExecutor.execute { handFeedback.reset() }
-                }
+                Intent.ACTION_SCREEN_OFF -> suspendCameraForScreenOff()
                 Intent.ACTION_SCREEN_ON -> {
                     isScreenOn = true
-                    power.screenChanged(true)
-                    if (isActive) bindCamera()
+                    unlockGate.screenOn()
+                    power.screenChanged(false)
+                    // SCREEN_ON is often delivered before face unlock starts.
+                    // Do not bind here. Wait for KEYGUARD to disappear.
+                    cameraRetryCount = 0
+                    scheduleUnlockCheck(1000L)
+                }
+                Intent.ACTION_USER_PRESENT -> {
+                    // A genuine unlock has been signalled by Android. Keyguard
+                    // is rechecked in the delayed callback; never trust the
+                    // broadcast alone to access the camera.
+                    if (isScreenOn && isActive) {
+                        cameraRetryCount = 0
+                        scheduleUnlockCheck(800L)
+                    }
                 }
             }
         }
+    }
+
+    private fun screenIsUnlocked(): Boolean = try {
+        powerManager.isInteractive && !keyguard.isKeyguardLocked && !keyguard.isDeviceLocked
+    } catch (_: Exception) {
+        false
+    }
+
+    private fun cancelUnlockCheck() {
+        cameraResumeCheck?.let { main.removeCallbacks(it) }
+        cameraResumeCheck = null
+    }
+
+    /** Full camera release, not merely stopping ML inference. */
+    private fun suspendCameraForScreenOff() {
+        isScreenOn = false
+        unlockGate.screenOff()
+        cancelUnlockCheck()
+        cameraGeneration++ // Invalidate any asynchronous ProcessCameraProvider listener
+        cameraBindPending = false
+        cameraBound = false
+        cameraRetryCount = 0
+        power.screenChanged(false)
+        provider?.unbindAll()
+        overlay.dismissHand()
+        cameraExecutor.execute {
+            handFeedback.reset()
+            sequence.reset()
+        }
+    }
+
+    private fun scheduleUnlockCheck(delayMillis: Long) {
+        cancelUnlockCheck()
+        if (!isScreenOn || !isActive) return
+        val expectedGeneration = cameraGeneration
+        val check = Runnable {
+            cameraResumeCheck = null
+            if (!isActive || !isScreenOn || cameraGeneration != expectedGeneration) return@Runnable
+            val unlocked = screenIsUnlocked()
+            if (unlockGate.confirmUnlocked(unlocked, !unlocked, !unlocked)) {
+                // Allow face authentication to fully close its camera session.
+                // This is only reached after Keyguard is genuinely gone.
+                power.screenChanged(true)
+                bindCamera()
+            } else if (++cameraRetryCount <= 25) {
+                // Infrequent checks handle devices that do not dispatch
+                // ACTION_USER_PRESENT. Stop polling after ~50s; a subsequent
+                // ACTION_USER_PRESENT or new screen cycle still resumes.
+                scheduleUnlockCheck(2000L)
+            }
+        }
+        cameraResumeCheck = check
+        main.postDelayed(check, delayMillis)
     }
 
     override fun onCreate() {
@@ -107,9 +180,12 @@ class GlobalGestureService : LifecycleService() {
                 cameraExecutor.execute { sequence.reset() }
             }
         }
+        isScreenOn = powerManager.isInteractive
+        if (isScreenOn) unlockGate.screenOn() else unlockGate.screenOff()
         registerReceiver(screen, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_USER_PRESENT)
         })
     }
 
@@ -158,7 +234,10 @@ class GlobalGestureService : LifecycleService() {
         GlobalGrabBridge.onReceiveGesture = { main.post { connections.confirmReceive() } }
         connections.start()
         power.start()
-        if (isScreenOn) bindCamera()
+        // A foreground start from the unlocked dashboard may bind after a
+        // short grace period. Starting while locked leaves the camera free.
+        power.screenChanged(false)
+        if (isScreenOn) scheduleUnlockCheck(700L)
         return START_NOT_STICKY
     }
 
@@ -206,9 +285,17 @@ class GlobalGestureService : LifecycleService() {
     }
 
     private fun bindCamera() {
+        if (cameraBindPending || cameraBound || !isActive || !isScreenOn ||
+            !screenIsUnlocked()) return
+        val generation = cameraGeneration
+        cameraBindPending = true
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
-            if (!isActive || !isScreenOn) return@addListener
+            if (cameraGeneration != generation || !isActive || !isScreenOn ||
+                !screenIsUnlocked()) {
+                if (cameraGeneration == generation) cameraBindPending = false
+                return@addListener
+            }
             try {
                 if (recognizer == null) {
                     recognizer = GestureRecognizer.createFromOptions(this,
@@ -239,10 +326,22 @@ class GlobalGestureService : LifecycleService() {
                 provider = future.get()
                 provider?.unbindAll()
                 provider?.bindToLifecycle(this, CameraSelector.DEFAULT_FRONT_CAMERA, analysis)
+                cameraBound = true
+                cameraBindPending = false
+                cameraRetryCount = 0
             } catch (_: Exception) {
-                // Camera ownership / background restrictions require user-visible recovery.
-                isActive = false
-                stopSelf()
+                // A competing camera user (including face unlock) must not
+                // destroy the Nearby service. Retry a few times after unlock.
+                cameraBindPending = false
+                cameraBound = false
+                provider?.unbindAll()
+                if (cameraGeneration == generation && isActive && isScreenOn &&
+                    cameraRetryCount++ < 3) {
+                    scheduleUnlockCheck(1500L)
+                } else {
+                    connections.reportCaptureFailure(
+                        "前鏡頭暫時無法使用，傳檔連線仍在；請解鎖後重試")
+                }
             }
         }, ContextCompat.getMainExecutor(this))
     }
@@ -301,6 +400,8 @@ class GlobalGestureService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        cancelUnlockCheck()
+        cameraGeneration++
         isActive = false
         transfer = null
         GlobalGrabBridge.onGrabResult = null
