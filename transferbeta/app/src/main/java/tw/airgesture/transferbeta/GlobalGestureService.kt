@@ -40,6 +40,8 @@ import tw.airgesture.transferbeta.core.VisualPhase
 import tw.airgesture.transferbeta.core.HandFeedbackPolicy
 import tw.airgesture.transferbeta.core.FloatingControlRouter
 import tw.airgesture.transferbeta.core.TiltedPalmAssist
+import tw.airgesture.transferbeta.core.FloatingSettings
+import tw.airgesture.transferbeta.core.PalmPositionTracker
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
 
@@ -56,6 +58,7 @@ class GlobalGestureService : LifecycleService() {
         const val ACTION_STOP = "tw.airgesture.transferbeta.STOP_GLOBAL"
         const val ACTION_CAPTURE_SCREEN = "tw.airgesture.transferbeta.EXPLICIT_SCREEN_CAPTURE"
         const val ACTION_CONFIRM_RECEIVE = "tw.airgesture.transferbeta.CONFIRM_RECEIVE"
+        const val ACTION_SETTINGS_CHANGED = "tw.airgesture.transferbeta.SETTINGS_CHANGED"
         private const val CHANNEL = "global_grab_camera"
         private const val NOTIFICATION = 4108
         @Volatile var isActive = false
@@ -75,7 +78,9 @@ class GlobalGestureService : LifecycleService() {
     private lateinit var overlay: GestureStatusOverlay
     private val power = AdaptivePowerPolicy()
     private val handFeedback = HandFeedbackPolicy()
-    private val unified = FloatingControlRouter()
+    private var unified = FloatingControlRouter()
+    private val palmTrail = PalmPositionTracker()
+    @Volatile private var showPalm = true
     private val tiltedPalm = TiltedPalmAssist(enabled = true)
     private val cameraExecutor = Executors.newSingleThreadExecutor()
     private var provider: ProcessCameraProvider? = null
@@ -163,7 +168,9 @@ class GlobalGestureService : LifecycleService() {
         provider?.unbindAll()
         overlay.dismissHand()
         GlobalGrabAccessibilityService.setCursor(null)
+        GlobalGrabAccessibilityService.setPalm(null)
         cameraExecutor.execute {
+            palmTrail.clear()
             handFeedback.reset()
             unified.reset()
         }
@@ -182,7 +189,7 @@ class GlobalGestureService : LifecycleService() {
                 // Allow face authentication to fully close its camera session.
                 // This is only reached after Keyguard is genuinely gone.
                 power.screenChanged(true)
-                connections.setDiscoveryEnabled(true)
+                connections.setDiscoveryEnabled(FloatingSettings.nearby(this@GlobalGestureService))
                 bindCamera()
             } else if (++cameraRetryCount <= 25) {
                 // Infrequent checks handle devices that do not dispatch
@@ -197,6 +204,7 @@ class GlobalGestureService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
+        reloadFloatingSettings()
         connections = MultiPeerTransferManager(applicationContext)
         overlay = GestureStatusOverlay(applicationContext)
         connections.onVisualEvent = { event -> overlay.showState(event) }
@@ -216,8 +224,27 @@ class GlobalGestureService : LifecycleService() {
         })
     }
 
+    private fun reloadFloatingSettings() {
+        power.setPowerMode(FloatingSettings.power(this))
+        showPalm = FloatingSettings.showPalm(this)
+        val dwell = FloatingSettings.dwellMs(this)
+        val sensitivity = FloatingSettings.sensitivity(this)
+        cameraExecutor.execute {
+            unified = FloatingControlRouter(dwell, sensitivity)
+            palmTrail.clear()
+        }
+        if(!showPalm) GlobalGrabAccessibilityService.setPalm(null)
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
+        if(intent?.action == ACTION_SETTINGS_CHANGED) {
+            if(isActive) {
+                reloadFloatingSettings()
+                connections.setDiscoveryEnabled(isScreenOn && mayBindCamera() && FloatingSettings.nearby(this))
+            }
+            return START_NOT_STICKY
+        }
         if (intent?.action == ACTION_STOP) {
             stopSelf()
             return START_NOT_STICKY
@@ -409,6 +436,10 @@ class GlobalGestureService : LifecycleService() {
             val py = if (marks != null && marks.size > 17)
                 (marks[0].y() + marks[5].y() + marks[9].y() +
                     marks[13].y() + marks[17].y()) / 5f else null
+            val snapshot = if(showPalm)
+                palmTrail.observe(px, py, pose == "Open_Palm" && trustedScore >= .65f, now)
+            else { palmTrail.clear(); null }
+            GlobalGrabAccessibilityService.setPalm(snapshot)
             val index = if (pose == "Pointing_Up" && marks != null &&
                 marks.size > 8) marks[8] else null
             val output = unified.accept(pose, trustedScore, px, py,
@@ -492,6 +523,7 @@ class GlobalGestureService : LifecycleService() {
         overlay.dismiss()
         overlay.dismissHand()
         GlobalGrabAccessibilityService.setCursor(null)
+        GlobalGrabAccessibilityService.setPalm(null)
         power.stop()
         provider?.unbindAll()
         try { unregisterReceiver(screen) } catch (_: Exception) {}
