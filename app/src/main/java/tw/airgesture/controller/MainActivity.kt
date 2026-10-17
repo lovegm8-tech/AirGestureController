@@ -38,7 +38,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var pointerDwell: Spinner
     private lateinit var longFistDuration: Spinner
     private lateinit var animatedHandFeedback: Switch
-    private lateinit var circleVolume: Switch
+    private lateinit var palmPositionOverlay: Switch
     private lateinit var smartLitPower: Switch
     private lateinit var tiltedPalmAssist: Switch
     private lateinit var fastSwipeAssist: Switch
@@ -104,14 +104,14 @@ class MainActivity : ComponentActivity() {
         content.addView(animatedHandFeedback, LinearLayout.LayoutParams(-1, dip(54)))
         label("預設開啟：已偵測到手、張掌已辨識、握拳已辨識、食指游標辨識；點擊或滑動成功時短暫顯示執行提示。關閉可改回舊版簡潔小圓點。", 13f)
 
-        label("張掌畫圈控制音量（v0.3.0）", 19f, true)
-        circleVolume = Switch(this).apply {
-            text = "啟用張掌順／逆時針畫圈調整音量"
-            isChecked = Settings.circleVolume(this@MainActivity)
+        label("張掌位置追蹤動畫", 19f, true)
+        palmPositionOverlay = Switch(this).apply {
+            text = "顯示跟隨張掌移動的圓環與軌跡"
+            isChecked = Settings.palmPositionOverlay(this@MainActivity)
             textSize = 16f
         }
-        content.addView(circleVolume, LinearLayout.LayoutParams(-1, -2))
-        label("張掌先停穩約 0.35 秒，看到跟隨手掌的藍色圓環後開始畫圈。順時針加音量，逆時針減音量；首段約 240°，持續轉動每 120° 再調 1 格。畫圈軌跡跟隨手掌，偵測到直線滑動時會嘗試保留原本滑動。若造成誤觸可關閉此功能。", 13f)
+        content.addView(palmPositionOverlay, LinearLayout.LayoutParams(-1, -2))
+        label("辨識到張掌後，藍色圓環會跟著手掌中心移動並留下短暫軌跡。這只是畫面提示，不再調整音量或攔截上下滑、右滑與握拳。可獨立開關，儲存後重新啟動辨識。", 13f)
 
         label("食指游標停穩點擊時間", 19f, true)
         pointerDwell = Spinner(this)
@@ -222,7 +222,7 @@ class MainActivity : ComponentActivity() {
         cooldownText.text = "操作冷卻時間：${500 + cooldown.progress * 100} 毫秒"
         content.addView(cooldown, LinearLayout.LayoutParams(-1, dip(48)))
         button("儲存設定") {
-            Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition, cursorRange.selectedItemPosition, tiltedPalmAssist.isChecked, fastSwipeAssist.isChecked, screenWake.isChecked, wakePowerMode.selectedItemPosition, pointerDwell.selectedItemPosition, longFistDuration.selectedItemPosition, animatedHandFeedback.isChecked, smartLitPower.isChecked, circleVolume.isChecked)
+            Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition, cursorRange.selectedItemPosition, tiltedPalmAssist.isChecked, fastSwipeAssist.isChecked, screenWake.isChecked, wakePowerMode.selectedItemPosition, pointerDwell.selectedItemPosition, longFistDuration.selectedItemPosition, animatedHandFeedback.isChecked, smartLitPower.isChecked, palmPositionOverlay.isChecked)
             toast("已儲存；重新啟動辨識後生效")
         }
         label("隱私：App 不要求網路權限，影像只在本機暫時分析，不會錄影或上傳。\n啟動後可從通知列隨時停止前鏡頭。", 13f)
@@ -250,7 +250,7 @@ class MainActivity : ComponentActivity() {
 
     private fun startControl() {
         if (!GestureAccessibilityService.isReady()) { toast("無障礙服務尚未啟用"); return }
-        Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition, cursorRange.selectedItemPosition, tiltedPalmAssist.isChecked, fastSwipeAssist.isChecked, screenWake.isChecked, wakePowerMode.selectedItemPosition, pointerDwell.selectedItemPosition, longFistDuration.selectedItemPosition, animatedHandFeedback.isChecked, smartLitPower.isChecked, circleVolume.isChecked)
+        Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition, cursorRange.selectedItemPosition, tiltedPalmAssist.isChecked, fastSwipeAssist.isChecked, screenWake.isChecked, wakePowerMode.selectedItemPosition, pointerDwell.selectedItemPosition, longFistDuration.selectedItemPosition, animatedHandFeedback.isChecked, smartLitPower.isChecked, palmPositionOverlay.isChecked)
         val intent = Intent(this, CameraGestureService::class.java).setAction(CameraGestureService.START)
         try {
             ContextCompat.startForegroundService(this, intent)
