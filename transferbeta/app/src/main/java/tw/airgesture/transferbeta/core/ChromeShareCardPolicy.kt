@@ -15,6 +15,21 @@ data class ChromeCardControl(
 data class ChromeCardPoint(val x: Float, val y: Float)
 
 object ChromeShareCardPolicy {
+    /**
+     * If Chrome opens the address search editor and Samsung IME becomes the
+     * active accessibility window, only the unique underlying Chrome app
+     * window may be consulted. Never search other foreground applications.
+     */
+    fun mayUseChromeWindowBehindKeyboard(
+        requestedPackage: String?,
+        activePackage: String?,
+        keyboardWindowVisible: Boolean,
+        chromeWindowCount: Int
+    ): Boolean =
+        requestedPackage == "com.android.chrome" &&
+            activePackage != requestedPackage &&
+            keyboardWindowVisible && chromeWindowCount == 1
+
     fun inferSharePoint(
         appPackage: String?,
         editorWasOpenedByAirGrab: Boolean,
