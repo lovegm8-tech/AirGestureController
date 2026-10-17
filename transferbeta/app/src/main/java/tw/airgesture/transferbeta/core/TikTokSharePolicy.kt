@@ -32,7 +32,7 @@ object TikTokSharePolicy {
         return buttons.withIndex().filter { (_, candidate) ->
             val n = candidate.node
             n.visible && n.clickable && !n.password &&
-                candidate.centerYRatio in .70f.. .89f &&
+                candidate.centerYRatio in 0.70f..0.89f &&
                 (listOfNotNull(n.label, n.hint) + n.texts)
                     .any { norm(it) in moreLabels }
         }.singleOrNull()?.index
