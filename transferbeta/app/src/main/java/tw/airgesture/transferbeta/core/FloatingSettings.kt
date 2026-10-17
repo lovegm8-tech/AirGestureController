@@ -5,7 +5,7 @@ object FloatingSettings {
     fun dwellIndex(c:Context)=pref(c).getInt("dwell",1).coerceIn(0,2)
     fun dwellMs(c:Context)=longArrayOf(1000L,2000L,3000L)[dwellIndex(c)]
     fun range(c:Context)=pref(c).getInt("cursor_range",2).coerceIn(0,3)
-    fun showPalm(c:Context)=pref(c).getBoolean("palm_overlay",true)
+    fun showPalm(c:Context)=pref(c).getBoolean("palm_overlay",false)
     fun power(c:Context)=pref(c).getInt("power_mode",1).coerceIn(0,2)
     fun nearby(c:Context)=pref(c).getBoolean("nearby_enabled",true)
     fun sensitivity(c:Context)=pref(c).getInt("swipe_sensitivity",1).coerceIn(0,2)
