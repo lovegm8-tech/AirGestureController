@@ -122,7 +122,8 @@ class PalmCircleEngine(
             }
             if (points.size > 70) points.removeAt(0)
         }
-        if (nowMs - lastMove >= 700L || nowMs - armedAt > 9_000L) {
+        if ((points.size > 1 && nowMs - lastMove >= 700L) ||
+            nowMs - armedAt > 9_000L) {
             reset()
             return Result(Phase.IDLE)
         }
@@ -133,7 +134,6 @@ class PalmCircleEngine(
         val dimensions = bounds()
         val width = dimensions.first
         val height = dimensions.second
-        val hasActualBend = absDegrees > 32f
         // If a user swipes a straight line, release the held swipe as soon as
         // displacement is clear. No circular-volume event can follow that stroke.
         if (!firedOnce && absDegrees < 15f &&
