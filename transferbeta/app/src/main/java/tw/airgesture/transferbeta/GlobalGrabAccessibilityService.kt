@@ -45,10 +45,9 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
             private set
         private const val YOUTUBE = "com.google.android.youtube"
 
-        fun isYouTubeForeground(): Boolean {
-            val real = current?.get()?.rootInActiveWindow?.packageName?.toString()
-            return (real ?: foregroundPackage) == YOUTUBE
-        }
+        // Avoid expensive Accessibility window-root Binder calls on every ML
+        // inference. A real-root check still occurs before the media key fires.
+        fun isYouTubeForeground(): Boolean = foregroundPackage == YOUTUBE
         fun sendControl(command: FloatingControlRouter.Command) {
             val service = current?.get()
             if (service == null) {
