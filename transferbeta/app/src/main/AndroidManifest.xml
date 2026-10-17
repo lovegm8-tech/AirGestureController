@@ -34,6 +34,7 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <activity android:name=".GestureTestActivity" android:exported="false" />
         <!-- Transparent separate Sharesheet task: only this receives external
              ACTION_SEND. It never constructs or reveals the AirGrab dashboard. -->
         <activity
