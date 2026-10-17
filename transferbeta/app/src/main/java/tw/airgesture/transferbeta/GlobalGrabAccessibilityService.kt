@@ -45,6 +45,7 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         var hubMoreClicked: Boolean = false,
         var targetClicked: Boolean = false,
         var youtubeShareScrolls: Int = 0,
+        var tiktokShareScrolls: Int = 0,
         var galleryImageChoiceClicked: Boolean = false
     )
 
@@ -378,6 +379,8 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
                     "瀏覽器分享選單尚未把連結交給 AirGrab；請確認分享介面有 AirGrab"
                 else if (pkg == YouTubeLinkPolicy.PACKAGE)
                     "YouTube 分享選單沒有開啟「其他項目」；請檢查分享面板"
+                else if (TikTokSharePolicy.isTikTok(pkg))
+                    "TikTok 分享選單未找到「更多」，或未將網址交付 AirGrab"
                 else if (pkg == SamsungGalleryScreenshotSharePolicy.GALLERY_PACKAGE)
                     "三星相簿尚未將截圖交付 AirGrab；若有選擇視窗，請選「圖像」"
                 else "來源 App 分享選單未能自動交付檔案；請手動選 AirGrab 測試"))
@@ -395,6 +398,8 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
                     else "已展開瀏覽器選單 · 正在找分享功能"
                 else if (pkg == YouTubeLinkPolicy.PACKAGE)
                     "已開啟 YouTube 分享面板；正在尋找「其他項目」"
+                else if (TikTokSharePolicy.isTikTok(pkg))
+                    "已開啟 TikTok 分享面板；正在尋找「更多」"
                 else "已開啟來源 App 分享選單；正在找 AirGrab（尚未取得原檔）"))
             schedulePendingCheck()
         } else {
@@ -467,6 +472,55 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         )
     }
 
+    /**
+     * TikTok puts "更多" at the end of the horizontal app row, which is lower
+     * on screen than YouTube's. Only called inside the confirmed TikTok "傳送至"
+     * panel after the user's explicit grab. Never swipe the underlying video.
+     */
+    private fun scrollTikTokShareRow(root: AccessibilityNodeInfo): Boolean {
+        if (!TikTokSharePolicy.isTikTok(root.packageName?.toString())) return false
+        val width = resources.displayMetrics.widthPixels
+        val height = resources.displayMetrics.heightPixels
+        val queue = ArrayDeque<Pair<AccessibilityNodeInfo, Int>>()
+        queue.add(root to 0)
+        val candidates = ArrayList<AccessibilityNodeInfo>()
+        var inspected = 0
+        while (queue.isNotEmpty() && inspected++ < 260) {
+            val (node, depth) = queue.removeFirst()
+            if (!node.isVisibleToUser || node.isPassword) continue
+            val bounds = Rect().also { node.getBoundsInScreen(it) }
+            if (node.isScrollable && bounds.width() >= (width * 0.55f).toInt() &&
+                bounds.top >= (height * 0.68f).toInt() &&
+                bounds.top <= (height * 0.86f).toInt() &&
+                bounds.bottom <= (height * 0.90f).toInt() &&
+                bounds.height() <= (height * 0.24f).toInt()) {
+                candidates.add(node)
+            }
+            if (depth < 16) {
+                for (i in 0 until node.childCount) {
+                    node.getChild(i)?.let { queue.add(it to (depth + 1)) }
+                }
+            }
+        }
+        if (candidates.size == 1) {
+            val row = candidates.single()
+            if (row.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_RIGHT.id) ||
+                row.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) return true
+        }
+        // The native TikTok sheet in S26 Ultra screenshots places the app row
+        // around 78-84% of the display. A single horizontal swipe here cannot
+        // touch the video progress bar or the separate action row below.
+        val y = height * 0.80f
+        val path = Path().apply {
+            moveTo(width * 0.83f, y)
+            lineTo(width * 0.23f, y)
+        }
+        return dispatchGesture(
+            GestureDescription.Builder()
+                .addStroke(GestureDescription.StrokeDescription(path, 0L, 330L))
+                .build(), null, null)
+    }
+
     private fun advanceFlow() {
         val flow = pending ?: return
         val now = SystemClock.uptimeMillis()
@@ -477,6 +531,8 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
                     "網頁連結分享逾時；未能把連結交給 AirGrab"
                 else if (flow.origin == YouTubeLinkPolicy.PACKAGE)
                     "YouTube 分享面板或系統分享清單逾時；未取得影片連結"
+                else if (TikTokSharePolicy.isTikTok(flow.origin))
+                    "TikTok 分享／系統清單逾時；沒有收到影片連結"
                 else "來源 App 分享選單等待逾時；尚未收到原始檔案"))
             return
         }
@@ -544,6 +600,38 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
                     GlobalGrabBridge.result(GrabResult.ShareStarted(
                         "正在橫向滑動 YouTube 分享 App 清單，尋找「其他項目」 " +
                             "(${flow.youtubeShareScrolls}/4)"))
+                    return
+                }
+            }
+        }
+        // TikTok uses its own "傳送至" panel, with "更多" at the far
+        // right of the horizontal app carousel. Only this distinct package
+        // and sheet may trigger a bounded leftward swipe.
+        if (TikTokSharePolicy.isTikTok(flow.origin) && pkg == flow.origin &&
+            !flow.hubMoreClicked) {
+            val visibleText = readable(root).mapNotNull { it.text }
+            if (TikTokSharePolicy.isNativeShareSheet(pkg, visibleText)) {
+                val height = resources.displayMetrics.heightPixels.toFloat()
+                val candidates = nodes.mapIndexed { i, node ->
+                    val rect = Rect().also { clickable[i].getBoundsInScreen(it) }
+                    TikTokShareCandidate(node, rect.exactCenterY() / height)
+                }
+                val more = TikTokSharePolicy.moreAppsTarget(pkg, visibleText, candidates)
+                if (more != null) {
+                    if (clickable[more].performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                        flow.hubMoreClicked = true
+                        flow.lastAction = now
+                        GlobalGrabBridge.result(GrabResult.ShareStarted(
+                            "已選 TikTok「更多」；正在尋找系統分享清單的 AirGrab"))
+                        return
+                    }
+                } else if (flow.tiktokShareScrolls < 4 && scrollTikTokShareRow(root)) {
+                    flow.tiktokShareScrolls++
+                    // Give TikTok's carousel time to finish each gesture.
+                    flow.lastAction = now + 400L
+                    GlobalGrabBridge.result(GrabResult.ShareStarted(
+                        "正在滑動 TikTok 分享清單，尋找「更多」 " +
+                            "(${flow.tiktokShareScrolls}/4)"))
                     return
                 }
             }
