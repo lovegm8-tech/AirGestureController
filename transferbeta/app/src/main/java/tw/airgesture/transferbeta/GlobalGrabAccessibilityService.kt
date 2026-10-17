@@ -43,7 +43,8 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         var lastAction: Long,
         var hubMoreClicked: Boolean = false,
         var targetClicked: Boolean = false,
-        var youtubeShareScrolls: Int = 0
+        var youtubeShareScrolls: Int = 0,
+        var galleryImageChoiceClicked: Boolean = false
     )
 
     override fun onServiceConnected() {
@@ -309,6 +310,8 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
                     "瀏覽器分享選單尚未把連結交給 AirGrab；請確認分享介面有 AirGrab"
                 else if (pkg == YouTubeLinkPolicy.PACKAGE)
                     "YouTube 分享選單沒有開啟「其他項目」；請檢查分享面板"
+                else if (pkg == SamsungGalleryScreenshotSharePolicy.GALLERY_PACKAGE)
+                    "三星相簿尚未將截圖交付 AirGrab；若有選擇視窗，請選「圖像」"
                 else "來源 App 分享選單未能自動交付檔案；請手動選 AirGrab 測試"))
             }
         }
@@ -417,6 +420,37 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         val root = rootInActiveWindow ?: return
         val pkg = root.packageName?.toString()
         val (nodes, clickable) = collect(root)
+        // Galaxy Gallery recognizes a URL inside some screenshots and opens
+        // "螢幕截圖分享形式：圖像 / 網頁連結". When a grab began in
+        // Samsung Gallery, prefer the original screenshot image. Only click
+        // inside the uniquely identified modal, never a generic "圖像" label.
+        if (flow.origin == SamsungGalleryScreenshotSharePolicy.GALLERY_PACKAGE &&
+            !flow.galleryImageChoiceClicked) {
+            val visibleText = readable(root).mapNotNull { it.text }
+            if (SamsungGalleryScreenshotSharePolicy.isChoiceDialog(
+                    flow.origin, pkg, visibleText)) {
+                val idx = SamsungGalleryScreenshotSharePolicy.imageTarget(
+                    flow.origin, pkg, visibleText, nodes)
+                if (idx != null) {
+                    val bounds = Rect().also { clickable[idx].getBoundsInScreen(it) }
+                    val screenHeight = resources.displayMetrics.heightPixels
+                    val insideModal = bounds.width() > 0 && bounds.height() > 0 &&
+                        bounds.top >= (screenHeight * 0.50f).toInt() &&
+                        bounds.bottom <= screenHeight
+                    if (insideModal &&
+                        clickable[idx].performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                        flow.galleryImageChoiceClicked = true
+                        flow.lastAction = now
+                        GlobalGrabBridge.result(GrabResult.ShareStarted(
+                            "已選擇「圖像」，正在開啟三星相簿原始截圖分享選單"))
+                        return
+                    }
+                }
+                // A confirmed image/link dialog must never fall through to the
+                // generic Android chooser or click an unrelated control.
+                return
+            }
+        }
         // The YouTube app's own panel (screenshots show "其他項目") opens
         // the Android system chooser, where AirGrab is an ACTION_SEND target.
         // This does not require reading the clipboard or leaving YouTube.
