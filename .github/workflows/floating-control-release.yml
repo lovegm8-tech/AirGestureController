@@ -1,4 +1,4 @@
-name: Floating Control 1.0.4 Signed Release APK
+name: Floating Control 1.0.5 Signed Release APK
 on:
   push:
     branches:
@@ -28,7 +28,7 @@ jobs:
       - name: Install Android SDK
         run: |
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
-      - name: Verify gestures, battery policy, palm tracking then assemble 1.0.4 APK
+      - name: Verify gestures, low-power control cues, transfers then assemble 1.0.5 APK
         run: gradle :app:testDebugUnitTest :app:assembleRelease --no-daemon
       - name: Sign release APK with repository secret
         shell: bash
@@ -89,6 +89,6 @@ jobs:
           grep -qiF '05e77197d2ad73ac4a255e4c40b868a5c26c539b9aea3c1abd53100ff484f19e' "$RUNNER_TEMP/cert.txt"
       - uses: actions/upload-artifact@v4
         with:
-          name: FloatingControl-v1.0.4-release-signed
+          name: FloatingControl-v1.0.5-release-signed
           path: transferbeta/app/build/outputs/apk/release/app-release.apk
           retention-days: 30
