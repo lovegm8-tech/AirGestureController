@@ -38,6 +38,8 @@ import tw.airgesture.transferbeta.core.CameraUnlockGate
 import tw.airgesture.transferbeta.core.VisualEvent
 import tw.airgesture.transferbeta.core.VisualPhase
 import tw.airgesture.transferbeta.core.HandFeedbackPolicy
+import tw.airgesture.transferbeta.core.FloatingControlRouter
+import tw.airgesture.transferbeta.core.TiltedPalmAssist
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
 
@@ -73,7 +75,8 @@ class GlobalGestureService : LifecycleService() {
     private lateinit var overlay: GestureStatusOverlay
     private val power = AdaptivePowerPolicy()
     private val handFeedback = HandFeedbackPolicy()
-    private val sequence = GestureSequence(holdMillis = 2_000L, unknownGraceMillis = 550L)
+    private val unified = FloatingControlRouter()
+    private val tiltedPalm = TiltedPalmAssist(enabled = true)
     private val cameraExecutor = Executors.newSingleThreadExecutor()
     private var provider: ProcessCameraProvider? = null
     private var recognizer: GestureRecognizer? = null
@@ -156,9 +159,10 @@ class GlobalGestureService : LifecycleService() {
         power.screenChanged(false)
         provider?.unbindAll()
         overlay.dismissHand()
+        GlobalGrabAccessibilityService.setCursor(null)
         cameraExecutor.execute {
             handFeedback.reset()
-            sequence.reset()
+            unified.reset()
         }
     }
 
@@ -196,7 +200,7 @@ class GlobalGestureService : LifecycleService() {
             if (receivingOffer != awaiting) {
                 receivingOffer = awaiting
                 power.setReceiverAwaiting(awaiting)
-                cameraExecutor.execute { sequence.reset() }
+                cameraExecutor.execute { unified.reset() }
             }
         }
         isScreenOn = powerManager.isInteractive
@@ -263,7 +267,7 @@ class GlobalGestureService : LifecycleService() {
     private fun foregroundNotification() {
         val mgr = getSystemService(NotificationManager::class.java)
         mgr.createNotificationChannel(NotificationChannel(
-            CHANNEL, "隔空抓取／前鏡頭監測", NotificationManager.IMPORTANCE_LOW))
+            CHANNEL, "懸浮操作／前鏡頭監測", NotificationManager.IMPORTANCE_LOW))
         val stop = PendingIntent.getService(this, 32,
             Intent(this, GlobalGestureService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
@@ -276,8 +280,8 @@ class GlobalGestureService : LifecycleService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val n = Notification.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_camera)
-            .setContentTitle("隔空抓取已啟用")
-            .setContentText("低頻辨識中；偵測到手掌才切換快速辨識")
+            .setContentTitle("懸浮操作已啟用")
+            .setContentText("控制與傳檔共用鏡頭；待機自動降頻")
             .setOngoing(true)
             .setContentIntent(open)
             .addAction(Notification.Action.Builder(
@@ -375,22 +379,47 @@ class GlobalGestureService : LifecycleService() {
             val result = recognizer?.recognizeForVideo(BitmapImageBuilder(image).build(), now)
                 ?: return
             val best = result.gestures().firstOrNull()?.maxByOrNull { it.score() }
-            val shape = if ((best?.score() ?: 0f) >= .58f)
-                best?.categoryName() ?: "" else ""
-            val handSeen = result.landmarks().firstOrNull()?.isNotEmpty() == true ||
-                shape == "Open_Palm" || shape == "Closed_Fist"
+            val name = best?.categoryName()
+            val score = best?.score() ?: 0f
+            val marks = result.landmarks().firstOrNull()
+            val handSeen = marks?.isNotEmpty() == true ||
+                name == "Open_Palm" || name == "Closed_Fist"
             power.observeHand(handSeen, now)
-            handFeedback.observe(handSeen, shape, now)?.let { hint ->
-                overlay.showHandFeedback(hint)
-            }
-            when (sequence.accept(shape, now, receiveAvailable = receivingOffer)) {
-                GestureSequence.Result.SEND -> {
+            // Tilt fallback uses existing landmarks, not another ML inference.
+            val xy = if (marks != null && marks.size >= 21) {
+                FloatArray(42).also { c ->
+                    for (i in 0 until 21) {
+                        c[2 * i] = marks[i].x()
+                        c[2 * i + 1] = marks[i].y()
+                    }
+                }
+            } else null
+            val tilt = tiltedPalm.resolve(name, score, xy, now)
+            val pose = if (tilt.useLandmarkFallback) "Open_Palm"
+                else if (score >= .58f) name ?: "" else ""
+            val trustedScore = if (tilt.useLandmarkFallback) .65f else score
+            handFeedback.observe(handSeen, pose, now)?.let(overlay::showHandFeedback)
+            val px = if (marks != null && marks.size > 17)
+                1f - (marks[0].x() + marks[5].x() + marks[9].x() +
+                    marks[13].x() + marks[17].x()) / 5f else null
+            val py = if (marks != null && marks.size > 17)
+                (marks[0].y() + marks[5].y() + marks[9].y() +
+                    marks[13].y() + marks[17].y()) / 5f else null
+            val index = if (pose == "Pointing_Up" && marks != null &&
+                marks.size > 8) marks[8] else null
+            val output = unified.accept(pose, trustedScore, px, py,
+                index?.let { 1f - it.x() }, index?.y(), now, receivingOffer,
+                GlobalGrabAccessibilityService.isYouTubeForeground())
+            when (val command = output.command) {
+                FloatingControlRouter.Command.SEND -> {
                     overlay.showState(VisualEvent(VisualPhase.CAPTURING, "正在抓取目前內容…"))
                     GlobalGrabBridge.onGrabGesture()
                 }
-                GestureSequence.Result.RECEIVE -> GlobalGrabBridge.onReleaseGesture()
-                else -> Unit
+                FloatingControlRouter.Command.RECEIVE -> GlobalGrabBridge.onReleaseGesture()
+                null -> Unit
+                else -> GlobalGrabAccessibilityService.sendControl(command)
             }
+            GlobalGrabAccessibilityService.setCursor(output.pointer)
             // Telemetry deliberately stores no frame or hand identity.
             if (now - lastHint > 1500L) lastHint = now
         } finally { image.recycle() }
@@ -451,6 +480,7 @@ class GlobalGestureService : LifecycleService() {
         connections.stop()
         overlay.dismiss()
         overlay.dismissHand()
+        GlobalGrabAccessibilityService.setCursor(null)
         power.stop()
         provider?.unbindAll()
         try { unregisterReceiver(screen) } catch (_: Exception) {}
