@@ -38,7 +38,9 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         val plan: SharePlan,
         var nextStep: Int,
         val expires: Long,
-        var lastAction: Long
+        var lastAction: Long,
+        var hubMoreClicked: Boolean = false,
+        var targetClicked: Boolean = false
     )
 
     override fun onServiceConnected() {
@@ -208,6 +210,19 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
             }
             else -> Unit
         }
+        // Chrome and Google have app-owned Share controls that often open a
+        // native Share Hub instead of exposing a URL editor. Prefer the
+        // user-initiated app share path when a unique known button/menu exists.
+        // Samsung's confirmed-working address capture remains unchanged.
+        if (pkg == "com.android.chrome" ||
+            pkg == "com.google.android.googlequicksearchbox") {
+            val plan = ShareAutomationPolicy.plan(pkg)
+            if (plan != null && (ShareAutomationPolicy.match(plan.steps.first(), tree.first) != null ||
+                    ShareAutomationPolicy.browserOverflow(tree.first) != null)) {
+                beginShare(pkg, root)
+                return
+            }
+        }
         if (GrabContentPolicy.isBrowser(pkg)) {
             // Chromium/Samsung often show only the host in the address pill.
             // Clicking the known address control exposes a complete URL in its
@@ -302,16 +317,48 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         val root = rootInActiveWindow ?: return
         val pkg = root.packageName?.toString()
         val (nodes, clickable) = collect(root)
-        // Share target selection is only allowed from recognized Android resolver packages.
-        if (ShareAutomationPolicy.isTrustedResolver(pkg)) {
-            val index = ShareAutomationPolicy.onlyUniqueChooserTarget(pkg, nodes)
-            if (index != null && clickable[index].performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-                clearPending()
+        // Chrome's native Sharing Hub is not an Android resolver. Only
+        // interact if its distinct accessibility sheet description is visible.
+        // Never select a page element solely because it contains "AirGrab".
+        if (flow.plan.kind == GrabKind.BROWSER && pkg == "com.android.chrome" &&
+            ShareAutomationPolicy.isChromeSharingHub(pkg,
+                readable(root).mapNotNull { it.text })) {
+            if (flow.targetClicked) return
+            val target = ShareAutomationPolicy.browserHubTarget(nodes)
+            if (target != null &&
+                clickable[target].performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                flow.targetClicked = true
+                flow.lastAction = now
                 GlobalGrabBridge.result(GrabResult.ShareStarted(
-                    "已點選 AirGrab，等待三星相簿交付照片原檔（尚未送達對方）"))
+                    "已從 Chrome 分享面板選擇 AirGrab；等待網址交付"))
                 return
             }
-            // Device-specific resolver may not expose target; never guess a screen position.
+            if (!flow.hubMoreClicked) {
+                val more = ShareAutomationPolicy.browserHubMore(nodes)
+                if (more != null &&
+                    clickable[more].performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                    flow.hubMoreClicked = true
+                    flow.lastAction = now
+                    GlobalGrabBridge.result(GrabResult.ShareStarted(
+                        "已展開 Chrome 的完整分享清單；正在尋找 AirGrab"))
+                    return
+                }
+            }
+        }
+        // A chooser click alone is not proof of delivered content. Keep
+        // watchdog active until ShareReceiverActivity confirms ACTION_SEND.
+        if (ShareAutomationPolicy.isTrustedResolver(pkg)) {
+            if (flow.targetClicked) return
+            val index = ShareAutomationPolicy.onlyUniqueChooserTarget(pkg, nodes)
+            if (index != null && clickable[index].performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                flow.targetClicked = true
+                flow.lastAction = now
+                GlobalGrabBridge.result(GrabResult.ShareStarted(
+                    if (flow.plan.kind == GrabKind.BROWSER)
+                        "已從系統分享清單點選 AirGrab；等待網址交付"
+                    else "已點選 AirGrab，等待原始檔案交付"))
+                return
+            }
             return
         }
         if (pkg != flow.origin || flow.nextStep >= flow.plan.steps.size) return
