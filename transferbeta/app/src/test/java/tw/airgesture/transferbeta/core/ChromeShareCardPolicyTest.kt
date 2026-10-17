@@ -53,4 +53,32 @@ class ChromeShareCardPolicyTest {
                 ChromeCardControl("編輯", 654f, 217f)))
         assertNotNull(p)
     }
+    @Test fun secondRowChromeShareWithSamsungKeyboardVisible() {
+        // S26 Ultra screenshot: page title/domain in row 2, icons Share/Copy/Edit
+        // at roughly x=520/609/697, y=158 of a 755 x 1536 display.
+        val p = ChromeShareCardPolicy.inferSharePoint(
+            "com.android.chrome", true, 755f, 1536f,
+            listOf(
+                ChromeCardControl("複製", 609f, 158f),
+                ChromeCardControl("編輯", 697f, 158f)
+            ))!!
+        assertEquals(521f, p.x, .1f)
+        assertEquals(158f, p.y, .1f)
+    }
+
+    @Test fun chromeWindowUnderImeCanBeReadOnlyDuringOwnEditorFlow() {
+        assertTrue(ChromeShareCardPolicy.mayUseChromeWindowBehindKeyboard(
+            "com.android.chrome", "com.samsung.android.honeyboard", true, 1))
+        assertTrue(ChromeShareCardPolicy.mayUseChromeWindowBehindKeyboard(
+            "com.android.chrome", null, true, 1))
+        assertFalse(ChromeShareCardPolicy.mayUseChromeWindowBehindKeyboard(
+            "com.android.chrome", "com.android.chrome", true, 1))
+        assertFalse(ChromeShareCardPolicy.mayUseChromeWindowBehindKeyboard(
+            "com.android.chrome", "com.android.systemui", false, 1))
+        assertFalse(ChromeShareCardPolicy.mayUseChromeWindowBehindKeyboard(
+            "com.android.chrome", "com.samsung.android.honeyboard", true, 2))
+        assertFalse(ChromeShareCardPolicy.mayUseChromeWindowBehindKeyboard(
+            "com.google.android.googlequicksearchbox", "com.samsung.android.honeyboard", true, 1))
+    }
+
 }
