@@ -35,6 +35,24 @@ class AdaptivePowerPolicyTest {
         assertEquals(AdaptivePowerPolicy.Mode.ECO, p.mode(63_201L))
     }
 
+    @Test fun cheapSceneMotionWakesOnlyDeepIdleMlVerification() {
+        val p = AdaptivePowerPolicy()
+        p.start(); p.screenChanged(true)
+        assertFalse(p.isDeepIdle(0L))
+        assertTrue(p.shouldInfer(0L))
+        // First scene-change hint is not allowed to bypass normal idle schedule.
+        assertFalse(p.shouldInfer(100L, significantMotion = true))
+        assertFalse(p.isDeepIdle(19_999L))
+        assertTrue(p.isDeepIdle(20_000L))
+        assertTrue(p.shouldInfer(20_000L, significantMotion = true))
+        assertFalse(p.shouldInfer(20_100L, significantMotion = true))
+        assertTrue(p.shouldInfer(20_240L, significantMotion = true))
+        p.observeHand(true, 20_240L)
+        assertFalse(p.isDeepIdle(21_000L))
+        p.screenChanged(false)
+        assertFalse(p.shouldInfer(30_000L, significantMotion = true))
+    }
+
     @Test fun powerModesTradeSpeedForEnergy() {
         val save = AdaptivePowerPolicy()
         save.setPowerMode(0)
