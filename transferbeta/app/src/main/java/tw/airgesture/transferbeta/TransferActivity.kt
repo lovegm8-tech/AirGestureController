@@ -28,6 +28,9 @@ import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.view.Gravity
 import android.widget.Button
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import tw.airgesture.transferbeta.core.FloatingSettings
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
@@ -68,6 +71,13 @@ class TransferActivity : ComponentActivity() {
     private lateinit var titleHint: TextView
     private lateinit var primaryAction: Button
     private lateinit var advanced: LinearLayout
+    private lateinit var setupGuide: LinearLayout
+    private lateinit var setupTitle: TextView
+    private lateinit var cameraStep: Button
+    private lateinit var nearbyStep: Button
+    private lateinit var accessibilityStep: Button
+    private lateinit var overlayStep: Button
+    private lateinit var notificationStep: Button
     private var advancedOpen = false
     private var normalLauncherEntry = false
     private var homePromptVisible = false
@@ -108,15 +118,7 @@ class TransferActivity : ComponentActivity() {
         if (!granted) flash("通知權限未開；接收端背景收到網址時，可能無法顯示開啟連結的通知")
     }
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        if (hasPermissions()) {
-            refreshHome()
-            if (homePrefs.getBoolean("auto_run", false) && hasAccessibilityPermission()) {
-                startGlobalMode()
-            }
-        } else {
-            show("尚未授予必要權限")
-            refreshHome()
-        }
+        refreshHome()
     }
 
     private var shownPairCode: String? = null
@@ -231,8 +233,60 @@ class TransferActivity : ComponentActivity() {
         }, 700)
     }
 
+    private fun permissionGranted(name: String) =
+        ContextCompat.checkSelfPermission(this, name) == PackageManager.PERMISSION_GRANTED
+
+    private fun nearbyPermissions(): Array<String> =
+        permissions().filter { it != Manifest.permission.CAMERA }.toTypedArray()
+
+    private fun nearbyGranted() = nearbyPermissions().all { permissionGranted(it) }
+
+    private fun requestNextPermission() {
+        when {
+            !permissionGranted(Manifest.permission.CAMERA) ->
+                permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA))
+            !nearbyGranted() ->
+                permissionLauncher.launch(nearbyPermissions().filterNot { permissionGranted(it) }.toTypedArray())
+            !hasAccessibilityPermission() ->
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            !Settings.canDrawOverlays(this) ->
+                startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + packageName)))
+            else -> startGlobalMode()
+        }
+    }
+
+    private fun refreshSetupGuide() {
+        if (!::setupGuide.isInitialized) return
+        val cameraOk = permissionGranted(Manifest.permission.CAMERA)
+        val nearbyOk = nearbyGranted()
+        val accessOk = hasAccessibilityPermission()
+        val overlayOk = Settings.canDrawOverlays(this)
+        val notifyOk = Build.VERSION.SDK_INT < 33 ||
+            permissionGranted(Manifest.permission.POST_NOTIFICATIONS)
+        val done = listOf(cameraOk, nearbyOk, accessOk, overlayOk).count { it }
+        setupGuide.visibility = if (done == 4) View.GONE else View.VISIBLE
+        setupTitle.text = "初次使用設定 · $done／4 項完成"
+        cameraStep.text = (if(cameraOk) "✓ 已允許" else "① 點此開啟") +
+            "｜相機：辨識手掌與手勢"
+        nearbyStep.text = (if(nearbyOk) "✓ 已允許" else "② 點此開啟") +
+            "｜附近裝置：配對及傳送檔案"
+        accessibilityStep.text = (if(accessOk) "✓ 已啟用" else "③ 點此開啟") +
+            "｜無障礙服務：模擬滑動、點擊與分享"
+        overlayStep.text = (if(overlayOk) "✓ 已允許" else "④ 點此開啟") +
+            "｜懸浮顯示：手勢提示及接收狀態"
+        notificationStep.text = (if(notifyOk) "✓ 已允許" else "建議開啟") +
+            "｜通知：背景傳檔及收到網址提醒（非必要）"
+        cameraStep.isEnabled = !cameraOk
+        nearbyStep.isEnabled = !nearbyOk
+        accessibilityStep.isEnabled = !accessOk
+        overlayStep.isEnabled = !overlayOk
+        notificationStep.isEnabled = !notifyOk
+    }
+
     private fun refreshHome() {
         if (!::status.isInitialized || !::primaryAction.isInitialized) return
+        refreshSetupGuide()
         val d = tw.airgesture.transferbeta.core.HomeScreenPolicy.decide(
             hasPermissions(), hasAccessibilityPermission(),
             GlobalGestureService.isActive,
@@ -310,6 +364,50 @@ class TransferActivity : ComponentActivity() {
         }
         root.addView(text("懸浮操作", 28f))
         root.addView(text("免觸控操作、隔空抓取，一次啟用即可使用。", 15f))
+        setupGuide = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(20, 14, 20, 18)
+            background = GradientDrawable().apply {
+                setColor(0xffedf4ff.toInt())
+                cornerRadius = 22f
+                setStroke(2, 0xffb8cff1.toInt())
+            }
+        }
+        setupTitle = text("初次使用設定", 19f)
+        setupGuide.addView(setupTitle)
+        setupGuide.addView(text("依序點選下方未完成項目。系統設定完成後返回本 App，會自動重新檢查權限。", 14f))
+        fun guideButton(): Button = Button(this).apply {
+            isAllCaps = false
+            textSize = 13f
+            minHeight = (resources.displayMetrics.density * 57).toInt()
+        }
+        cameraStep = guideButton().apply { setOnClickListener {
+            permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA))
+        } }
+        nearbyStep = guideButton().apply { setOnClickListener {
+            permissionLauncher.launch(nearbyPermissions().filterNot { permissionGranted(it) }.toTypedArray())
+        } }
+        accessibilityStep = guideButton().apply { setOnClickListener {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        } }
+        overlayStep = guideButton().apply { setOnClickListener {
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:" + packageName)))
+        } }
+        notificationStep = guideButton().apply { setOnClickListener {
+            if(Build.VERSION.SDK_INT >= 33)
+                notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } }
+        listOf(cameraStep, nearbyStep, accessibilityStep, overlayStep, notificationStep)
+            .forEach { setupGuide.addView(it) }
+        setupGuide.addView(Button(this).apply {
+            text = "權限按鈕無法開啟？前往本 App 的系統設定"
+            setOnClickListener {
+                startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:" + packageName)))
+            }
+        })
+        root.addView(setupGuide)
         titleHint = text("檢查服務狀態中…", 20f)
         root.addView(titleHint)
         status = text("等待連線", 14f)
@@ -330,7 +428,7 @@ class TransferActivity : ComponentActivity() {
                     GlobalGestureService.transfer?.isConnected == true
                 ).action) {
                     tw.airgesture.transferbeta.core.HomeAction.GRANT_PERMISSION ->
-                        permissionLauncher.launch(permissions())
+                        requestNextPermission()
                     tw.airgesture.transferbeta.core.HomeAction.ENABLE_ACCESSIBILITY ->
                         startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                     tw.airgesture.transferbeta.core.HomeAction.START -> startGlobalMode()
@@ -355,6 +453,54 @@ class TransferActivity : ComponentActivity() {
                 text = label
                 setOnClickListener { click() }
             })
+        }
+        extraButton("手勢停留點擊時間") {
+            val items = arrayOf("1 秒（快速）", "2 秒（預設）", "3 秒（防誤觸）")
+            AlertDialog.Builder(this).setTitle("食指停留點擊")
+                .setSingleChoiceItems(items, FloatingSettings.dwellIndex(this)) { d, value ->
+                    FloatingSettings.saveInt(this, "dwell", value)
+                    reloadLiveSettings()
+                    d.dismiss()
+                }.setNegativeButton("取消", null).show()
+        }
+        extraButton("食指游標活動範圍") {
+            val items = arrayOf("1 倍（精細）", "2 倍", "3 倍（預設）", "4 倍（大範圍）")
+            AlertDialog.Builder(this).setTitle("游標活動範圍")
+                .setSingleChoiceItems(items, FloatingSettings.range(this)) { d, value ->
+                    FloatingSettings.saveInt(this, "cursor_range", value)
+                    reloadLiveSettings()
+                    d.dismiss()
+                }.setNegativeButton("取消", null).show()
+        }
+        extraButton("張掌滑動靈敏度") {
+            val items = arrayOf("低（防誤觸）", "標準", "高")
+            AlertDialog.Builder(this).setTitle("張掌滑動靈敏度")
+                .setSingleChoiceItems(items, FloatingSettings.sensitivity(this)) { d, value ->
+                    FloatingSettings.saveInt(this, "swipe_sensitivity", value)
+                    reloadLiveSettings()
+                    d.dismiss()
+                }.setNegativeButton("取消", null).show()
+        }
+        extraButton("全天省電／辨識反應模式") {
+            val items = arrayOf("省電優先（偵測較慢）", "智慧平衡（預設）", "反應優先（較耗電）")
+            AlertDialog.Builder(this).setTitle("全天運作效能")
+                .setSingleChoiceItems(items, FloatingSettings.power(this)) { d, value ->
+                    FloatingSettings.saveInt(this, "power_mode", value)
+                    reloadLiveSettings()
+                    d.dismiss()
+                }.setNegativeButton("取消", null).show()
+        }
+        extraButton("手掌位置軌跡動畫（開／關）") {
+            val newValue = !FloatingSettings.showPalm(this)
+            FloatingSettings.saveBool(this, "palm_overlay", newValue)
+            reloadLiveSettings()
+            flash(if(newValue) "已開啟手掌位置動畫" else "已關閉手掌位置動畫", true)
+        }
+        extraButton("附近裝置自動搜尋（開／關）") {
+            val newValue = !FloatingSettings.nearby(this)
+            FloatingSettings.saveBool(this, "nearby_enabled", newValue)
+            reloadLiveSettings()
+            flash(if(newValue) "已恢復搜尋附近裝置" else "已關閉附近搜尋以節省電力", true)
         }
         extraButton("手動選擇照片或檔案發送") { picker.launch(arrayOf("*/*")) }
         val videoModeButton = Button(this).apply {
@@ -559,6 +705,12 @@ class TransferActivity : ComponentActivity() {
                 flash("已收到連結；請點通知開啟（系統限制背景自動跳轉）", true)
             }
         } catch (e: Exception) { flash("無法開啟連結：" + e.message) }
+    }
+
+    private fun reloadLiveSettings() {
+        if(GlobalGestureService.isActive) startService(
+            Intent(this, GlobalGestureService::class.java)
+                .setAction(GlobalGestureService.ACTION_SETTINGS_CHANGED))
     }
 
     private fun permissions(): Array<String> {
