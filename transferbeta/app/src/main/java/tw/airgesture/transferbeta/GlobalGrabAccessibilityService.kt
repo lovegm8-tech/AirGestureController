@@ -14,6 +14,7 @@ import android.os.SystemClock
 import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import androidx.core.content.ContextCompat
 import tw.airgesture.transferbeta.core.*
 import java.io.File
@@ -242,9 +243,34 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         )
     }
 
+    /**
+     * Chrome's address search screen may launch Samsung Keyboard, making the
+     * IME the active accessibility root. Access Chrome's unique underlying
+     * application window only for the deliberate, short browserCapture flow.
+     * Other apps and unrelated windows are never searched.
+     */
+    private fun rootForBrowserCapture(capture: BrowserCapture): AccessibilityNodeInfo? {
+        val activeRoot = rootInActiveWindow
+        if (activeRoot?.packageName?.toString() == capture.origin) return activeRoot
+        if (capture.origin != "com.android.chrome") return null
+        val windowsNow = windows ?: return null
+        val hasKeyboard = windowsNow.any { win ->
+            win.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD
+        }
+        val chromeRoots = windowsNow.filter {
+            it.type == AccessibilityWindowInfo.TYPE_APPLICATION
+        }.mapNotNull { it.root }.filter { root ->
+            root.packageName?.toString() == capture.origin && root.isVisibleToUser
+        }
+        return if (ChromeShareCardPolicy.mayUseChromeWindowBehindKeyboard(
+                capture.origin, activeRoot?.packageName?.toString(),
+                hasKeyboard, chromeRoots.size))
+            chromeRoots.single() else null
+    }
+
     private fun advanceBrowserCapture() {
         val capture = browserCapture ?: return
-        val root = rootInActiveWindow
+        val root = rootForBrowserCapture(capture)
         if (root != null && root.packageName?.toString() == capture.origin) {
             val result = GrabContentPolicy.decide(
                 capture.origin, readable(root), allowFocusedEditor = true)
