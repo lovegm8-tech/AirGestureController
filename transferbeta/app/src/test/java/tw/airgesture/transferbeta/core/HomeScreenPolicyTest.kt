@@ -36,7 +36,8 @@ class HomeScreenPolicyTest {
     @Test fun repeatLaunchDoesNotNeedPairingIfStillConnected() {
         assertTrue(HomeScreenPolicy.shouldAutoBackground(true,true,true,true,false,false))
     }
-    @Test fun genuineDisconnectionMustShowConnectingPage() {
-        assertFalse(HomeScreenPolicy.shouldAutoBackground(true,true,true,false,false,false))
+    @Test fun noNearbyPeerStillAllowsControlAndBackground() {
+        assertEquals(HomeAction.BACKGROUND, HomeScreenPolicy.decide(true,true,true,false).action)
+        assertTrue(HomeScreenPolicy.shouldAutoBackground(true,true,true,false,false,false))
     }
 }
