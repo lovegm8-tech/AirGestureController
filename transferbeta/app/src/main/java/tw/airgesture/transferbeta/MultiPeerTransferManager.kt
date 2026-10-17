@@ -959,8 +959,8 @@ class MultiPeerTransferManager(private val app: Context) {
         val name = if (offer is Offered.FileOffer) offer.name else "網頁連結"
         notifyIncomingOffer(name)
         sendControl(p, JSONObject().put("type", "offer_seen").put("sid", offer.sid))
-        ui("收到 " + name + " · 30 秒內握拳張掌即可接收")
-        visual(VisualPhase.OFFER_RECEIVED, "收到分享 · 握拳張掌接收")
+        ui("收到 " + name + " · 30 秒內握拳維持 2 秒即可接收")
+        visual(VisualPhase.OFFER_RECEIVED, "收到分享 · 握拳 2 秒接收")
         main.postDelayed({
             if (offered === offer && offeredBy == p.endpoint && !busy) {
                 offered = null
