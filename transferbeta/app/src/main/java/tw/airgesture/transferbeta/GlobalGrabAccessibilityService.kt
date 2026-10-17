@@ -204,6 +204,44 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         return ShareAutomationPolicy.addressCardShare(pkg, restricted)
     }
 
+    /**
+     * Some Chrome builds show the current page's unlabeled Share icon between
+     * Copy and Edit. Infer it only inside the address editor that AirGrab opened,
+     * using the positions of TWO uniquely labeled adjacent buttons. This is a
+     * fallback for missing accessibility labels, not general coordinate tapping.
+     */
+    private fun chromeShareCardPoint(
+        pkg: String,
+        tree: Pair<List<ActionNode>, List<AccessibilityNodeInfo>>
+    ): ChromeCardPoint? {
+        if (pkg != "com.android.chrome") return null
+        val controls = tree.first.mapIndexed { i, n ->
+            val bounds = Rect().also { tree.second[i].getBoundsInScreen(it) }
+            ChromeCardControl(
+                label = listOfNotNull(n.label, n.hint).firstOrNull()
+                    ?: n.texts.firstOrNull() ?: "",
+                x = bounds.exactCenterX(),
+                y = bounds.exactCenterY(),
+                visible = n.visible && bounds.width() > 0 && bounds.height() > 0,
+                clickable = n.clickable && !n.password
+            )
+        }
+        return ChromeShareCardPolicy.inferSharePoint(
+            pkg, browserCapture?.origin == pkg,
+            resources.displayMetrics.widthPixels.toFloat(),
+            resources.displayMetrics.heightPixels.toFloat(), controls
+        )
+    }
+
+    private fun tapChromeShareCard(point: ChromeCardPoint): Boolean {
+        val path = Path().apply { moveTo(point.x, point.y) }
+        return dispatchGesture(
+            GestureDescription.Builder().addStroke(
+                GestureDescription.StrokeDescription(path, 0L, 70L)
+            ).build(), null, null
+        )
+    }
+
     private fun advanceBrowserCapture() {
         val capture = browserCapture ?: return
         val root = rootInActiveWindow
@@ -218,11 +256,13 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
             }
             // The screenshot-confirmed Chrome/Google current-page row exposes
             // Share beside Copy/Edit without exposing an untruncated URL.
-            if (addressCardShareIndex(capture.origin, collect(root)) != null) {
-                browserCapture = null
+            val tree = collect(root)
+            if (addressCardShareIndex(capture.origin, tree) != null ||
+                chromeShareCardPoint(capture.origin, tree) != null) {
                 nextAttempt?.let { main.removeCallbacks(it) }
                 nextAttempt = null
                 beginShare(capture.origin, root, fromAddressCard = true)
+                browserCapture = null
                 return
             }
         }
@@ -289,7 +329,9 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         val menu = if (!fromAddressCard && direct == null && GrabContentPolicy.isBrowser(pkg))
             ShareAutomationPolicy.browserOverflow(tree.first) else null
         val index = direct ?: menu
-        if (index == null) {
+        val chromeUnlabeledShare = if (fromAddressCard && index == null)
+            chromeShareCardPoint(pkg, tree) else null
+        if (index == null && chromeUnlabeledShare == null) {
             GlobalGrabBridge.result(GrabResult.Unavailable(
                 if (GrabContentPolicy.isBrowser(pkg))
                     "瀏覽器目前沒有可讀取的完整網址，也找不到可信任的分享選項；請在網址列開啟完整網址後重試"
@@ -317,10 +359,12 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         }
         flowTimeout = watchdog
         main.postDelayed(watchdog, 12_000L)
-        if (tree.second[index].performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+        if ((index != null &&
+                tree.second[index].performAction(AccessibilityNodeInfo.ACTION_CLICK)) ||
+            (chromeUnlabeledShare != null && tapChromeShareCard(chromeUnlabeledShare))) {
             GlobalGrabBridge.result(GrabResult.ShareStarted(
                 if (GrabContentPolicy.isBrowser(pkg))
-                    if (fromAddressCard) "已點選目前網頁旁的分享圖示 · 正在找 AirGrab"
+                    if (fromAddressCard) "已啟動 Chrome 當前網頁分享圖示 · 正在找 AirGrab"
                     else if (direct != null) "已開啟瀏覽器分享 · 正在找 AirGrab"
                     else "已展開瀏覽器選單 · 正在找分享功能"
                 else if (pkg == YouTubeLinkPolicy.PACKAGE)
