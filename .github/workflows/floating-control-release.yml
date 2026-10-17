@@ -28,7 +28,7 @@ jobs:
       - name: Install Android SDK
         run: |
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
-      - name: Build signed Floating Control 1.0.3 release APK
+      - name: Verify gestures, idle motion and transfer then assemble 1.0.3 APK
         run: gradle :app:testDebugUnitTest :app:assembleRelease --no-daemon
       - name: Sign release APK with repository secret
         shell: bash
