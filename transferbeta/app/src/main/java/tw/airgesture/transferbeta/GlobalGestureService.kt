@@ -91,6 +91,8 @@ class GlobalGestureService : LifecycleService() {
     private val palmTrail = PalmPositionTracker()
     @Volatile private var showPalm = false
     private var lastPalmUiAt = 0L
+    private var lastPalmUiX = Float.NaN
+    private var lastPalmUiY = Float.NaN
     private var palmShown = false
     private var cursorShown = false
     private val tiltedPalm = TiltedPalmAssist(enabled = true)
@@ -185,6 +187,8 @@ class GlobalGestureService : LifecycleService() {
             palmShown = false
             cursorShown = false
             lastPalmUiAt = 0L
+            lastPalmUiX = Float.NaN
+            lastPalmUiY = Float.NaN
             palmTrail.clear()
             handFeedback.reset()
             unified.reset()
@@ -242,6 +246,7 @@ class GlobalGestureService : LifecycleService() {
     private fun reloadFloatingSettings() {
         power.setPowerMode(FloatingSettings.power(this))
         showPalm = FloatingSettings.showPalm(this)
+        power.setPalmAnimationEnabled(showPalm)
         val dwell = FloatingSettings.dwellMs(this)
         val sensitivity = FloatingSettings.sensitivity(this)
         cameraExecutor.execute {
@@ -249,6 +254,8 @@ class GlobalGestureService : LifecycleService() {
             palmShown = false
             cursorShown = false
             lastPalmUiAt = 0L
+            lastPalmUiX = Float.NaN
+            lastPalmUiY = Float.NaN
             palmTrail.clear()
         }
         if(!showPalm) GlobalGrabAccessibilityService.setPalm(null)
@@ -469,17 +476,34 @@ class GlobalGestureService : LifecycleService() {
                 (marks[0].y() + marks[5].y() + marks[9].y() +
                     marks[13].y() + marks[17].y()) / 5f else null
             if (showPalm) {
-                val snapshot = palmTrail.observe(px, py,
-                    pose == "Open_Palm" && trustedScore >= .65f, now)
+                val confirmedPalm = pose == "Open_Palm" && trustedScore >= .58f
+                // Confirmed different gesture: hide immediately. One dropped
+                // detection frame should not make the visual jump/disappear.
+                val otherGesture = pose.isNotBlank() && pose != "None" &&
+                    pose != "Open_Palm"
+                val snapshot = if (otherGesture) {
+                    palmTrail.clear()
+                    null
+                } else palmTrail.observe(px, py, confirmedPalm, now)
                 if (snapshot == null) {
                     if (palmShown) {
                         GlobalGrabAccessibilityService.setPalm(null)
                         palmShown = false
+                        lastPalmUiX = Float.NaN
+                        lastPalmUiY = Float.NaN
                     }
-                } else if (!palmShown || now - lastPalmUiAt >= 250L) {
-                    GlobalGrabAccessibilityService.setPalm(snapshot)
-                    palmShown = true
-                    lastPalmUiAt = now
+                } else {
+                    val moved = !lastPalmUiX.isFinite() ||
+                        kotlin.math.abs(snapshot.x - lastPalmUiX) >= .004f ||
+                        kotlin.math.abs(snapshot.y - lastPalmUiY) >= .004f
+                    val due = now - lastPalmUiAt >= if (moved) 80L else 280L
+                    if (!palmShown || due) {
+                        GlobalGrabAccessibilityService.setPalm(snapshot)
+                        palmShown = true
+                        lastPalmUiAt = now
+                        lastPalmUiX = snapshot.x
+                        lastPalmUiY = snapshot.y
+                    }
                 }
             }
             val index = if (pose == "Pointing_Up" && marks != null &&
