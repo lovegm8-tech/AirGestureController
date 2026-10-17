@@ -150,9 +150,10 @@ object ShareAutomationPolicy {
         if (pkg != "com.android.chrome") return false
         return descriptions.any { value ->
             val t = value.trim().lowercase()
-            t.startsWith("list of sharing options") ||
+            (t.startsWith("list of sharing options") ||
                 t.startsWith("分享選項清單") ||
-                t.startsWith("分享選項列表")
+                t.startsWith("分享選項列表")) &&
+                !t.contains("closed") && !t.contains("已關閉") && !t.contains("已关闭")
         }
     }
 
