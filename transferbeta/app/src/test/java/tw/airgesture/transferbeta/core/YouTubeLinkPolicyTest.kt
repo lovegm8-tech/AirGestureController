@@ -4,64 +4,50 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class YouTubeLinkPolicyTest {
-    @Test fun screenshotConfirmedShareSheetCanChooseCopyLink() {
-        val nodes = listOf(
-            ActionNode(null, "複製連結", clickable = true),
-            ActionNode(null, "快速分享", clickable = true),
-            ActionNode(null, "建立貼文", clickable = true)
+    private val sheet = listOf("分享", "複製連結", "快速分享", "建立貼文")
+
+    @Test fun youtubeNativeShareSheetOpensOtherApps() {
+        val options = listOf(
+            ActionNode(null, "LINE", clickable = true),
+            ActionNode(null, "其他項目", clickable = true),
+            ActionNode(null, "複製連結", clickable = true)
         )
-        assertEquals(0, YouTubeLinkPolicy.copyLinkTarget(
-            "com.google.android.youtube", nodes,
-            listOf("分享", "複製連結", "快速分享", "建立貼文")))
-        assertEquals(0, YouTubeLinkPolicy.copyLinkTarget(
+        assertTrue(YouTubeLinkPolicy.isShareSheet("com.google.android.youtube", sheet))
+        assertEquals(1, YouTubeLinkPolicy.moreAppsTarget(
+            "com.google.android.youtube", options, sheet))
+        assertEquals(0, YouTubeLinkPolicy.moreAppsTarget(
             "com.google.android.youtube",
-            listOf(ActionNode(null, "Copy link", clickable = true)),
-            listOf("Quick Share")))
+            listOf(ActionNode(null, "Other apps", clickable = true)),
+            listOf("Copy link", "Create post")))
+        assertEquals(0, YouTubeLinkPolicy.moreAppsTarget(
+            "com.google.android.youtube",
+            listOf(ActionNode(null, "其他项目", clickable = true)),
+            listOf("快速分享")))
     }
 
-    @Test fun noCopyOutsideProvenYouTubeShareSheet() {
-        val copy = listOf(ActionNode(null, "複製連結", clickable = true))
-        assertNull(YouTubeLinkPolicy.copyLinkTarget(
-            "com.google.android.youtube", copy, listOf("影片內容")))
-        assertNull(YouTubeLinkPolicy.copyLinkTarget(
-            "com.android.chrome", copy, listOf("快速分享")))
-        assertNull(YouTubeLinkPolicy.copyLinkTarget(
-            "com.google.android.youtube", listOf(
-                ActionNode(null, "複製連結", clickable = true),
-                ActionNode(null, "複製連結", clickable = true)), listOf("快速分享")))
-        assertNull(YouTubeLinkPolicy.copyLinkTarget(
-            "com.google.android.youtube", listOf(
-                ActionNode(null, "複製連結", clickable = false)), listOf("快速分享")))
+    @Test fun neverClicksUnknownOrAmbiguousYouTubeControls() {
+        val options = listOf(ActionNode(null, "其他項目", clickable = true))
+        assertNull(YouTubeLinkPolicy.moreAppsTarget(
+            "com.android.chrome", options, sheet))
+        assertNull(YouTubeLinkPolicy.moreAppsTarget(
+            "com.google.android.youtube", options, listOf("影片內容")))
+        assertNull(YouTubeLinkPolicy.moreAppsTarget(
+            "com.google.android.youtube",
+            listOf(ActionNode(null, "其他項目", clickable = true),
+                ActionNode(null, "其他項目", clickable = true)), sheet))
+        assertNull(YouTubeLinkPolicy.moreAppsTarget(
+            "com.google.android.youtube",
+            listOf(ActionNode(null, "其他項目", clickable = false)), sheet))
+        assertNull(YouTubeLinkPolicy.moreAppsTarget(
+            "com.google.android.youtube",
+            listOf(ActionNode(null, "其他項目", clickable = true, password = true)), sheet))
     }
 
-    @Test fun onlyNewVideoLinkIsAccepted() {
-        val url = "https://youtu.be/abcdefghijk?si=123"
-        assertEquals(url, YouTubeLinkPolicy.freshVideoLink(url, 100_000, 100_300, 101_000))
-        assertNull(YouTubeLinkPolicy.freshVideoLink(url, 100_000, 70_000, 101_000))
-        assertNull(YouTubeLinkPolicy.freshVideoLink(url, 100_000, 0, 101_000))
-        assertNull(YouTubeLinkPolicy.freshVideoLink(url, 100_000, 100_300, 120_000))
-        assertNull(YouTubeLinkPolicy.freshVideoLink(url, 100_000, 100_300, 99_000))
-    }
-
-    @Test fun nonVideoClipboardContentMustNotBeTransmitted() {
-        val since = 100_000L
-        val clipped = 100_500L
-        val now = 101_000L
-        assertEquals("https://www.youtube.com/watch?v=abcdefghijk",
-            YouTubeLinkPolicy.freshVideoLink("https://www.youtube.com/watch?v=abcdefghijk",
-                since, clipped, now))
-        assertEquals("https://youtube.com/shorts/abcdefghijk",
-            YouTubeLinkPolicy.freshVideoLink("https://youtube.com/shorts/abcdefghijk",
-                since, clipped, now))
-        assertNull(YouTubeLinkPolicy.freshVideoLink("https://example.com/watch?v=abc",
-            since, clipped, now))
-        assertNull(YouTubeLinkPolicy.freshVideoLink("https://www.youtube.com/",
-            since, clipped, now))
-        assertNull(YouTubeLinkPolicy.freshVideoLink("https://www.youtube.com/watch",
-            since, clipped, now))
-        assertNull(YouTubeLinkPolicy.freshVideoLink("secret password",
-            since, clipped, now))
-        assertNull(YouTubeLinkPolicy.freshVideoLink(
-            "https://youtu.be/abcdefghijk https://example.org/", since, clipped, now))
+    @Test fun labelOnlyEllipsisIsNotEnoughToClick() {
+        assertNull(YouTubeLinkPolicy.moreAppsTarget(
+            "com.google.android.youtube",
+            listOf(ActionNode(null, "•••", clickable = true)), sheet))
+        assertFalse(YouTubeLinkPolicy.isShareSheet(
+            "com.google.android.youtube", listOf("影片標題", "留言")))
     }
 }
