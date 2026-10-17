@@ -246,9 +246,7 @@ class GlobalGestureService : LifecycleService() {
 
     private fun reloadFloatingSettings() {
         power.setPowerMode(FloatingSettings.power(this))
-        // v1.0.3 battery cadence remains unchanged; no high-frequency ML
-        // solely to animate a decorative palm trail.
-        power.setPalmAnimationEnabled(false)
+        // Keep v1.0.3 battery cadence: a one-shot cue never boosts AI FPS.
         actionCueEnabled = FloatingSettings.actionFeedback(this)
         val dwell = FloatingSettings.dwellMs(this)
         val sensitivity = FloatingSettings.sensitivity(this)
