@@ -7,7 +7,7 @@ import tw.airgesture.transferbeta.GestureSequence
  * A two-second fist wins over tapping. Short taps are sent on RELEASE only,
  * never during the two-second hold. No Android dependency: test on JVM.
  */
-class FloatingControlRouter {
+class FloatingControlRouter(pointerDwellMs:Long=2000L, sensitivity:Int=1) {
     enum class Command { SEND, RECEIVE, SWIPE_UP, SWIPE_DOWN, SWIPE_BACK, TAP, MEDIA_PLAY_PAUSE }
     data class Decision(
         val command: Command? = null,
@@ -16,9 +16,9 @@ class FloatingControlRouter {
 
     private val fist = GestureSequence(holdMillis = 2_000L, unknownGraceMillis = 550L)
     private val swipes = GestureDecisionEngine(
-        GestureDecisionEngine.Options(fastSwipeAssistEnabled = true)
+        GestureDecisionEngine.Options(fastSwipeAssistEnabled = true, swipeDistance = when(sensitivity){ 0->.18f;2->.09f;else->.13f })
     )
-    private val pointer = PointerDwellEngine(dwellMs = 2_000L)
+    private val pointer = PointerDwellEngine(dwellMs = pointerDwellMs)
     private var palmFrames = 0
     private var lastPalm = -1L
     private var armed = false

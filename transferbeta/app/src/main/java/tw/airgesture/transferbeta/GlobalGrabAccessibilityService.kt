@@ -49,6 +49,16 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
                 }
             }
         }
+        fun setPalm(snapshot:PalmPositionTracker.Snapshot?) {
+            current?.get()?.let { service -> service.main.post {
+                if(current?.get() !== service) return@post
+                if(snapshot==null) service.palmOverlay?.hide()
+                else {
+                    if(service.palmOverlay==null) service.palmOverlay=FloatingPalmOverlay(service)
+                    service.palmOverlay?.update(snapshot)
+                }
+            } }
+        }
         fun setCursor(cursor: PointerDwellEngine.Result?) {
             current?.get()?.let { service ->
                 service.main.post {
@@ -69,6 +79,7 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
     }
     private val io = Executors.newSingleThreadExecutor()
     private var pointerOverlay: FloatingPointerOverlay? = null
+    private var palmOverlay: FloatingPalmOverlay? = null
     private val main = Handler(Looper.getMainLooper())
     private var pending: RunningShare? = null
     private var nextAttempt: Runnable? = null
@@ -860,6 +871,8 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         clearPending()
         pointerOverlay?.hide()
         pointerOverlay = null
+        palmOverlay?.hide()
+        palmOverlay = null
         if (current?.get() === this) current = null
         foregroundPackage = null
         GlobalGrabBridge.accessibility = null

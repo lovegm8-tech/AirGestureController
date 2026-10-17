@@ -13,6 +13,8 @@ class AdaptivePowerPolicy(
     private val activeKeepAliveMs: Long = 2200L
 ) {
     enum class Mode { STOPPED, ECO, ACTIVE }
+    @Volatile private var policy=1
+    fun setPowerMode(mode:Int){policy=mode.coerceIn(0,2)}
     @Volatile private var enabled = false
     @Volatile private var screenOn = true
     @Volatile private var receiverAwaiting = false
@@ -52,12 +54,13 @@ class AdaptivePowerPolicy(
     fun shouldInfer(nowMs: Long): Boolean {
         val interval = when (mode(nowMs)) {
             Mode.STOPPED -> return false
-            Mode.ACTIVE -> activeIntervalMs
+            Mode.ACTIVE -> when(policy){0->170L;2->90L;else->activeIntervalMs}
             Mode.ECO -> {
                 if (idleSince == Long.MIN_VALUE || nowMs < idleSince)
                     idleSince = nowMs
-                if (nowMs - idleSince >= deepIdleAfterMs)
-                    deepIdleIntervalMs else idleIntervalMs
+                if(nowMs-idleSince>=deepIdleAfterMs)
+                    when(policy){0->1900L;2->950L;else->deepIdleIntervalMs}
+                else when(policy){0->1350L;2->650L;else->idleIntervalMs}
             }
         }
         if (lastInference != Long.MIN_VALUE && nowMs >= lastInference &&

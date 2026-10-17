@@ -13,6 +13,7 @@ import android.view.View
 import android.view.WindowManager
 import kotlin.math.roundToInt
 import tw.airgesture.transferbeta.core.CursorCoordinateMapper
+import tw.airgesture.transferbeta.core.FloatingSettings
 
 /**
  * Visual-only cursor, deliberately not touchable or focusable.
@@ -34,11 +35,13 @@ internal class FloatingPointerOverlay(private val context: Context) {
         title = "AirGesture finger cursor"
     }
     private var showing = false
-    private var lastRange = 2
+    private var lastRange = FloatingSettings.range(context)
     private var mapper = CursorCoordinateMapper(lastRange)
 
     @Suppress("DEPRECATION")
     fun update(normX: Float, normY: Float, progress: Float, clicked: Boolean): Pair<Float, Float>? {
+        val requested = FloatingSettings.range(context)
+        if(requested != lastRange) {lastRange=requested;mapper=CursorCoordinateMapper(requested)}
         val mapped = mapper.map(normX, normY) ?: return null
         window.defaultDisplay.getRealSize(screen)
         if (screen.x < 1 || screen.y < 1) return null
