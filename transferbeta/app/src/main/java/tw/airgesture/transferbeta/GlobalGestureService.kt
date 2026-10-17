@@ -77,6 +77,11 @@ class GlobalGestureService : LifecycleService() {
     private val cameraExecutor = Executors.newSingleThreadExecutor()
     private var provider: ProcessCameraProvider? = null
     private var recognizer: GestureRecognizer? = null
+    // Reuse fallback RGBA row-padding storage on the single camera worker.
+    // CameraX often provides a tightly packed direct ByteBuffer, requiring no
+    // intermediate frame-sized ByteArray at all.
+    private var rgbaScratch = ByteArray(0)
+    private val rotationMatrix = Matrix()
     private var lastHint = 0L
     private var isScreenOn = false
     private val unlockGate = CameraUnlockGate()
@@ -395,21 +400,41 @@ class GlobalGestureService : LifecycleService() {
         val w = proxy.width
         val h = proxy.height
         val plane = proxy.planes[0]
-        val src = proxy.planes[0].buffer.duplicate()
-        val row = ByteArray(w * 4)
-        val arr = ByteArray(w * h * 4)
-        for (y in 0 until h) {
-            src.position(y * plane.rowStride)
-            src.get(row)
-            System.arraycopy(row, 0, arr, y * row.size, row.size)
+        val src = plane.buffer.duplicate().apply { position(0) }
+        val packedBytes = w * h * 4
+        val pixelStride = plane.pixelStride
+        val rgba = if (pixelStride == 4 && plane.rowStride == w * 4 &&
+            src.remaining() >= packedBytes) {
+            // Zero extra Java array allocations: Bitmap copies directly from
+            // CameraX's read-only image plane on this worker before frame.close.
+            src
+        } else {
+            if (rgbaScratch.size != packedBytes) rgbaScratch = ByteArray(packedBytes)
+            for (y in 0 until h) {
+                if (pixelStride == 4) {
+                    src.position(y * plane.rowStride)
+                    src.get(rgbaScratch, y * w * 4, w * 4)
+                } else {
+                    // Rare devices with padded pixels still produce RGBA.
+                    for (x in 0 until w) {
+                        val srcIndex = y * plane.rowStride + x * pixelStride
+                        val dstIndex = (y * w + x) * 4
+                        for (channel in 0 until 4) {
+                            rgbaScratch[dstIndex + channel] = src.get(srcIndex + channel)
+                        }
+                    }
+                }
+            }
+            ByteBuffer.wrap(rgbaScratch)
         }
         val image = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        image.copyPixelsFromBuffer(ByteBuffer.wrap(arr))
+        image.copyPixelsFromBuffer(rgba)
         val rotation = proxy.imageInfo.rotationDegrees
         if (rotation == 0) return image
         return try {
-            Bitmap.createBitmap(image, 0, 0, w, h,
-                Matrix().apply { postRotate(rotation.toFloat()) }, false)
+            rotationMatrix.reset()
+            rotationMatrix.postRotate(rotation.toFloat())
+            Bitmap.createBitmap(image, 0, 0, w, h, rotationMatrix, false)
         } finally { image.recycle() }
     }
 
