@@ -3,6 +3,7 @@ package tw.airgesture.transferbeta
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityService.ScreenshotResult
 import android.accessibilityservice.AccessibilityService.TakeScreenshotCallback
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Rect
 import android.os.Build
@@ -304,8 +305,9 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
                 GlobalGrabBridge.result(GrabResult.Unavailable(
                     if (GrabContentPolicy.isBrowser(pkg))
                     "瀏覽器分享選單尚未把連結交給 AirGrab；請確認分享介面有 AirGrab"
-                else "相簿分享選單未能自動交付照片給 AirGrab；請確認分享選單有 AirGrab，" +
-                    "或手動點選 AirGrab 測試原檔傳送"))
+                else if (pkg == YouTubeLinkPolicy.PACKAGE)
+                    "YouTube 分享面板未提供可辨識的「複製連結」；請先確認分享選單"
+                else "來源 App 分享選單未能自動交付檔案；請手動選 AirGrab 測試"))
             }
         }
         flowTimeout = watchdog
@@ -316,7 +318,9 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
                     if (fromAddressCard) "已點選目前網頁旁的分享圖示 · 正在找 AirGrab"
                     else if (direct != null) "已開啟瀏覽器分享 · 正在找 AirGrab"
                     else "已展開瀏覽器選單 · 正在找分享功能"
-                else "已開啟三星相簿分享選單；正在找 AirGrab（尚未取得照片原檔）"))
+                else if (pkg == YouTubeLinkPolicy.PACKAGE)
+                    "已開啟 YouTube 分享面板；正在尋找「複製連結」"
+                else "已開啟來源 App 分享選單；正在找 AirGrab（尚未取得原檔）"))
             schedulePendingCheck()
         } else {
             clearPending()
@@ -332,7 +336,9 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
             GlobalGrabBridge.result(GrabResult.Unavailable(
                 if (GrabContentPolicy.isBrowser(flow.origin))
                     "網頁連結分享逾時；未能把連結交給 AirGrab"
-                else "相簿分享選單等待逾時；尚未收到原始檔案，請手動選 AirGrab 測試"))
+                else if (flow.origin == YouTubeLinkPolicy.PACKAGE)
+                    "YouTube 分享面板未找到可信的「複製連結」；已停止抓取"
+                else "來源 App 分享選單等待逾時；尚未收到原始檔案"))
             return
         }
         if (now - flow.lastAction < 280) {
@@ -345,6 +351,39 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         val root = rootInActiveWindow ?: return
         val pkg = root.packageName?.toString()
         val (nodes, clickable) = collect(root)
+        // YouTube has its own app-local Share sheet, screenshot-confirmed to
+        // contain "複製連結". Avoid copying from an arbitrary page element.
+        if (flow.origin == YouTubeLinkPolicy.PACKAGE &&
+            pkg == YouTubeLinkPolicy.PACKAGE && !flow.targetClicked) {
+            val copyIndex = YouTubeLinkPolicy.copyLinkTarget(
+                pkg, nodes, readable(root).mapNotNull { it.text })
+            if (copyIndex != null) {
+                val clickedAt = System.currentTimeMillis()
+                if (clickable[copyIndex].performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                    flow.targetClicked = true
+                    clearPending()
+                    GlobalGrabBridge.result(GrabResult.ShareStarted(
+                        "已選擇 YouTube 複製連結；正在確認本次影片網址"))
+                    // Reading the clipboard from a background Service is
+                    // prohibited by Android 10+. A temporary focused Activity
+                    // performs one read and returns to the existing video task.
+                    main.postDelayed({
+                        try {
+                            startActivity(Intent(this, YouTubeClipboardImportActivity::class.java)
+                                .putExtra(YouTubeClipboardImportActivity.EXTRA_CLICKED_AT, clickedAt)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or
+                                    Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
+                                    Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS or
+                                    Intent.FLAG_ACTIVITY_NO_ANIMATION))
+                        } catch (_: Exception) {
+                            GlobalGrabBridge.result(GrabResult.Unavailable(
+                                "Android 不允許開啟剪貼簿讀取視窗；請手動分享影片連結"))
+                        }
+                    }, 220L)
+                    return
+                }
+            }
+        }
         // Chrome's native Sharing Hub is not an Android resolver. Only
         // interact if its distinct accessibility sheet description is visible.
         // Never select a page element solely because it contains "AirGrab".
