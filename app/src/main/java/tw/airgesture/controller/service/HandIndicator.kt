@@ -145,6 +145,15 @@ internal class HandIndicator(
         if (SystemClock.uptimeMillis() >= actionUntil) render(state)
     }
 
+    /** Feedback confirms the Android media key was requested, not playback state. */
+    fun flashMediaToggle() {
+        if (root == null) return
+        actionUntil = SystemClock.uptimeMillis() + 760L
+        main.removeCallbacks(restore)
+        renderKey("MEDIA", "▶❚❚", "已送出播放／暫停", 0xff16a34a.toInt())
+        main.postDelayed(restore, 780L)
+    }
+
     fun flashAction() {
         if (root == null) return
         actionUntil = SystemClock.uptimeMillis() + 420L
@@ -191,7 +200,7 @@ internal class HandIndicator(
             // Preserve the original small gray/green/action-blue dot if requested.
             val dotColor = when (key) {
                 "PALM" -> 0xff16a34a.toInt()
-                "ACTION" -> 0xff2563eb.toInt()
+                "ACTION", "MEDIA" -> 0xff2563eb.toInt()
                 else -> 0xff777777.toInt()
             }
             dot?.background = circle(dotColor)
