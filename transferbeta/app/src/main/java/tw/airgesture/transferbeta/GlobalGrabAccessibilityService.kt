@@ -856,6 +856,7 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
             }, null)
         lastControlStatus = if (sent) "食指停留點擊已送出"
             else "食指停留點擊被系統拒絕"
+        if (sent) GlobalGestureService.showAcceptedPointerTap()
     }
 
     private fun executeControl(command: FloatingControlRouter.Command) {
@@ -872,6 +873,7 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
             audio.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP,
                 KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, 0))
             lastControlStatus = "已發送 YouTube 播放／暫停鍵"
+            GlobalGestureService.showAcceptedControlAction(command)
             return
         }
         val size = screenSize()
@@ -913,6 +915,7 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         }, null)
         lastControlStatus = if (sent) "手勢已送出：" + command.name
             else "系統拒絕操作：" + command.name
+        if (sent) GlobalGestureService.showAcceptedControlAction(command)
     }
 
     override fun onDestroy() {
