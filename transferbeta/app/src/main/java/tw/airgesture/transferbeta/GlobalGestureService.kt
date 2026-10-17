@@ -85,6 +85,7 @@ class GlobalGestureService : LifecycleService() {
     private lateinit var connections: MultiPeerTransferManager
     private lateinit var overlay: GestureStatusOverlay
     private val power = AdaptivePowerPolicy()
+    private val motionSampler = IdleMotionSampler()
     private val handFeedback = HandFeedbackPolicy()
     private var unified = FloatingControlRouter()
     private val palmTrail = PalmPositionTracker()
@@ -427,7 +428,13 @@ class GlobalGestureService : LifecycleService() {
     private fun infer(frame: ImageProxy) {
         framesSeen++
         val now = SystemClock.uptimeMillis()
-        if (!power.shouldInfer(now)) return
+        val movement = if (power.isDeepIdle(now)) {
+            motionSampler.observe(frame, now)
+        } else {
+            motionSampler.reset()
+            false
+        }
+        if (!power.shouldInfer(now, movement)) return
         inferences++
         val image = frameToBitmap(frame)
         try {
