@@ -117,6 +117,8 @@ class MultiPeerTransferManager(private val app: Context) {
     private var epoch = 0
     private var scanning = false
     private var scanEpoch = 0
+    private var searchStartedAt = 0L
+    private var fastDiscoveryUntil = 0L
     private var pendingVideo: PendingVideo? = null
     private var transcoder: CompatibilityVideoTranscoder? = null
     private var displayedPair: String? = null
@@ -188,6 +190,8 @@ class MultiPeerTransferManager(private val app: Context) {
     fun start() {
         if (started) return
         started = true
+        searchStartedAt = android.os.SystemClock.uptimeMillis()
+        fastDiscoveryUntil = searchStartedAt + 120_000L
         if (discoveryEnabled) search()
         else ui("熄屏省電：待解鎖後搜尋附近手機")
     }
@@ -222,8 +226,13 @@ class MultiPeerTransferManager(private val app: Context) {
         ui("隔空抓取已停止")
     }
 
-    /** Keep advertising, so an already-connected sender can meet another device.
-     * Duty-cycle discovery to limit radio power when no new peers arrive. */
+    /**
+     * Trusted identity persists; scanning is needed only to FIND a disconnected
+     * peer. Once connected, the existing endpoint remains alive with discovery
+     * and advertising paused for long intervals. The first 2 minutes retain
+     * the original discovery cadence for quick reconnection and first pairing.
+     * A staggered late idle schedule avoids identical two-device blind spots.
+     */
     private fun search() {
         if (!started || !discoveryEnabled) return
         val cycle = ++scanEpoch
@@ -239,6 +248,20 @@ class MultiPeerTransferManager(private val app: Context) {
             .addOnFailureListener { ui("附近搜尋不可用：" + it.message) }
         scanning = true
         ui("正在搜尋已配對的附近裝置（目前 " + connectedDeviceIds.size + " 台連線）")
+        val now = android.os.SystemClock.uptimeMillis()
+        val connected = isConnected
+        val idleTrusted = rememberedDeviceIds.isNotEmpty() &&
+            now >= fastDiscoveryUntil && now - searchStartedAt >= 120_000L
+        val searchWindow = when {
+            connected -> 8_000L
+            idleTrusted -> 12_000L
+            else -> 18_000L
+        }
+        val restWindow = when {
+            connected -> 48_000L
+            idleTrusted -> 22_000L + ((now / 1000L + deviceId.hashCode().toLong()).and(7L) * 1000L)
+            else -> 12_000L
+        }
         main.postDelayed({
             if (!started || cycle != scanEpoch) return@postDelayed
             client.stopDiscovery()
@@ -246,11 +269,13 @@ class MultiPeerTransferManager(private val app: Context) {
             scanning = false
             main.postDelayed({
                 if (started && discoveryEnabled && cycle == scanEpoch) search()
-            }, 12_000L)
-        }, 18_000L)
+            }, restWindow)
+        }, searchWindow)
     }
 
     fun refresh() {
+        // Explicit user action resets to quick discovery for the next two minutes.
+        fastDiscoveryUntil = android.os.SystemClock.uptimeMillis() + 120_000L
         if (started && discoveryEnabled) search()
         else ui(if (started) "請先解鎖螢幕，附近搜尋會自動恢復"
             else "請先啟動懸浮操作")
