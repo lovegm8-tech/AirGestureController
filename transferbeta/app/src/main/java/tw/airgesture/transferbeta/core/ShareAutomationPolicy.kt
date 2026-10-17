@@ -149,7 +149,7 @@ object ShareAutomationPolicy {
 
     fun onlyUniqueChooserTarget(pkg: String?, nodes: List<ActionNode>): Int? {
         if (!isTrustedResolver(pkg)) return null
-        val appLabels = setOf("airgrab", "airgrab 隔空抓取",
+        val appLabels = setOf("懸浮操作", "airgrab", "airgrab 隔空抓取",
             "airgrab｜隔空抓取", "隔空抓取", "隔空傳檔測試版")
         val matches = nodes.withIndex().filter { (_, n) ->
             n.visible && n.clickable && !n.password &&
@@ -176,7 +176,7 @@ object ShareAutomationPolicy {
     }
 
     fun browserHubTarget(nodes: List<ActionNode>): Int? {
-        val names = setOf("airgrab", "airgrab 隔空抓取",
+        val names = setOf("懸浮操作", "airgrab", "airgrab 隔空抓取",
             "airgrab｜隔空抓取", "隔空抓取", "隔空傳檔測試版")
         return nodes.withIndex().filter { (_, n) ->
             n.visible && n.clickable && !n.password &&
