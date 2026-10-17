@@ -88,6 +88,19 @@ class GestureSequenceTest {
         assertEquals(GestureSequence.Result.SEND, restarted.last())
     }
 
+    @Test fun firedFistRemainsConsumedAcrossLongInferenceGap() {
+        val g = GestureSequence()
+        assertEquals(GestureSequence.Result.SEND, heldFist(g, 1000L, 3000L).last())
+        g.accept("", 4700L)
+        assertEquals(true, heldFist(g, 5100L, 8200L).all {
+            it == GestureSequence.Result.NONE
+        })
+        g.accept("Open_Palm", 8400L)
+        g.accept("Open_Palm", 8700L)
+        assertEquals(GestureSequence.Result.RECEIVE,
+            heldFist(g, 9000L, 11000L, true).last())
+    }
+
     @Test fun isolatedPalmNeverTriggers() {
         val g = GestureSequence()
         assertEquals(GestureSequence.Result.NONE, g.accept("Open_Palm", 1000L))
