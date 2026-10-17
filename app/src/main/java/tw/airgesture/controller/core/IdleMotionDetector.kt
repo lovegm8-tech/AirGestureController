@@ -1,0 +1,52 @@
+package tw.airgesture.controller.core
+
+import kotlin.math.abs
+
+/**
+ * A low-cost, pure-JVM motion sentinel for long bright-screen idle sessions.
+ * Camera remains open so the existing gestures can react immediately.
+ *
+ * The camera-side caller supplies 16x12 luminance samples instead of asking
+ * MediaPipe to run on every frame. A uniform exposure shift is subtracted before
+ * counting changed cells (screen reflections can change camera brightness).
+ */
+class IdleMotionDetector(
+    private val minimumChangedCells: Int = 24,
+    private val perCellThreshold: Int = 18,
+    private val cooldownMs: Long = 1500L
+) {
+    private var baseline: IntArray? = null
+    private var lastTriggerMs = Long.MIN_VALUE
+
+    fun reset() {
+        baseline = null
+        lastTriggerMs = Long.MIN_VALUE
+    }
+
+    fun observe(samples: IntArray, nowMs: Long): Boolean {
+        val previous = baseline
+        if (previous == null || previous.size != samples.size ||
+            previous.isEmpty()) {
+            baseline = samples.copyOf()
+            return false
+        }
+        if (lastTriggerMs != Long.MIN_VALUE && nowMs < lastTriggerMs) {
+            reset()
+            baseline = samples.copyOf()
+            return false
+        }
+        var uniformShift = 0L
+        for (i in samples.indices) uniformShift += samples[i] - previous[i]
+        val mean = uniformShift.toFloat() / samples.size
+        var changed = 0
+        for (i in samples.indices) {
+            if (abs(samples[i] - previous[i] - mean) >= perCellThreshold) changed++
+        }
+        baseline = samples.copyOf()
+        if (changed < minimumChangedCells) return false
+        if (lastTriggerMs != Long.MIN_VALUE && nowMs - lastTriggerMs < cooldownMs)
+            return false
+        lastTriggerMs = nowMs
+        return true
+    }
+}
