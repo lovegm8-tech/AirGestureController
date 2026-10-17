@@ -30,5 +30,5 @@ object HomeScreenPolicy {
         serviceRunning: Boolean, connected: Boolean,
         pairingPromptOpen: Boolean, advancedOpen: Boolean
     ): Boolean = userEnabledAutoRun && normalLauncherEntry && serviceRunning &&
-        !pairingPromptOpen && !advancedOpen
+        connected && !pairingPromptOpen && !advancedOpen
 }
