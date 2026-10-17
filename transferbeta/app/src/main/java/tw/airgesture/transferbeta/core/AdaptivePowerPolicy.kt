@@ -51,7 +51,19 @@ class AdaptivePowerPolicy(
         else -> Mode.ECO
     }
 
-    fun shouldInfer(nowMs: Long): Boolean {
+    /** Original AirGestureController-style motion wake-up. Only runs MediaPipe
+     * after cheap pixel motion was confirmed, and never fires an action itself. */
+    fun isDeepIdle(nowMs: Long): Boolean =
+        mode(nowMs) == Mode.ECO && idleSince != Long.MIN_VALUE &&
+        nowMs >= idleSince && nowMs - idleSince >= 20_000L
+
+    fun shouldInfer(nowMs: Long, significantMotion: Boolean = false): Boolean {
+        if (significantMotion && isDeepIdle(nowMs) &&
+            (lastInference == Long.MIN_VALUE || nowMs < lastInference ||
+                nowMs - lastInference >= 240L)) {
+            lastInference = nowMs
+            return true
+        }
         val interval = when (mode(nowMs)) {
             Mode.STOPPED -> return false
             Mode.ACTIVE -> when(policy){0->220L;2->115L;else->activeIntervalMs}
