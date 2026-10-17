@@ -1135,13 +1135,18 @@ class GestureSequence(
         when (raw) {
             "Closed_Fist" -> {
                 palmSince = -1L
+                // Once triggered, skipped frames cannot re-arm a continuous fist.
+                // A confirmed open palm release is mandatory for the next grab.
+                if (fired) {
+                    lastFistSeen = now
+                    return Result.NONE
+                }
                 if (fistSince < 0L || lastFistSeen < 0L || now < lastFistSeen ||
                     now - lastFistSeen > unknownGraceMillis) {
                     fistSince = now
-                    fired = false
                 }
                 lastFistSeen = now
-                if (fired || now - fistSince < holdMillis) return Result.NONE
+                if (now - fistSince < holdMillis) return Result.NONE
                 fired = true
                 return if (receiveAvailable) Result.RECEIVE else Result.SEND
             }
@@ -1154,7 +1159,11 @@ class GestureSequence(
                 palmSince = -1L
                 if (lastFistSeen >= 0L &&
                     (now < lastFistSeen || now - lastFistSeen > unknownGraceMillis)) {
-                    reset()
+                    if (fired) {
+                        // Preserve one-shot latch across long dropped-frame gaps.
+                        fistSince = -1L
+                        lastFistSeen = -1L
+                    } else reset()
                 }
             }
         }
