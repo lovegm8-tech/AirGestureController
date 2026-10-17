@@ -242,9 +242,9 @@ class TransferActivity : ComponentActivity() {
             !Settings.canDrawOverlays(this)
         val label = if (overlayMissing) "開啟手勢與接收提示權限" else when (d.action) {
             tw.airgesture.transferbeta.core.HomeAction.GRANT_PERMISSION -> "開始設定 · 允許必要權限"
-            tw.airgesture.transferbeta.core.HomeAction.ENABLE_ACCESSIBILITY -> "繼續設定 · 啟用隔空抓取"
-            tw.airgesture.transferbeta.core.HomeAction.START -> "啟用隔空抓取"
-            tw.airgesture.transferbeta.core.HomeAction.WAIT -> "重新搜尋附近手機"
+            tw.airgesture.transferbeta.core.HomeAction.ENABLE_ACCESSIBILITY -> "繼續設定 · 啟用懸浮操作"
+            tw.airgesture.transferbeta.core.HomeAction.START -> "啟用懸浮操作"
+            tw.airgesture.transferbeta.core.HomeAction.WAIT -> "返回桌面 · 操作已啟用"
             tw.airgesture.transferbeta.core.HomeAction.BACKGROUND -> "返回桌面 · 開始使用"
         }
         primaryAction.text = label
@@ -252,10 +252,10 @@ class TransferActivity : ComponentActivity() {
             "尚未允許懸浮顯示：看不到已偵測手、張掌、握拳和接收通知"
         else when (d.state) {
             tw.airgesture.transferbeta.core.HomeState.NEED_PERMISSION -> "尚差一步：開啟權限"
-            tw.airgesture.transferbeta.core.HomeState.NEED_ACCESSIBILITY -> "尚差一步：開啟隔空抓取服務"
+            tw.airgesture.transferbeta.core.HomeState.NEED_ACCESSIBILITY -> "尚差一步：開啟懸浮操作服務"
             tw.airgesture.transferbeta.core.HomeState.NEED_START -> "設定已完成，按下方啟用"
-            tw.airgesture.transferbeta.core.HomeState.SEARCHING -> "隔空抓取已開啟，正在等待附近手機連線"
-            tw.airgesture.transferbeta.core.HomeState.READY -> "已連線 · 隔空抓取可以使用"
+            tw.airgesture.transferbeta.core.HomeState.SEARCHING -> "隔空操作已啟用；傳檔正在搜尋附近手機"
+            tw.airgesture.transferbeta.core.HomeState.READY -> "隔空操作已啟用 · 傳檔裝置已連線"
         }
         titleHint.setTextColor(if (d.state ==
                 tw.airgesture.transferbeta.core.HomeState.READY) 0xff0e8053.toInt()
@@ -308,8 +308,8 @@ class TransferActivity : ComponentActivity() {
             setTextColor(0xff1f3550.toInt())
             setPadding(0, 10, 0, 10)
         }
-        root.addView(text("AirGrab  隔空抓取", 26f))
-        root.addView(text("啟用一次，就能在其他 App 隔空抓取和接收。", 15f))
+        root.addView(text("懸浮操作", 28f))
+        root.addView(text("免觸控操作、隔空抓取，一次啟用即可使用。", 15f))
         titleHint = text("檢查服務狀態中…", 20f)
         root.addView(titleHint)
         status = text("等待連線", 14f)
@@ -342,8 +342,8 @@ class TransferActivity : ComponentActivity() {
             }
         }
         root.addView(primaryAction)
-        root.addView(text("抓取：握拳維持 2 秒\n\n接收：收到分享後，握拳維持 2 秒", 16f))
-        root.addView(text("完成連線後，可以直接使用相簿、影片或網頁，不必停留在 AirGrab。", 14f))
+        root.addView(text("滑動｜張掌上下揮動；向右揮＝上一頁\n點擊｜張掌→短握拳→放開（YouTube 播放／暫停）\n游標｜伸食指移動，停留 2 秒點擊\n傳送｜握拳 2 秒抓取；收到分享後握拳 2 秒接收", 15f))
+        root.addView(text("整天待命：亮屏無手自動降頻，熄屏完全釋放前鏡頭；解鎖後再恢復。\n隔空操作無須附近手機；只有傳檔需要配對。", 13f))
         val advancedToggle = Button(this).apply { text = "進階設定與測試  ▾" }
         root.addView(advancedToggle)
         advanced = LinearLayout(this).apply {
@@ -409,7 +409,7 @@ class TransferActivity : ComponentActivity() {
                 AlertDialog.Builder(this)
                     .setTitle("AirGrab 多裝置：已連線 " + live.size + " 台")
                     .setMessage(summary +
-                        "\n\n傳送端抓取後開放接收 30 秒，已配對設備可各自握拳張掌加入。" +
+                        "\n\n傳送端抓取後開放接收 30 秒，已配對設備可各自握拳持續 2 秒加入。" +
                         "\n最多記住 8 台裝置。清除配對會讓所有裝置下次重新核對數字。")
                     .setPositiveButton("保留配對", null)
                     .setNegativeButton("清除全部配對") { _, _ ->
@@ -432,7 +432,7 @@ class TransferActivity : ComponentActivity() {
                 "／辨識：" + GlobalGestureService.inferences +
                 "／鏡頭 FPS：" + GlobalGestureService.requestedSensorFps)
         }
-        extraButton("停止背景隔空抓取") {
+        extraButton("停止懸浮操作") {
             homePrefs.edit().putBoolean("auto_run", false).apply()
             stopService(Intent(this, GlobalGestureService::class.java))
             status.text = "使用者已停止背景服務"
