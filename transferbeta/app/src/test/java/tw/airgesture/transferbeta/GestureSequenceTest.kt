@@ -4,24 +4,38 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class GestureSequenceTest {
+    // Simulates fast camera observations while a fist is continuously in frame.
+    private fun heldFist(
+        detector: GestureSequence,
+        startMs: Long,
+        endMs: Long,
+        receiveAvailable: Boolean = false
+    ): List<GestureSequence.Result> {
+        val events = mutableListOf<GestureSequence.Result>()
+        var t = startMs
+        while (t <= endMs) {
+            events += detector.accept("Closed_Fist", t, receiveAvailable)
+            t += 100L
+        }
+        return events
+    }
+
     @Test fun closedFistAfterTwoSecondsSendsWithoutOpenPalmFirst() {
-        val g = GestureSequence()
-        assertEquals(GestureSequence.Result.NONE, g.accept("Closed_Fist", 1000L))
-        assertEquals(GestureSequence.Result.NONE, g.accept("Closed_Fist", 2999L))
-        assertEquals(GestureSequence.Result.SEND, g.accept("Closed_Fist", 3000L))
+        val events = heldFist(GestureSequence(), 1000L, 3000L)
+        assertEquals(20, events.count { it == GestureSequence.Result.NONE })
+        assertEquals(GestureSequence.Result.SEND, events.last())
     }
 
     @Test fun incomingOfferMakesTheSameFistGestureReceive() {
-        val g = GestureSequence()
-        assertEquals(GestureSequence.Result.NONE, g.accept("Closed_Fist", 1000L, true))
-        assertEquals(GestureSequence.Result.NONE, g.accept("Closed_Fist", 2999L, true))
-        assertEquals(GestureSequence.Result.RECEIVE, g.accept("Closed_Fist", 3000L, true))
+        val events = heldFist(GestureSequence(), 1000L, 3000L, true)
+        assertEquals(20, events.count { it == GestureSequence.Result.NONE })
+        assertEquals(GestureSequence.Result.RECEIVE, events.last())
     }
 
     @Test fun shortFistDoesNotTriggerEitherAction() {
         val g = GestureSequence()
-        g.accept("Closed_Fist", 1000L)
-        assertEquals(GestureSequence.Result.NONE, g.accept("Closed_Fist", 2500L))
+        val events = heldFist(g, 1000L, 2500L)
+        assertEquals(true, events.all { it == GestureSequence.Result.NONE })
         g.accept("Open_Palm", 2700L)
         g.accept("Open_Palm", 3000L)
         assertEquals(GestureSequence.Result.NONE, g.accept("Open_Palm", 3200L))
@@ -29,29 +43,28 @@ class GestureSequenceTest {
 
     @Test fun oneLongFistCannotTriggerTwice() {
         val g = GestureSequence()
-        g.accept("Closed_Fist", 1000L)
-        assertEquals(GestureSequence.Result.SEND, g.accept("Closed_Fist", 3000L))
-        assertEquals(GestureSequence.Result.NONE, g.accept("Closed_Fist", 6000L))
-        assertEquals(GestureSequence.Result.NONE, g.accept("Closed_Fist", 9000L, true))
+        val events = heldFist(g, 1000L, 6000L)
+        assertEquals(1, events.count { it == GestureSequence.Result.SEND })
+        assertEquals(0, events.count { it == GestureSequence.Result.RECEIVE })
+        assertEquals(GestureSequence.Result.NONE, g.accept("Closed_Fist", 6100L, true))
     }
 
     @Test fun releaseThenNewHoldCanTriggerAgain() {
         val g = GestureSequence()
-        g.accept("Closed_Fist", 1000L)
-        assertEquals(GestureSequence.Result.SEND, g.accept("Closed_Fist", 3000L))
+        assertEquals(GestureSequence.Result.SEND, heldFist(g, 1000L, 3000L).last())
         g.accept("Open_Palm", 3100L)
         g.accept("Open_Palm", 3400L)
-        assertEquals(GestureSequence.Result.NONE, g.accept("Closed_Fist", 3500L, true))
-        assertEquals(GestureSequence.Result.RECEIVE, g.accept("Closed_Fist", 5500L, true))
+        val receiveEvents = heldFist(g, 3500L, 5500L, true)
+        assertEquals(1, receiveEvents.count { it == GestureSequence.Result.RECEIVE })
+        assertEquals(GestureSequence.Result.RECEIVE, receiveEvents.last())
     }
 
     @Test fun aSingleNoisyPalmFrameDoesNotRearm() {
         val g = GestureSequence()
-        g.accept("Closed_Fist", 1000L)
-        assertEquals(GestureSequence.Result.SEND, g.accept("Closed_Fist", 3000L))
+        assertEquals(GestureSequence.Result.SEND, heldFist(g, 1000L, 3000L).last())
         g.accept("Open_Palm", 3100L)
-        assertEquals(GestureSequence.Result.NONE, g.accept("Closed_Fist", 3200L))
-        assertEquals(GestureSequence.Result.NONE, g.accept("Closed_Fist", 5600L))
+        val next = heldFist(g, 3200L, 5600L)
+        assertEquals(true, next.all { it == GestureSequence.Result.NONE })
     }
 
     @Test fun shortUnknownGapKeepsTheFistTimer() {
@@ -60,6 +73,9 @@ class GestureSequenceTest {
         g.accept("Closed_Fist", 1500L)
         g.accept("", 1600L)
         assertEquals(GestureSequence.Result.NONE, g.accept("Closed_Fist", 1800L))
+        g.accept("Closed_Fist", 2100L)
+        g.accept("Closed_Fist", 2400L)
+        g.accept("Closed_Fist", 2700L)
         assertEquals(GestureSequence.Result.SEND, g.accept("Closed_Fist", 3000L))
     }
 
@@ -67,9 +83,9 @@ class GestureSequenceTest {
         val g = GestureSequence()
         g.accept("Closed_Fist", 1000L)
         g.accept("", 1600L)
-        assertEquals(GestureSequence.Result.NONE, g.accept("Closed_Fist", 2000L))
-        assertEquals(GestureSequence.Result.NONE, g.accept("Closed_Fist", 3999L))
-        assertEquals(GestureSequence.Result.SEND, g.accept("Closed_Fist", 4000L))
+        val restarted = heldFist(g, 2000L, 4000L)
+        assertEquals(20, restarted.count { it == GestureSequence.Result.NONE })
+        assertEquals(GestureSequence.Result.SEND, restarted.last())
     }
 
     @Test fun isolatedPalmNeverTriggers() {
@@ -82,7 +98,8 @@ class GestureSequenceTest {
         val g = GestureSequence()
         g.accept("Closed_Fist", 1000L)
         g.reset()
-        assertEquals(GestureSequence.Result.NONE, g.accept("Closed_Fist", 3000L, true))
-        assertEquals(GestureSequence.Result.RECEIVE, g.accept("Closed_Fist", 5000L, true))
+        val events = heldFist(g, 3000L, 5000L, true)
+        assertEquals(20, events.count { it == GestureSequence.Result.NONE })
+        assertEquals(GestureSequence.Result.RECEIVE, events.last())
     }
 }
