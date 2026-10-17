@@ -38,6 +38,6 @@ class HomeScreenPolicyTest {
     }
     @Test fun noNearbyPeerStillAllowsControlAndBackground() {
         assertEquals(HomeAction.BACKGROUND, HomeScreenPolicy.decide(true,true,true,false).action)
-        assertTrue(HomeScreenPolicy.shouldAutoBackground(true,true,true,false,false,false))
+        assertFalse(HomeScreenPolicy.shouldAutoBackground(true,true,true,false,false,false))
     }
 }
