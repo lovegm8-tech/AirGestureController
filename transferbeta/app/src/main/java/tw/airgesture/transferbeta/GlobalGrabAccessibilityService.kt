@@ -45,7 +45,10 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
             private set
         private const val YOUTUBE = "com.google.android.youtube"
 
-        fun isYouTubeForeground(): Boolean = foregroundPackage == YOUTUBE
+        fun isYouTubeForeground(): Boolean {
+            val real = current?.get()?.rootInActiveWindow?.packageName?.toString()
+            return (real ?: foregroundPackage) == YOUTUBE
+        }
         fun sendControl(command: FloatingControlRouter.Command) {
             val service = current?.get()
             if (service == null) {
@@ -818,15 +821,22 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         (getSystemService(WINDOW_SERVICE) as WindowManager).defaultDisplay.getRealSize(it)
     }
 
+    private fun activeTargetPackage(): String? =
+        rootInActiveWindow?.packageName?.toString() ?: foregroundPackage
+
     private fun controlAllowed(): Boolean {
         val power = getSystemService(POWER_SERVICE) as PowerManager
         val keyguard = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
-        val ok = power.isInteractive && !keyguard.isKeyguardLocked &&
-            foregroundPackage != packageName && pending == null && browserCapture == null
+        val active = activeTargetPackage()
+        val locked = !power.isInteractive || keyguard.isKeyguardLocked
+        val ownSettings = active == packageName && !GestureTestActivity.isVisible
+        val sharing = pending != null || browserCapture != null
+        val ok = !locked && !ownSettings && !sharing && !active.isNullOrBlank()
         if (!ok) lastControlStatus = when {
-            !power.isInteractive || keyguard.isKeyguardLocked -> "螢幕未解鎖，已停止操作"
-            foregroundPackage == packageName -> "目前是設定首頁，已防止誤觸"
-            else -> "傳檔流程處理中，暫不執行觸控操作"
+            locked -> "螢幕未解鎖，已停止操作"
+            ownSettings -> "設定首頁禁止誤觸；請進入手勢操作測試區"
+            sharing -> "傳檔流程進行中，暫停一般手勢"
+            else -> "未能確認目前顯示的 App"
         }
         return ok
     }
@@ -836,14 +846,23 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         val stroke = GestureDescription.StrokeDescription(
             Path().apply { moveTo(x, y) }, 0L, 80L
         )
-        val sent = dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
-        lastControlStatus = if (sent) "食指停留點擊已送出" else "食指停留點擊被系統拒絕"
+        val sent = dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(),
+            object : GestureResultCallback() {
+                override fun onCompleted(gestureDescription: GestureDescription?) {
+                    lastControlStatus = "食指停留點擊完成"
+                }
+                override fun onCancelled(gestureDescription: GestureDescription?) {
+                    lastControlStatus = "食指停留點擊被系統中斷"
+                }
+            }, null)
+        lastControlStatus = if (sent) "食指停留點擊已送出"
+            else "食指停留點擊被系統拒絕"
     }
 
     private fun executeControl(command: FloatingControlRouter.Command) {
         if (!controlAllowed()) return
         if (command == FloatingControlRouter.Command.MEDIA_PLAY_PAUSE) {
-            if (foregroundPackage != YOUTUBE) {
+            if (activeTargetPackage() != YOUTUBE) {
                 lastControlStatus = "YouTube 未在前景，未發送播放鍵"
                 return
             }
@@ -885,8 +904,15 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         }
         val sent = dispatchGesture(GestureDescription.Builder().addStroke(
             GestureDescription.StrokeDescription(path, 0L, duration)
-        ).build(), null, null)
-        lastControlStatus = if (sent) "已送出操作：" + command.name
+        ).build(), object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+                lastControlStatus = "手勢執行完成：" + command.name
+            }
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+                lastControlStatus = "手勢被系統中斷：" + command.name
+            }
+        }, null)
+        lastControlStatus = if (sent) "手勢已送出：" + command.name
             else "系統拒絕操作：" + command.name
     }
 
