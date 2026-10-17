@@ -440,6 +440,17 @@ class TransferActivity : ComponentActivity() {
             }
         }
         root.addView(primaryAction)
+        root.addView(Button(this).apply {
+            text = "手勢操作測試區 · 實際測試滑動和點擊"
+            setOnClickListener {
+                if (!GlobalGestureService.isActive || !hasAccessibilityPermission()) {
+                    AlertDialog.Builder(this@TransferActivity)
+                        .setMessage("請先完成權限設定並啟動懸浮操作，再進行手勢測試。")
+                        .setPositiveButton("知道了", null).show()
+                } else startActivity(Intent(this@TransferActivity, GestureTestActivity::class.java))
+            }
+        })
+        root.addView(text("設定首頁會禁止手勢誤觸；想驗證滑動請開啟上方測試區。隔空抓取則請在相簿等其他 App 測試。", 13f))
         root.addView(text("滑動｜張掌上下揮動；向右揮＝上一頁\n點擊｜張掌→短握拳→放開（YouTube 播放／暫停）\n游標｜伸食指移動，停留 2 秒點擊\n傳送｜握拳 2 秒抓取；收到分享後握拳 2 秒接收", 15f))
         root.addView(text("整天待命：亮屏無手自動降頻，熄屏完全釋放前鏡頭；解鎖後再恢復。\n隔空操作無須附近手機；只有傳檔需要配對。", 13f))
         val advancedToggle = Button(this).apply { text = "進階設定與測試  ▾" }
@@ -588,7 +599,8 @@ class TransferActivity : ComponentActivity() {
                     "\n鏡頭 FPS：" + GlobalGestureService.requestedSensorFps +
                     "\n辨識異常：" + GlobalGestureService.lastRecognitionError +
                     "\n附近裝置連線：" +
-                        (if (GlobalGestureService.transfer?.isConnected == true) "已連線" else "尚未連線")
+                        (if (GlobalGestureService.transfer?.isConnected == true) "已連線" else "尚未連線") +
+                    "\n注意：設定首頁禁止手勢，請到手勢操作測試區檢查"
                 ).setPositiveButton("完成", null).show()
         }
         extraButton("停止懸浮操作") {
