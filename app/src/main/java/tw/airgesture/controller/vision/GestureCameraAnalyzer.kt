@@ -14,6 +14,7 @@ import tw.airgesture.controller.core.GestureDecisionEngine
 import tw.airgesture.controller.core.HandVisualState
 import tw.airgesture.controller.core.HandVisualClassifier
 import tw.airgesture.controller.core.PointerDwellEngine
+import tw.airgesture.controller.core.PalmCircleEngine
 import tw.airgesture.controller.core.TiltedPalmAssist
 import tw.airgesture.controller.core.YouTubeGestureRouter
 import java.nio.ByteBuffer
@@ -25,9 +26,13 @@ class GestureCameraAnalyzer(
     performanceMode: Int = 1,
     angleAssistEnabled: Boolean = false,
     pointerDwellMs: Long = 2000L,
-    smartLitPower: Boolean = false
+    smartLitPower: Boolean = false,
+    circleVolumeEnabled: Boolean = true
 ) : AutoCloseable {
     private val decision = GestureDecisionEngine(options)
+    private val circle: PalmCircleEngine? = if (circleVolumeEnabled) PalmCircleEngine() else null
+    private var delayedSwipe: GestureDecisionEngine.Action? = null
+    private var lastCircleActive = false
     private val youtubeRouter = YouTubeGestureRouter(options.longFistSecondClickMs, options.longFistMaximumFrameGapMs)
     private val pointer = PointerDwellEngine(pointerDwellMs)
     private val tiltAssist = TiltedPalmAssist(angleAssistEnabled)
@@ -60,6 +65,7 @@ class GestureCameraAnalyzer(
         onAction: (GestureDecisionEngine.Action) -> Unit,
         onHandState: (HandVisualState) -> Unit,
         onPointer: (PointerDwellEngine.Result?) -> Unit,
+        onCircle: (PalmCircleEngine.Result) -> Unit = {},
         isYouTubeForeground: () -> Boolean = { false }
     ) {
         val now = SystemClock.uptimeMillis()
@@ -133,14 +139,57 @@ class GestureCameraAnalyzer(
                 onPointer(null)
             }
 
+            // The circle recognizer never runs during screen-off face-unlock scan.
+            // An open palm held steadily first arms the overlay and temporarily
+            // defers competing swipes. A clearly straight stroke releases the
+            // original action; a round stroke suppresses it until completion.
+            val circular = circle?.observe(
+                palmX, palmY,
+                shape == GestureDecisionEngine.Shape.OPEN_PALM && effectiveConfidence >= .65f,
+                now
+            )
+            if (circular != null) onCircle(circular)
             val action = decision.accept(
                 GestureDecisionEngine.Frame(shape, palmY, effectiveConfidence, palmX), now
             )
-            // Only media-player routing is special; normal swipe, hover and pointer
-            // recognition stays exactly as before. Never interpret a weak fist.
             val confirmedShape = if (effectiveConfidence < .65f)
                 GestureDecisionEngine.Shape.NO_HAND else shape
-            youtubeRouter.route(confirmedShape, now, action, isYouTubeForeground())?.let(onAction)
+
+            if (circular?.intercept == true) {
+                if (action == GestureDecisionEngine.Action.SWIPE_UP ||
+                    action == GestureDecisionEngine.Action.SWIPE_DOWN ||
+                    action == GestureDecisionEngine.Action.SWIPE_BACK) {
+                    if (delayedSwipe == null) delayedSwipe = action
+                }
+                if (circular.volumeStep != 0) {
+                    delayedSwipe = null
+                    decision.reset()
+                    youtubeRouter.reset()
+                    onAction(if (circular.volumeStep > 0)
+                        GestureDecisionEngine.Action.VOLUME_UP
+                    else GestureDecisionEngine.Action.VOLUME_DOWN)
+                }
+                lastCircleActive = true
+            } else {
+                // Discard an unfinished arc when palm disappears; release only
+                // on a deliberate straight stroke while palm remains confirmed.
+                val output = if (circular?.cancelledToStraight == true)
+                    delayedSwipe ?: action
+                else if (lastCircleActive) null
+                else action
+                delayedSwipe = null
+                lastCircleActive = false
+                youtubeRouter.route(confirmedShape, now, output,
+                    isYouTubeForeground())?.let(onAction)
+                if (circular?.cancelledToStraight == false &&
+                    circular.phase == PalmCircleEngine.Phase.IDLE) {
+                    // The former circle session must not leave a blocked
+                    // or partially armed swipe for the next gesture.
+                    if (action == null && confirmedShape == GestureDecisionEngine.Shape.NO_HAND) {
+                        decision.reset()
+                    }
+                }
+            }
         } finally {
             converter.release(frame)
         }
