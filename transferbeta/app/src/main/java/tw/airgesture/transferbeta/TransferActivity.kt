@@ -503,6 +503,24 @@ class TransferActivity : ComponentActivity() {
                     d.dismiss()
                 }.setNegativeButton("取消", null).show()
         }
+        extraButton("YouTube Shorts 播放／暫停方式") {
+            val items = arrayOf(
+                "自動辨識（預設）：Shorts 點一下畫面、一般影片用媒體鍵",
+                "短影音點按：在 YouTube 一律點一下影片畫面",
+                "僅媒體鍵：YouTube 一律用播放／暫停鍵"
+            )
+            AlertDialog.Builder(this).setTitle("YouTube 播放／暫停")
+                .setSingleChoiceItems(items, FloatingSettings.youtubeShortsMode(this)) { d, value ->
+                    FloatingSettings.saveInt(this, "youtube_shorts_mode", value)
+                    flash("已設定 YouTube 播放控制： " +
+                        when (value) {
+                            1 -> "畫面單擊（Shorts 測試用）"
+                            2 -> "僅媒體鍵"
+                            else -> "自動判斷 Shorts／一般影片"
+                        }, true)
+                    d.dismiss()
+                }.setNegativeButton("取消", null).show()
+        }
         extraButton("操作方向確認動畫（開／關，預設開啟）") {
             val newValue = !FloatingSettings.actionFeedback(this)
             FloatingSettings.saveBool(this, "action_feedback_enabled", newValue)
