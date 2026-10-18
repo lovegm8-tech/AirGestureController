@@ -20,6 +20,7 @@ import android.provider.MediaStore
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.*
 import org.json.JSONObject
+import org.json.JSONArray
 import tw.airgesture.transferbeta.core.AirGrabBundle
 import tw.airgesture.transferbeta.core.GrabContentPolicy
 import tw.airgesture.transferbeta.core.MediaFilePolicy
@@ -68,6 +69,7 @@ class MultiPeerTransferManager(private val app: Context) {
         var nearbyReady = false
         var verified = false
         var supportsBundles = false
+        var supportsQueue = false
         var authPending = false
         var awaitingPair = false
         var numericApproved = false
@@ -94,8 +96,13 @@ class MultiPeerTransferManager(private val app: Context) {
             override val sid: String, val name: String, val size: Long,
             val sha: String, val items: Int = 1
         ) : Offered()
+        data class QueueOffer(override val sid: String, val files: List<ExpectedItem>) : Offered()
         data class LinkOffer(override val sid: String, val url: String) : Offered()
     }
+
+    data class StagedFile(val file: File, val name: String)
+    private data class ExpectedItem(val name: String, val size: Long, val sha: String)
+    private data class PreparedItem(val file: File, val info: ExpectedItem)
 
     private class Outgoing(
         val sid: String,
@@ -103,7 +110,8 @@ class MultiPeerTransferManager(private val app: Context) {
         val policy: MultiReceiverBatch,
         val file: File? = null,
         val url: String? = null,
-        val deleteAfterTransfer: Boolean = false
+        val deleteAfterTransfer: Boolean = false,
+        val queue: List<PreparedItem>? = null
     ) {
         var awaitingVerificationPayload = -1L
     }
@@ -119,6 +127,7 @@ class MultiPeerTransferManager(private val app: Context) {
     private var offered: Offered? = null
     private var offeredBy: String? = null
     private var incomingFile: Payload? = null
+    private var incomingQueueIndex = 0
     private var incomingPayload = -1L
     private val incomingSpeed = TransferSpeedTracker()
     private var incomingFinished = false
@@ -133,6 +142,7 @@ class MultiPeerTransferManager(private val app: Context) {
     private var pendingVideo: PendingVideo? = null
     private var pendingFileCount = 1
     private var pendingOwnedFile: File? = null
+    private var stagedQueue: List<StagedFile>? = null
     private var transcoder: CompatibilityVideoTranscoder? = null
     private var displayedPair: String? = null
     private var lastConnected = false
@@ -222,7 +232,10 @@ class MultiPeerTransferManager(private val app: Context) {
         peers.clear()
         active?.let { batch ->
             if (batch.deleteAfterTransfer) batch.file?.delete()
+            batch.queue?.forEach { it.file.delete() }
         }
+        stagedQueue?.forEach { it.file.delete() }
+        stagedQueue = null
         active = null
         pendingOwnedFile?.delete()
         pendingOwnedFile = null
@@ -230,6 +243,7 @@ class MultiPeerTransferManager(private val app: Context) {
         pendingVideo = null
         offered = null
         offeredBy = null
+        incomingQueueIndex = 0
         busy = false
         closeIncomingPrompt()
         pendingDigits = null
@@ -618,7 +632,7 @@ class MultiPeerTransferManager(private val app: Context) {
         if (!p.ownProofVerified) {
             p.ownProofVerified = true
             sendControl(p, JSONObject().put("type", "auth_ready")
-                .put("bundle_v1", true))
+                .put("bundle_v1", true).put("queue_v1", true))
         }
         finishAuthentication(p)
     }
@@ -659,12 +673,14 @@ class MultiPeerTransferManager(private val app: Context) {
 
     private fun beginBroadcast(
         json: JSONObject, file: File? = null, url: String? = null,
-        deleteAfterTransfer: Boolean = false
+        deleteAfterTransfer: Boolean = false,
+        queue: List<PreparedItem>? = null
     ) {
         val now = SystemClock.uptimeMillis()
         val sid = json.getString("sid")
-        val batch = Outgoing(sid, json, MultiReceiverBatch(sid, now),
-            file, url, deleteAfterTransfer)
+        val batch = Outgoing(sid, json,
+            MultiReceiverBatch(sid, now, fileCount = queue?.size ?: 1),
+            file, url, deleteAfterTransfer, queue)
         active = batch
         for (p in peers.values) announceToPeer(batch, p)
         ui("已開放 30 秒多人接收；連線 " + connectedDeviceIds.size + " 台")
@@ -680,6 +696,7 @@ class MultiPeerTransferManager(private val app: Context) {
 
     private fun announceToPeer(batch: Outgoing, p: Peer) {
         if (!p.verified || active !== batch) return
+        if (batch.queue != null && !p.supportsQueue) return
         if (batch.json.optInt("items", 1) > 1 && !p.supportsBundles) return
         val now = SystemClock.uptimeMillis()
         if (batch.policy.announce(p.endpoint, now)) {
@@ -708,7 +725,8 @@ class MultiPeerTransferManager(private val app: Context) {
         active = null
         busy = false
         if (batch.deleteAfterTransfer) batch.file?.delete()
-        val items = batch.json.optInt("items", 1)
+        batch.queue?.forEach { it.file.delete() }
+        val items = batch.queue?.size ?: batch.json.optInt("items", 1)
         ui("多人傳送結束：每台 " + items + " 個檔案；成功 " +
             successes + " 台，未完成 " + failures + " 台")
         visual(if (successes > 0) VisualPhase.SEND_COMPLETE else VisualPhase.FAILURE,
@@ -996,6 +1014,7 @@ class MultiPeerTransferManager(private val app: Context) {
                                 }
                                 "auth_ready" -> if (p.authPending) {
                                     p.supportsBundles = json.optBoolean("bundle_v1", false)
+                                    p.supportsQueue = json.optBoolean("queue_v1", false)
                                     p.remoteReady = true
                                     finishAuthentication(p)
                                 }
