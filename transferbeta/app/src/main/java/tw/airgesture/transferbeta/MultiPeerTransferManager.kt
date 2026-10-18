@@ -749,6 +749,84 @@ class MultiPeerTransferManager(private val app: Context) {
             .put("sid", sid).put("url", url), url = url)
     }
 
+    /**
+     * One offer contains an ordered list of original, uncompressed files.
+     * Each receiver opts in once and advances its own verified index. No
+     * aggregate byte-size ceiling or ZIP/archival staging is involved.
+     */
+    fun offerFiles(candidates: List<StagedFile>) {
+        fun reject(reason: String) {
+            candidates.forEach { it.file.delete() }
+            reportCaptureFailure(reason)
+        }
+        if (!started || !isConnected || busy) {
+            reject("尚未連線或上一批傳輸尚未完成")
+            return
+        }
+        if (candidates.size !in 2..AirGrabBundle.MAX_FILES) {
+            reject("一次請選取 2 至 ${AirGrabBundle.MAX_FILES} 個檔案")
+            return
+        }
+        if (peers.values.none { it.verified && it.supportsQueue }) {
+            reject("接收端版本尚未支援逐檔傳送，請更新兩台裝置")
+            return
+        }
+        if (candidates.any { it.file.length() <= 0L || !it.file.isFile ||
+            it.file.length() > TransferPolicy.MAX_BYTES ||
+            TransferPolicy.safeName(it.name) == null }) {
+            reject("包含無法讀取、空白或不支援的原始檔案")
+            return
+        }
+        busy = true
+        stagedQueue = candidates.toList()
+        val requestEpoch = ++epoch
+        ui("準備逐檔佇列 · 0/${candidates.size} · 正在驗證原檔")
+        worker.execute {
+            try {
+                val ready = candidates.mapIndexed { i, staged ->
+                    val name = TransferPolicy.safeName(staged.name)
+                        ?: error("原始檔名無效")
+                    val item = PreparedItem(staged.file,
+                        ExpectedItem(name, staged.file.length(), sha256(staged.file)))
+                    ui("準備原始檔 ${i + 1}/${candidates.size}")
+                    item
+                }
+                val sid = UUID.randomUUID().toString()
+                val list = JSONArray()
+                for (item in ready) {
+                    list.put(JSONObject().put("name", item.info.name)
+                        .put("size", item.info.size).put("hash", item.info.sha))
+                }
+                val offer = JSONObject().put("type", "queue_offer")
+                    .put("sid", sid).put("files", list)
+                require(offer.toString().toByteArray(Charsets.UTF_8).size <= 16_384) {
+                    "檔案名稱太長，無法建立傳輸清單"
+                }
+                main.post {
+                    if (!started || !busy || !isConnected || epoch != requestEpoch ||
+                        stagedQueue !== candidates && stagedQueue?.size != candidates.size) {
+                        // A stopped or replaced session owns cleanup.
+                        return@post
+                    }
+                    stagedQueue = null
+                    beginBroadcast(offer, queue = ready)
+                    ui("已建立 ${ready.size} 個檔案的逐檔佇列；30 秒內可加入接收")
+                }
+            } catch (error: Exception) {
+                main.post {
+                    if (epoch == requestEpoch) {
+                        stagedQueue = null
+                        candidates.forEach { it.file.delete() }
+                        busy = false
+                        ++epoch
+                        reportCaptureFailure("建立逐檔佇列失敗：" +
+                            (error.message ?: "讀取原始檔案失敗"))
+                    }
+                }
+            }
+        }
+    }
+
     fun offerFile(
         candidate: File, originalName: String,
         multiCount: Int = 1, deleteWhenDone: Boolean = false
