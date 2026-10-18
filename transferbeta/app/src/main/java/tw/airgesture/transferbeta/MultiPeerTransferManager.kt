@@ -822,6 +822,16 @@ class MultiPeerTransferManager(private val app: Context) {
         }
     }
 
+    private fun enoughStorageForIncoming(size: Long): Boolean = try {
+        val root = Environment.getExternalStorageDirectory()
+        val available = StatFs(root.absolutePath).availableBytes
+        TransferPolicy.hasRoom(available, size)
+    } catch (_: Exception) {
+        // Storage access might be restricted; the MediaStore writer still
+        // rejects storage exhaustion, and failed files are deleted.
+        true
+    }
+
     fun confirmReceive() {
         val current = offered ?: run {
             reportCaptureFailure("尚無可接收內容")
@@ -830,6 +840,10 @@ class MultiPeerTransferManager(private val app: Context) {
         val p = offeredBy?.let { peers[it] }
         if (p?.verified != true || busy) {
             reportCaptureFailure("接收裝置已離線或正在傳輸")
+            return
+        }
+        if (current is Offered.FileOffer && !enoughStorageForIncoming(current.size)) {
+            reportCaptureFailure("接收空間不足，請先清理裝置儲存空間")
             return
         }
         busy = true
@@ -998,12 +1012,16 @@ class MultiPeerTransferManager(private val app: Context) {
                         else if (batch != null) failRecipient(batch, id, "傳輸中斷")
                     }
                     PayloadTransferUpdate.Status.IN_PROGRESS -> if (update.totalBytes > 0) {
-                        val percent = (100 * update.bytesTransferred / update.totalBytes)
-                            .toInt().coerceIn(0, 100)
+                        val tracker = if (isReceiving) incomingSpeed else p.speed
+                        val sample = tracker.observe(update.bytesTransferred,
+                            update.totalBytes, SystemClock.uptimeMillis())
+                        val percent = (update.bytesTransferred.toDouble() * 100.0 /
+                            update.totalBytes).toInt().coerceIn(0, 100)
                         if (percent != p.lastProgress) {
                             p.lastProgress = percent
-                            ui(if (isReceiving) "接收中 " + percent + "%"
-                                else "正在傳給 " + p.modelLabel + "：" + percent + "%")
+                            val details = TransferSpeedTracker.summary(sample)
+                            ui(if (isReceiving) "接收中 $percent%$details"
+                                else "正在傳給 " + p.modelLabel + "：$percent%$details")
                             if (isReceiving)
                                 visual(VisualPhase.RECEIVING, "接收中 " + percent + "%", percent)
                         }
