@@ -33,6 +33,26 @@ class HandFeedbackPolicyTest {
         p.reset()
         assertEquals(HandHint.HAND_SEEN, p.observe(true, "Other", 4200))
     }
+    @Test fun brieflyUncertainClassificationDoesNotFlashHandDetected() {
+        val p = HandFeedbackPolicy()
+        assertEquals(HandHint.OPEN_PALM, p.observe(true, "Open_Palm", 1000))
+        assertNull(p.observe(true, "", 1120))
+        assertNull(p.observe(true, "Other", 1300))
+        // Display-only grace must expire if pose recognition stays uncertain.
+        assertEquals(HandHint.HAND_SEEN, p.observe(true, "", 1321))
+        // New, reliable fist must immediately replace previous status.
+        assertEquals(HandHint.CLOSED_FIST, p.observe(true, "Closed_Fist", 1350))
+        assertNull(p.observe(true, "", 1500))
+    }
+
+    @Test fun firstDetectionRemainsImmediateBeforePoseClassification() {
+        val p = HandFeedbackPolicy()
+        assertEquals(HandHint.HAND_SEEN, p.observe(true, "", 1000))
+        assertEquals(HandHint.CLOSED_FIST, p.observe(true, "Closed_Fist", 1115))
+        assertNull(p.observe(true, "", 1200))
+        assertEquals(HandHint.HAND_SEEN, p.observe(true, "", 1440))
+    }
+
     @Test fun noHandAtStartupProducesNoSpam() {
         val p = HandFeedbackPolicy()
         assertNull(p.observe(false, "", 1000))
