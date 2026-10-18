@@ -8,7 +8,7 @@ package tw.airgesture.transferbeta.core
  * The gesture controller does not raise AI/camera FPS.
  */
 class FloatingControlRouter(pointerDwellMs: Long = 2000L, sensitivity: Int = 1) {
-    enum class Command { SEND, RECEIVE, SWIPE_UP, SWIPE_DOWN, SWIPE_BACK, TAP, MEDIA_PLAY_PAUSE }
+    enum class Command { SEND, RECEIVE, SWIPE_UP, SWIPE_DOWN, SWIPE_BACK, SWIPE_LEFT, TAP, MEDIA_PLAY_PAUSE }
     data class Decision(
         val command: Command? = null,
         val pointer: PointerDwellEngine.Result? = null
@@ -169,10 +169,11 @@ class FloatingControlRouter(pointerDwellMs: Long = 2000L, sensitivity: Int = 1) 
             GestureDecisionEngine.Action.SWIPE_UP -> Command.SWIPE_UP
             GestureDecisionEngine.Action.SWIPE_DOWN -> Command.SWIPE_DOWN
             GestureDecisionEngine.Action.SWIPE_BACK -> Command.SWIPE_BACK
+            GestureDecisionEngine.Action.SWIPE_LEFT -> Command.SWIPE_LEFT
             else -> null
         }
         if (action == Command.SWIPE_UP || action == Command.SWIPE_DOWN ||
-            action == Command.SWIPE_BACK) {
+            action == Command.SWIPE_BACK || action == Command.SWIPE_LEFT) {
             // Swiping an open palm must not arm a subsequent accidental grab.
             palmArmed = false
             palmSamples = 0
