@@ -5,12 +5,13 @@ import kotlin.math.abs
 /** Android-independent state machine: steady-palm rearm can be tested on the JVM. */
 class GestureDecisionEngine(private val options: Options = Options()) {
     enum class Shape { OPEN_PALM, CLOSED_FIST, OTHER, NO_HAND }
-    enum class Action { SWIPE_UP, SWIPE_DOWN, SWIPE_BACK, TAP_CENTER, MEDIA_PLAY_PAUSE }
+    enum class Action { SWIPE_UP, SWIPE_DOWN, SWIPE_BACK, SWIPE_LEFT, TAP_CENTER, MEDIA_PLAY_PAUSE }
     data class Frame(val shape: Shape, val palmY: Float? = null, val confidence: Float = 1f, val palmX: Float? = null)
     data class Options(
         val minimumConfidence: Float = .65f,
         val swipeDistance: Float = .13f,
         val backSwipeDistance: Float = .17f,
+        val leftSwipeDistance: Float = .17f,
         val cooldownMs: Long = 850L,
         val maximumSwipeDurationMs: Long = 1_500L,
         val minimumSwipeDurationMs: Long = 100L,
@@ -178,6 +179,11 @@ class GestureDecisionEngine(private val options: Options = Options()) {
             // Only a clear user-right motion can invoke Android edge-back.
             if (dx >= options.backSwipeDistance && dx > abs(dy) * 1.45f) {
                 return fire(Action.SWIPE_BACK, nowMs)
+            }
+            // Distinct open-palm leftward swipe: starts anywhere within view,
+            // Android executes a full right-edge-to-left swipe.
+            if (dx <= -options.leftSwipeDistance && -dx > abs(dy) * 1.45f) {
+                return fire(Action.SWIPE_LEFT, nowMs)
             }
             if (abs(dy) < options.swipeDistance || abs(dy) < abs(dx) * 1.10f) return null
             return fire(if (dy < 0f) Action.SWIPE_UP else Action.SWIPE_DOWN, nowMs)
