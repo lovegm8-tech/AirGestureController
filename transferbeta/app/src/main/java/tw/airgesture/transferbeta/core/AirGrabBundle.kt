@@ -100,8 +100,10 @@ object AirGrabBundle {
         input: InputStream,
         expectedCount: Int,
         openOutput: (String) -> OutputStream,
-        progress: (Int, Int) -> Unit = { _, _ -> }
+        progress: (Int, Int) -> Unit = { _, _ -> },
+        maxUnpackedBytes: Long = TransferPolicy.MAX_BYTES
     ): List<Record> {
+        require(maxUnpackedBytes in 1L..TransferPolicy.MAX_BYTES)
         require(expectedCount in 2..MAX_FILES)
         val records = ArrayList<Record>()
         var total = 0L
@@ -145,7 +147,7 @@ object AirGrabBundle {
                         count += n
                         total += n
                         require(count <= TransferPolicy.MAX_BYTES &&
-                            total <= TransferPolicy.MAX_BYTES) { "解包大小超過限制" }
+                            total <= maxUnpackedBytes) { "解包大小超過限制" }
                         md.update(bytes, 0, n)
                         output.write(bytes, 0, n)
                     }
