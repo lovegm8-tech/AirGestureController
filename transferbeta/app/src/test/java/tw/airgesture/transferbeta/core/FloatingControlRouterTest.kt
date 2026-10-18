@@ -12,72 +12,105 @@ class FloatingControlRouterTest {
         ix: Float? = null, iy: Float? = null
     ) = r.accept(pose, .90f, px, py, ix, iy, time, offer, youtube)
 
-    @Test fun fistHeldThreeSecondsSendsOnlyOnceWithNoPrecedingPalm() {
+    @Test fun directFistHeldTwoSecondsTapsExactlyOnce() {
         val r = FloatingControlRouter()
-        var sendCount = 0
-        for (i in 0..45) {
-            val decision = step(r, "Closed_Fist", 1000L + i * 100L).command
-            if (i < 30) assertNotEquals(FloatingControlRouter.Command.SEND, decision)
-            if (decision == FloatingControlRouter.Command.SEND) sendCount++
+        val outputs = (0..36).map {
+            step(r, "Closed_Fist", 1000L + 100L * it).command
         }
-        assertEquals(1, sendCount)
+        assertTrue(outputs.take(20).all { it == null })
+        assertEquals(FloatingControlRouter.Command.TAP, outputs[20])
+        assertEquals(1, outputs.count { it == FloatingControlRouter.Command.TAP })
+        assertFalse(outputs.contains(FloatingControlRouter.Command.SEND))
     }
 
-    @Test fun fistReleasedBetweenTwoAndThreeSecondsDoesNotSendOrTap() {
+    @Test fun directFistInYoutubeSendsMediaCommandAndNotTap() {
         val r = FloatingControlRouter()
-        step(r, "Open_Palm", 900L)
-        step(r, "Open_Palm", 1000L)
-        val decisions = (0..27).map {
-            step(r, "Closed_Fist", 1100L + it * 100L).command
-        } + listOf(step(r, "Open_Palm", 3950L).command,
-            step(r, "Open_Palm", 4100L).command)
-        assertTrue(decisions.all { it == null })
+        val outputs = (0..35).map {
+            step(r, "Closed_Fist", 1000L + it * 100L, youtube = true).command
+        }
+        assertEquals(1, outputs.count {
+            it == FloatingControlRouter.Command.MEDIA_PLAY_PAUSE
+        })
+        assertFalse(outputs.contains(FloatingControlRouter.Command.TAP))
     }
 
-    @Test fun offerChangesLongFistFromSendToReceive() {
-        val r = FloatingControlRouter()
-        val results = (0..25).map { step(r, "Closed_Fist", 1000L + it * 100L, offer = true) }
-        assertEquals(1, results.count { it.command == FloatingControlRouter.Command.RECEIVE })
-        assertEquals(0, results.count { it.command == FloatingControlRouter.Command.SEND })
-    }
-
-    @Test fun shortFistCannotTapUntilPalmRelease() {
+    @Test fun palmThenFistGrabsImmediatelyAndBlocksLaterLongHoldTap() {
         val r = FloatingControlRouter()
         step(r, "Open_Palm", 1000L)
         step(r, "Open_Palm", 1100L)
         assertNull(step(r, "Closed_Fist", 1200L).command)
-        assertNull(step(r, "Closed_Fist", 1300L).command)
-        assertNull(step(r, "Closed_Fist", 1400L).command)
-        assertNull(step(r, "Open_Palm", 1500L).command)
-        assertEquals(FloatingControlRouter.Command.TAP,
-            step(r, "Open_Palm", 1600L).command)
-        assertNull(step(r, "Open_Palm", 1700L).command)
+        assertEquals(FloatingControlRouter.Command.SEND,
+            step(r, "Closed_Fist", 1300L).command)
+        val tail = (14..48).map {
+            step(r, "Closed_Fist", 1000L + it * 100L).command
+        }
+        assertTrue(tail.all { it == null })
+        assertNull(step(r, "Open_Palm", 5000L).command)
+        assertNull(step(r, "Open_Palm", 5100L).command)
     }
 
-    @Test fun youtubeShortFistUsesMediaKeyNotTouch() {
+    @Test fun shortOrNoisePalmDoesNotAccidentallyGrab() {
+        val r = FloatingControlRouter()
+        step(r, "Open_Palm", 900L)
+        assertNull(step(r, "Closed_Fist", 1000L).command)
+        val outputs = (1..25).map {
+            step(r, "Closed_Fist", 1000L + 100L * it).command
+        }
+        assertEquals(1, outputs.count { it == FloatingControlRouter.Command.TAP })
+        assertFalse(outputs.contains(FloatingControlRouter.Command.SEND))
+    }
+
+    @Test fun fistThenPalmReceivesWhenOfferIsWaiting() {
+        val r = FloatingControlRouter()
+        val events = (0..26).map {
+            step(r, "Closed_Fist", 1000L + 100L * it, offer = true).command
+        }
+        assertTrue(events.all { it == null })
+        assertNull(step(r, "Open_Palm", 3700L, offer = true).command)
+        assertEquals(FloatingControlRouter.Command.RECEIVE,
+            step(r, "Open_Palm", 3800L, offer = true).command)
+        assertNull(step(r, "Open_Palm", 3900L, offer = true).command)
+    }
+
+    @Test fun shortFistThenPalmAlsoReceivesOnlyWhenOfferExists() {
+        val r = FloatingControlRouter()
+        step(r, "Closed_Fist", 1000L, offer = true)
+        step(r, "Closed_Fist", 1100L, offer = true)
+        step(r, "Open_Palm", 1200L, offer = true)
+        assertEquals(FloatingControlRouter.Command.RECEIVE,
+            step(r, "Open_Palm", 1300L, offer = true).command)
+        val other = FloatingControlRouter()
+        step(other, "Closed_Fist", 1000L)
+        step(other, "Closed_Fist", 1100L)
+        step(other, "Open_Palm", 1200L)
+        assertNull(step(other, "Open_Palm", 1300L).command)
+    }
+
+    @Test fun pendingReceiveSuppressesPalmToFistGrabAndAllClicks() {
+        val r = FloatingControlRouter()
+        step(r, "Open_Palm", 1000L, offer = true)
+        step(r, "Open_Palm", 1100L, offer = true)
+        val events = (0..26).map {
+            step(r, "Closed_Fist", 1200L + it * 100L, offer = true).command
+        }
+        assertTrue(events.all { it == null })
+        step(r, "Open_Palm", 3900L, offer = true)
+        assertEquals(FloatingControlRouter.Command.RECEIVE,
+            step(r, "Open_Palm", 4000L, offer = true).command)
+    }
+
+    @Test fun onePalmFrameCannotRearmAfterConsumedGrab() {
         val r = FloatingControlRouter()
         step(r, "Open_Palm", 1000L)
         step(r, "Open_Palm", 1100L)
-        step(r, "Closed_Fist", 1200L, youtube = true)
-        step(r, "Closed_Fist", 1300L, youtube = true)
-        step(r, "Open_Palm", 1400L, youtube = true)
-        assertEquals(FloatingControlRouter.Command.MEDIA_PLAY_PAUSE,
-            step(r, "Open_Palm", 1500L, youtube = true).command)
-    }
-
-    @Test fun longFistNeverCausesEarlyOrReleasedTap() {
-        val r = FloatingControlRouter()
-        step(r, "Open_Palm", 1000L)
-        step(r, "Open_Palm", 1100L)
-        val outputs = (0..37).map {
-            step(r, "Closed_Fist", 1200L + it * 100L).command
-        } + listOf(
-            step(r, "Open_Palm", 5000L).command,
-            step(r, "Open_Palm", 5100L).command
-        )
-        assertEquals(1, outputs.count { it == FloatingControlRouter.Command.SEND })
-        assertEquals(0, outputs.count { it == FloatingControlRouter.Command.TAP })
-        assertEquals(0, outputs.count { it == FloatingControlRouter.Command.MEDIA_PLAY_PAUSE })
+        step(r, "Closed_Fist", 1200L)
+        assertEquals(FloatingControlRouter.Command.SEND,
+            step(r, "Closed_Fist", 1300L).command)
+        step(r, "Open_Palm", 1400L)
+        val results = (0..22).map {
+            step(r, "Closed_Fist", 1500L + it * 100L).command
+        }
+        assertTrue(results.all { it == null })
     }
 
     @Test fun openPalmSwipeUpRoutesWithoutTriggeringFileGrab() {
@@ -108,37 +141,21 @@ class FloatingControlRouterTest {
         assertFalse(step(r, "Pointing_Up", 3200L, ix = .4f, iy = .5f).pointer?.click ?: true)
     }
 
-    @Test fun classifiedHandAt60PercentCanStillTriggerThreeSecondGrab() {
+    @Test fun classifiedHandAt60PercentCanTriggerTwoSecondTap() {
         val r = FloatingControlRouter()
-        var count = 0
-        for (i in 0..40) {
-            val decision = r.accept("Closed_Fist", .60f, null, null, null, null,
-                1000L + i * 100L, false, false)
-            if (i < 30) assertNotEquals(FloatingControlRouter.Command.SEND, decision.command)
-            if (decision.command == FloatingControlRouter.Command.SEND) count++
+        val actions = (0..25).map {
+            r.accept("Closed_Fist", .60f, null, null, null, null,
+                1000L + it * 100L, false, false).command
         }
-        assertEquals(1, count)
+        assertEquals(1, actions.count { it == FloatingControlRouter.Command.TAP })
     }
 
-    @Test fun openPalmSwipeAt60PercentMatchesHandStatus() {
+    @Test fun weakRecognitionDoesNotTriggerActions() {
         val r = FloatingControlRouter()
-        val first = r.accept("Open_Palm", .60f, .50f, .85f, null, null,
-            1000L, false, false)
-        val second = r.accept("Open_Palm", .60f, .50f, .85f, null, null,
-            1100L, false, false)
-        val third = r.accept("Open_Palm", .60f, .50f, .50f, null, null,
-            1250L, false, false)
-        assertNull(first.command)
-        assertNull(second.command)
-        assertEquals(FloatingControlRouter.Command.SWIPE_UP, third.command)
-    }
-
-    @Test fun noGestureOnWeakRecognition() {
-        val r = FloatingControlRouter()
-        val results = (0..30).map {
+        val events = (0..34).map {
             r.accept("Closed_Fist", .40f, null, null, null, null,
-                1000L + 100 * it, false, false)
+                1000L + it * 100L, false, false)
         }
-        assertTrue(results.all { it.command == null })
+        assertTrue(events.all { it.command == null })
     }
 }
