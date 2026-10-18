@@ -86,7 +86,7 @@ final class SecureChannel {
     func receive() async throws -> (UInt8, Data) {
         let lengthBytes = try await readExactly(4)
         let size = lengthBytes.reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
-        guard size >= 29 && size <= Self.maxPayload + 29 else { throw AirGrabError.invalidFrame }
+        guard size >= 29 && size <= UInt32(Self.maxPayload + 29) else { throw AirGrabError.invalidFrame }
         let ciphertext = try await readExactly(Int(size))
         let box = try AES.GCM.SealedBox(combined: ciphertext)
         let plain = try AES.GCM.open(box, using: key)
