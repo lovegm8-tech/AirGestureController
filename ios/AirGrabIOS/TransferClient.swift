@@ -225,6 +225,22 @@ final class TransferModel: ObservableObject {
                 let checksum = sha.finalize().map { String(format: "%02x", $0) }.joined()
                 let socket = try await session()
                 defer { socket.close(); try? reader.close() }
+                // Send website/video-post URLs as URLs, not as documents.
+                if size <= 16_384 && (file.lastPathComponent.hasSuffix("-link.txt")
+                        || file.lastPathComponent.hasSuffix("-text.txt")),
+                   let value = try? String(contentsOf: file, encoding: .utf8),
+                   let url = URL(string: value.trimmingCharacters(in: .whitespacesAndNewlines)),
+                   (url.scheme == "https" || url.scheme == "http"), url.host != nil {
+                    try await socket.sendJSON(["op": "put_link", "url": url.absoluteString])
+                    let receipt = try await socket.receiveJSON()
+                    guard receipt["status"] as? String == "ok" else {
+                        throw AirGrabError.invalidResponse
+                    }
+                    if fromShare { SharedInbox.complete(file) }
+                    reloadLocal()
+                    status = "網址已傳送，請在 S26 Ultra 通知欄點擊開啟"
+                    return
+                }
                 try await socket.sendJSON(["op": "put", "name": file.lastPathComponent,
                                            "size": size, "sha256": checksum])
                 let reply = try await socket.receiveJSON()
