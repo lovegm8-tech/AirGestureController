@@ -1607,9 +1607,9 @@ class MultiPeerTransferManager(private val app: Context) {
                     expected.sha, digest, expected.size, size)) {
                     "檔案雜湊或大小不正確"
                 }
-                app.contentResolver.update(dest!!, ContentValues().apply {
+                check(app.contentResolver.update(dest!!, ContentValues().apply {
                     put(MediaStore.MediaColumns.IS_PENDING, 0)
-                }, null, null)
+                }, null, null) > 0) { "已驗證檔案無法發布到相簿或下載資料夾" }
                 val playback = if (media.kind == MediaKind.VIDEO)
                     VideoPlaybackProbe.explain(app, dest!!) else null
                 main.post {
