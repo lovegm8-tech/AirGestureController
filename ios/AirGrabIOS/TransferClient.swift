@@ -1,6 +1,7 @@
 import Foundation
 import CryptoKit
 import Security
+import Combine
 
 struct TransferOffer: Identifiable {
     let id: String
