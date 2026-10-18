@@ -13,8 +13,8 @@ class GlobalGrabCoreTest {
         assertTrue(p.shouldInfer(2550))
         p.observeHand(true, 2550)
         assertEquals(AdaptivePowerPolicy.Mode.ACTIVE, p.mode(2650))
-        assertFalse(p.shouldInfer(2700))
-        assertTrue(p.shouldInfer(2715))
+        assertFalse(p.shouldInfer(2660))
+        assertTrue(p.shouldInfer(2665)) // first-hand recognition burst: 115ms
         assertEquals(AdaptivePowerPolicy.Mode.ECO, p.mode(6501))
         p.screenChanged(false)
         assertEquals(AdaptivePowerPolicy.Mode.STOPPED, p.mode(7000))
