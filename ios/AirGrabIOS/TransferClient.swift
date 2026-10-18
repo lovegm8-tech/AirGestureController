@@ -99,6 +99,7 @@ final class TransferModel: ObservableObject {
     @Published var received: [URL] = []
     @Published var status = "請先掃描 S26 Ultra 的配對 QR Code"
     @Published var busy = false
+    @Published var progress: Double = 0
 
     init() { reloadLocal() }
 
@@ -146,6 +147,8 @@ final class TransferModel: ObservableObject {
 
     func download(_ offer: TransferOffer) {
         Task {
+            progress = 0
+            let start = Date()
             busy = true
             defer { busy = false }
             do {
@@ -175,6 +178,9 @@ final class TransferModel: ObservableObject {
                         try handle.write(contentsOf: bytes)
                         sha.update(data: bytes)
                         remaining -= Int64(bytes.count)
+                        if number.int64Value > 0 {
+                            progress = Double(number.int64Value - remaining) / Double(number.int64Value)
+                        }
                     }
                     let end = try await socket.receiveJSON()
                     guard end["status"] as? String == "end" else { throw AirGrabError.invalidResponse }
@@ -185,7 +191,9 @@ final class TransferModel: ObservableObject {
                     let final = receivedFolder().appendingPathComponent(UUID().uuidString + "-" + safe)
                     try FileManager.default.moveItem(at: temp, to: final)
                     reloadLocal()
-                    status = "已驗證完整檔案：" + safe
+                    let elapsed = max(0.001, Date().timeIntervalSince(start))
+                    let speed = Double(number.int64Value) / 1_000_000 / elapsed
+                    status = String(format: "已驗證：%@｜平均 %.1f MB/s", safe, speed)
                 } catch {
                     try? FileManager.default.removeItem(at: temp)
                     throw error
@@ -196,6 +204,8 @@ final class TransferModel: ObservableObject {
 
     func upload(_ file: URL, fromShare: Bool = false) {
         Task {
+            progress = 0
+            let start = Date()
             busy = true
             defer { busy = false }
             do {
@@ -218,17 +228,21 @@ final class TransferModel: ObservableObject {
                                            "size": size, "sha256": checksum])
                 let reply = try await socket.receiveJSON()
                 guard reply["status"] as? String == "ready" else { throw AirGrabError.invalidResponse }
+                var transmitted: Int64 = 0
                 while true {
                     let data = try reader.read(upToCount: SecureChannel.chunkSize) ?? Data()
                     if data.isEmpty { break }
                     try await socket.sendBytes(data)
+                    transmitted += Int64(data.count)
+                    if size > 0 { progress = Double(transmitted) / Double(size) }
                 }
                 try await socket.sendJSON(["status": "end"])
                 let receipt = try await socket.receiveJSON()
                 guard receipt["status"] as? String == "ok" else { throw AirGrabError.integrityFailure }
                 if fromShare { SharedInbox.complete(file) }
                 reloadLocal()
-                status = "原始檔案傳送成功（SHA-256 已驗證）"
+                let elapsed = max(0.001, Date().timeIntervalSince(start))
+                status = String(format: "驗證成功｜平均 %.1f MB/s", Double(size) / 1_000_000 / elapsed)
             } catch { status = "傳送失敗：" + error.localizedDescription }
         }
     }
