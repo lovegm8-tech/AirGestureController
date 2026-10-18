@@ -8,6 +8,10 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Environment
+import android.os.StatFs
+import android.bluetooth.BluetoothManager
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -22,6 +26,7 @@ import tw.airgesture.transferbeta.core.MediaKind
 import tw.airgesture.transferbeta.core.MultiReceiverBatch
 import tw.airgesture.transferbeta.core.PeerIdentityProtocol
 import tw.airgesture.transferbeta.core.TransferPolicy
+import tw.airgesture.transferbeta.core.TransferSpeedTracker
 import tw.airgesture.transferbeta.core.VideoCompatibilityPolicy
 import tw.airgesture.transferbeta.core.VideoDescription
 import tw.airgesture.transferbeta.core.VideoSendMode
@@ -78,6 +83,7 @@ class MultiPeerTransferManager(private val app: Context) {
         var outgoingPayload = -1L
         var lastOfferSentAt = 0L
         var lastProgress = -1
+        val speed = TransferSpeedTracker()
     }
 
     private sealed class Offered {
@@ -110,6 +116,7 @@ class MultiPeerTransferManager(private val app: Context) {
     private var offeredBy: String? = null
     private var incomingFile: Payload? = null
     private var incomingPayload = -1L
+    private val incomingSpeed = TransferSpeedTracker()
     private var incomingFinished = false
     private var incomingQueueAcknowledged = false
     private var busy = false
@@ -691,7 +698,7 @@ class MultiPeerTransferManager(private val app: Context) {
         }
         if (!candidate.isFile || candidate.length() <= 0 ||
             candidate.length() > TransferPolicy.MAX_BYTES) {
-            reportCaptureFailure("檔案不存在、為空或超過 256 MB")
+            reportCaptureFailure("檔案不存在、為空或超過 " + TransferPolicy.capacityLabel())
             return
         }
         val name = TransferPolicy.safeName(originalName)
@@ -757,7 +764,7 @@ class MultiPeerTransferManager(private val app: Context) {
             transcoder = null
             if (result.length() > TransferPolicy.MAX_BYTES) {
                 result.delete()
-                failPreparation("轉檔後超過 256 MB，請選擇較短影片")
+                failPreparation("轉檔後超過 " + TransferPolicy.capacityLabel())
             } else {
                 prepareFile(result,
                     VideoCompatibilityPolicy.compatibleName(video.name), epoch)
@@ -918,6 +925,7 @@ class MultiPeerTransferManager(private val app: Context) {
                             incomingFile = payload
                             incomingQueueAcknowledged = true
                             incomingPayload = payload.id
+                            incomingSpeed.reset()
                             if (incomingFinished) verifyFile()
                         }
                     }
@@ -937,7 +945,7 @@ class MultiPeerTransferManager(private val app: Context) {
 
                 if (isReceiving && update.totalBytes > TransferPolicy.MAX_BYTES) {
                     client.cancelPayload(update.payloadId)
-                    failIncoming("檔案超過 256 MB")
+                    failIncoming("檔案超過 " + TransferPolicy.capacityLabel())
                     return@post
                 }
                 val expected = offered as? Offered.FileOffer
@@ -1136,6 +1144,7 @@ class MultiPeerTransferManager(private val app: Context) {
             val payload = Payload.fromFile(file)
             p.outgoingPayload = payload.id
             p.lastProgress = -1
+            p.speed.reset()
             client.sendPayload(next, payload).addOnFailureListener {
                 main.post {
                     if (active === batch) failRecipient(batch, next,
