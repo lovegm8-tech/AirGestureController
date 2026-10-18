@@ -177,8 +177,15 @@ class FloatingControlRouter(pointerDwellMs: Long = 2000L, sensitivity: Int = 1) 
         // explicit fist -> palm confirmation.
         val swipeAction = if (action == null && fistSince < 0L &&
             !receivingOffer) swipes.accept(GestureDecisionEngine.Frame(
-            gestureShape, palmY, if (gestureShape == GestureDecisionEngine.Shape.TRACKED_HAND)
-                1f else if (shape == null) 0f else confidence, palmX
+            gestureShape, palmY, when (gestureShape) {
+                // Raw hand category has been rejected as a swipe endpoint.
+                // Keep OTHER authoritative even if the classifier score is
+                // below the engine's generic confidence threshold.
+                GestureDecisionEngine.Shape.TRACKED_HAND,
+                GestureDecisionEngine.Shape.OTHER -> 1f
+                GestureDecisionEngine.Shape.NO_HAND -> 0f
+                else -> confidence
+            }, palmX
         ), nowMs) else {
             swipes.reset()
             null
