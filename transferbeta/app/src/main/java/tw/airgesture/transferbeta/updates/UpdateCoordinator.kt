@@ -40,6 +40,27 @@ object UpdateCoordinator {
     private const val PERIODIC_WORK = "airgesture-daily-update-check"
     private const val NOTICE_CHANNEL = "airgesture_updates"
     private const val NOTICE_ID = 7603
+    private const val HISTORY = "update_history"
+
+    /** Local, bounded record of user-opted-in update checks and downloads. */
+    @Synchronized
+    fun record(context: Context, step: String) {
+        val pref = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+        val time = java.text.SimpleDateFormat("MM/dd HH:mm",
+            java.util.Locale.TAIWAN).format(java.util.Date())
+        val entry = "$time · " + step.take(95).replace('\n', ' ')
+        val previous = pref.getString(HISTORY, "")?.lines()
+            ?.filter { it.isNotBlank() } ?: emptyList()
+        pref.edit().putString(HISTORY,
+            (listOf(entry) + previous.filterNot { it.substringAfter(" · ") == step })
+                .take(12).joinToString("\n")).apply()
+    }
+
+    fun history(context: Context): String = context
+        .getSharedPreferences(PREF, Context.MODE_PRIVATE)
+        .getString(HISTORY, null)?.takeIf { it.isNotBlank() }
+        ?: "尚無更新檢查紀錄（自動更新預設關閉）"
+
 
     fun enabled(context: Context): Boolean =
         context.getSharedPreferences(PREF, Context.MODE_PRIVATE).getBoolean(ENABLED, false)
@@ -66,6 +87,7 @@ object UpdateCoordinator {
     fun markReady(context: Context, version: String, digest: String) {
         context.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit()
             .putString(VERSION, version).putString(DIGEST, digest).apply()
+        record(context, "v$version 已下載、簽章與 SHA-256 驗證通過；待使用者確認安裝")
     }
 
     private fun firebaseAvailable(context: Context): Boolean =
@@ -91,6 +113,10 @@ object UpdateCoordinator {
             messaging.isAutoInitEnabled = enabled
             if (enabled) messaging.subscribeToTopic(newChannel.topic)
         }
+        record(context, if (enabled)
+            "已啟用更新追蹤：" + if (newChannel == ReleaseUpdatePolicy.Channel.STABLE)
+                "正式機" else "測試機"
+            else "使用者已停用更新追蹤")
         if (enabled) {
             schedulePeriodic(context)
             checkNow(context)
@@ -125,6 +151,7 @@ object UpdateCoordinator {
 
     fun checkNow(context: Context) {
         if (!enabled(context)) return
+        record(context, "已排程檢查更新；等待符合 Wi-Fi／網路條件")
         val work = OneTimeWorkRequestBuilder<UpdateCheckWorker>()
             .setConstraints(Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.UNMETERED).build()).build()
