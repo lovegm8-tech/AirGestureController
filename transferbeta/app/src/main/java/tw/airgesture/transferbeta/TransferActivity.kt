@@ -535,11 +535,12 @@ class TransferActivity : ComponentActivity() {
                 else "已關閉操作確認動畫（手勢仍可正常使用）", true)
         }
         extraButton("查看版本更新紀錄／更新進度") {
-            val versionLog = "v1.0.9｜新增左滑手勢、右側辨識提示、多檔逐檔無損傳送、遊戲自動暫停、辨識加速與握拳 1.5 秒\\n" +
-                "v1.0.8｜隔空操作與隔空抓取整合、單檔／多裝置傳輸\\n\\n"
+            val versionLog = """
+                v1.0.9｜張掌左滑、辨識提示靠右、逐檔無損傳送、遊戲自動暫停、辨識加速、握拳 1.5 秒
+                v1.0.8｜隔空操作及隔空抓取整合、原有單檔及多人接收
+            """.trimIndent()
             AlertDialog.Builder(this).setTitle("懸浮操作 v" + BuildConfig.VERSION_NAME)
-                .setMessage(versionLog.replace("\\\\n", "\\n") +
-                    "更新流程紀錄（最近 12 筆）：\\n" +
+                .setMessage(versionLog + "\n\n更新流程紀錄（最近 12 筆）：\n" +
                     UpdateCoordinator.history(this))
                 .setPositiveButton("完成", null).show()
         }
