@@ -26,6 +26,22 @@ class GestureSequenceTest {
         assertEquals(GestureSequence.Result.SEND, events.last())
     }
 
+    @Test fun sendRequiresThreeSecondsButIncomingOfferStillNeedsOnlyTwo() {
+        val sender = GestureSequence(holdMillis = 3_000L,
+            unknownGraceMillis = 900L, receiveHoldMillis = 2_000L)
+        val tooShort = heldFist(sender, 1000L, 3900L)
+        assertEquals(30, tooShort.count { it == GestureSequence.Result.NONE })
+        assertEquals(GestureSequence.Result.SEND,
+            sender.accept("Closed_Fist", 4000L))
+        assertEquals(GestureSequence.Result.NONE,
+            sender.accept("Closed_Fist", 4500L))
+
+        val receiver = GestureSequence(holdMillis = 3_000L,
+            unknownGraceMillis = 900L, receiveHoldMillis = 2_000L)
+        assertEquals(GestureSequence.Result.RECEIVE,
+            heldFist(receiver, 1000L, 3000L, true).last())
+    }
+
     @Test fun incomingOfferMakesTheSameFistGestureReceive() {
         val events = heldFist(GestureSequence(), 1000L, 3000L, true)
         assertEquals(20, events.count { it == GestureSequence.Result.NONE })
