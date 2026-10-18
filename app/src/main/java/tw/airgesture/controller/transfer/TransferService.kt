@@ -4,6 +4,10 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.ContentValues
+import android.net.Uri
+import android.provider.MediaStore
+import android.webkit.MimeTypeMap
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
@@ -123,12 +127,47 @@ class TransferService : Service() {
             require(end.optString("status") == "end") { "Missing end frame" }
             val actual = digest.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
             require(expected == actual) { "SHA-256 mismatch" }
-            val output = File(dir, System.currentTimeMillis().toString() + "-" + name)
-            check(temp.renameTo(output)) { "Cannot commit verified file" }
-            channel.sendJson(JSONObject().put("status", "ok").put("saved", output.name))
+            val published = publishVerifiedFile(temp, name)
+            temp.delete()
+            channel.sendJson(JSONObject().put("status", "ok").put("saved", published.toString()))
         } catch (_: Exception) {
             temp.delete()
             try { channel.sendJson(JSONObject().put("error", "transfer_failed")) } catch (_: Exception) {}
+        }
+    }
+
+    /** Publish only after cryptographic verification, so Photos/Files never see partial data. */
+    private fun publishVerifiedFile(file: File, filename: String): Uri {
+        val ext = filename.substringAfterLast('.', "").lowercase()
+        val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+            ?: "application/octet-stream"
+        val (collection, folder) = when {
+            mime.startsWith("image/") -> MediaStore.Images.Media.getContentUri(
+                MediaStore.VOLUME_EXTERNAL_PRIMARY) to "Pictures/AirGrab"
+            mime.startsWith("video/") -> MediaStore.Video.Media.getContentUri(
+                MediaStore.VOLUME_EXTERNAL_PRIMARY) to "Movies/AirGrab"
+            else -> MediaStore.Downloads.getContentUri(
+                MediaStore.VOLUME_EXTERNAL_PRIMARY) to "Download/AirGrab"
+        }
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
+            put(MediaStore.MediaColumns.MIME_TYPE, mime)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, folder)
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        val uri = contentResolver.insert(collection, values)
+            ?: error("Unable to create shared media")
+        try {
+            contentResolver.openOutputStream(uri, "w")?.use { output ->
+                file.inputStream().use { it.copyTo(output, 256 * 1024) }
+            } ?: error("Unable to open destination")
+            contentResolver.update(uri, ContentValues().apply {
+                put(MediaStore.MediaColumns.IS_PENDING, 0)
+            }, null, null)
+            return uri
+        } catch (e: Exception) {
+            contentResolver.delete(uri, null, null)
+            throw e
         }
     }
 
