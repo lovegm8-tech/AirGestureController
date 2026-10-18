@@ -78,7 +78,7 @@ class IosLinkPairingActivity : ComponentActivity() {
                 Toast.makeText(this, "已複製，請勿分享給陌生人", Toast.LENGTH_LONG).show()
             }
         }
-        button("開啟 iPhone 接收／Android 接收服務") {
+        button("啟動 iPhone 雙向傳輸服務") {
             startReceiver()
             Toast.makeText(this, "區域網路服務已啟動", Toast.LENGTH_SHORT).show()
         }
@@ -86,7 +86,7 @@ class IosLinkPairingActivity : ComponentActivity() {
             startService(Intent(this, TransferService::class.java).setAction(TransferService.STOP))
         }
         label("Google、Chrome、YouTube、Facebook 可從各自分享選單選「隔空抓取」。影片平台一般僅提供網址，不是影片原檔。")
-        label("接收到的檔案目前保存於本 App 專屬下載資料夾；照片、影片原始位元不重新壓縮。")
+        label("經驗證的 iPhone 照片、影片會存入 Android 媒體庫，其他檔案則存入 Download/AirGrab；不重新壓縮。")
         setContentView(root)
     }
 

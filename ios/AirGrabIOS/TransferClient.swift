@@ -211,7 +211,7 @@ final class TransferModel: ObservableObject {
             do {
                 let scope = file.startAccessingSecurityScopedResource()
                 defer { if scope { file.stopAccessingSecurityScopedResource() } }
-                let size = Int64((try FileManager.default.attributesOfItem(atPath: file.path))[.size] as? UInt64 ?? 0)
+                let size = ((try FileManager.default.attributesOfItem(atPath: file.path))[.size] as? NSNumber)?.int64Value ?? 0
                 guard size <= 10 * 1024 * 1024 * 1024 else { throw AirGrabError.tooLarge }
                 var sha = SHA256()
                 let reader = try FileHandle(forReadingFrom: file)

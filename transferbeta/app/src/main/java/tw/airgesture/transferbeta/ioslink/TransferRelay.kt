@@ -2,6 +2,8 @@ package tw.airgesture.transferbeta.ioslink
 
 import android.content.Context
 import java.io.File
+import android.os.StatFs
+import tw.airgesture.transferbeta.core.TransferPolicy
 import java.util.concurrent.Executors
 
 /** Adapter between current Floating Control grab and iPhone LAN transport. */
@@ -18,6 +20,9 @@ object TransferRelay {
 
     fun offerFile(context: Context, source: File, name: String): Boolean {
         if (!isEnabled(context) || !source.isFile || source.length() <= 0) return false
+        // Do not stage a second full copy when local storage is insufficient.
+        val storage = StatFs(context.filesDir.absolutePath)
+        if (!TransferPolicy.hasRoom(storage.availableBytes, source.length())) return false
         val app = context.applicationContext
         queue.execute {
             // Staged copy remains intact even if the original Android Nearby

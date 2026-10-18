@@ -22,7 +22,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
 /**
- * Explicitly started, opt-in local receiver. No traffic leaves the local network.
+ * Explicitly started, opt-in local receiver. No public internet/cloud transfer.
  * This is a preview implementation, not yet connected to the existing camera gestures.
  */
 class TransferService : Service() {
@@ -35,7 +35,6 @@ class TransferService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == STOP) { stopSelf(); return START_NOT_STICKY }
         if (active.compareAndSet(false, true)) {
-            isServing = true
             val channel = "airgrab_local"
             (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
                 .createNotificationChannel(NotificationChannel(channel, "隔空抓取區域網路傳輸",
@@ -46,6 +45,7 @@ class TransferService : Service() {
                 .setSmallIcon(android.R.drawable.stat_sys_download_done)
                 .build()
             startForeground(4701, notification)
+            isServing = true
             thread(name = "airgrab-listener", isDaemon = true) {
                 try {
                     ServerSocket(PORT).use { server ->
