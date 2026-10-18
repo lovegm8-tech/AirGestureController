@@ -65,13 +65,24 @@ class FloatingControlRouter(pointerDwellMs: Long = 2000L, sensitivity: Int = 1) 
         indexY: Float?,
         nowMs: Long,
         receivingOffer: Boolean,
-        youtubeForeground: Boolean
+        youtubeForeground: Boolean,
+        rawCategory: String? = category
     ): Decision {
         val shape = if (confidence >= .58f) category else null
+        // Preserve unclassified-but-localized motion AFTER a genuine open palm.
+        // Never reinterpret an identified fist, pointer, or other pose as motion.
+        val validHandPosition = palmX != null && palmY != null &&
+            palmX.isFinite() && palmY.isFinite() &&
+            palmX in 0f..1f && palmY in 0f..1f
+        val mayTrackUncertainHand = validHandPosition &&
+            (rawCategory == null || rawCategory.isBlank() ||
+                rawCategory == "None" || rawCategory == "Open_Palm")
         val gestureShape = when (shape) {
             "Open_Palm" -> GestureDecisionEngine.Shape.OPEN_PALM
             "Closed_Fist" -> GestureDecisionEngine.Shape.CLOSED_FIST
-            null -> GestureDecisionEngine.Shape.NO_HAND
+            null, "None" -> if (mayTrackUncertainHand)
+                GestureDecisionEngine.Shape.TRACKED_HAND
+                else GestureDecisionEngine.Shape.NO_HAND
             else -> GestureDecisionEngine.Shape.OTHER
         }
         val pointerResult = if (shape == "Pointing_Up" && confidence >= .65f &&
@@ -160,7 +171,8 @@ class FloatingControlRouter(pointerDwellMs: Long = 2000L, sensitivity: Int = 1) 
         // explicit fist -> palm confirmation.
         val swipeAction = if (action == null && fistSince < 0L &&
             !receivingOffer) swipes.accept(GestureDecisionEngine.Frame(
-            gestureShape, palmY, if (shape == null) 0f else confidence, palmX
+            gestureShape, palmY, if (gestureShape == GestureDecisionEngine.Shape.TRACKED_HAND)
+                1f else if (shape == null) 0f else confidence, palmX
         ), nowMs) else {
             swipes.reset()
             null
