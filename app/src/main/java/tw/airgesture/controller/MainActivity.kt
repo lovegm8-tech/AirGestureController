@@ -94,6 +94,11 @@ class MainActivity : ComponentActivity() {
         startButton = button("② 啟動前鏡頭辨識") {
             if (CameraGestureService.running) stopControl() else checkAndStart()
         }
+        label("跨系統傳輸（測試功能）", 19f, true)
+        button("隔空抓取：配對 iPhone 14") {
+            startActivity(Intent(this, tw.airgesture.controller.transfer.TransferActivity::class.java))
+        }
+        label("此功能需自行開啟，只透過區域網路交換選取的檔案與網址；不會傳送前鏡頭影像。", 13f)
         label("操作對照", 19f, true)
         label("✋ 張掌向上移動 → 螢幕向上滑\n✋ 張掌向下移動 → 螢幕向下滑\n✋ 張掌向右移動 → 左邊緣右滑返回\n☝️ 只伸食指 → 控制懸浮游標，停穩所選秒數點擊\n✊ YouTube：張掌→握拳立即播放／暫停；其他 App 保留原本握拳點擊", 16f)
         label("重複操作：手掌停穩約 0.5 秒即可準備下一次手勢。食指點擊後需移動到新位置，避免停留時連點。", 13f)
@@ -243,7 +248,7 @@ class MainActivity : ComponentActivity() {
             Settings.save(this, sensitivity.selectedItemPosition, (500 + cooldown.progress * 100).toLong(), performance.selectedItemPosition, cursorRange.selectedItemPosition, tiltedPalmAssist.isChecked, fastSwipeAssist.isChecked, screenWake.isChecked, wakePowerMode.selectedItemPosition, pointerDwell.selectedItemPosition, longFistDuration.selectedItemPosition, animatedHandFeedback.isChecked, smartLitPower.isChecked, palmPositionOverlay.isChecked, motionStandby.isChecked, lowResolutionActive.isChecked)
             toast("已儲存；重新啟動辨識後生效")
         }
-        label("隱私：App 不要求網路權限，影像只在本機暫時分析，不會錄影或上傳。\n啟動後可從通知列隨時停止前鏡頭。", 13f)
+        label("隱私：前鏡頭影像只在本機辨識，不會錄影或上傳。新加入的區域網路權限僅用於使用者主動啟用的隔空抓取傳輸。\n啟動後可從通知列隨時停止前鏡頭。", 13f)
     }
 
     override fun onResume() {
