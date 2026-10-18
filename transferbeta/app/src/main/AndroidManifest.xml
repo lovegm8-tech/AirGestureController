@@ -19,6 +19,14 @@
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE"/>
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"/>
     <uses-feature android:name="android.hardware.camera.front" android:required="true"/>
+    <!-- Visibility of launchable apps is enough to query CATEGORY_GAME;
+         no broad QUERY_ALL_PACKAGES or usage-access permission needed. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN"/>
+            <category android:name="android.intent.category.LAUNCHER"/>
+        </intent>
+    </queries>
     <application
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
