@@ -9,6 +9,7 @@ object FloatingSettings {
     fun actionFeedback(c:Context)=pref(c).getBoolean("action_feedback_enabled",true)
     fun power(c:Context)=pref(c).getInt("power_mode",1).coerceIn(0,2)
     fun nearby(c:Context)=pref(c).getBoolean("nearby_enabled",true)
+    fun pauseInGames(c:Context)=pref(c).getBoolean("pause_in_games",true)
     fun sensitivity(c:Context)=pref(c).getInt("swipe_sensitivity",1).coerceIn(0,2)
     fun youtubeShortsMode(c:Context)=pref(c).getInt("youtube_shorts_mode",0).coerceIn(0,2)
     fun saveInt(c:Context,k:String,v:Int)=pref(c).edit().putInt(k,v).apply()
