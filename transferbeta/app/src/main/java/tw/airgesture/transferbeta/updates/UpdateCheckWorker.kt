@@ -28,18 +28,29 @@ class UpdateCheckWorker(appContext: Context, parameters: WorkerParameters) :
 
     override fun doWork(): Result {
         if (!UpdateCoordinator.enabled(applicationContext)) return Result.success()
+        UpdateCoordinator.record(applicationContext, "開始檢查 GitHub Releases")
         val connectivity = applicationContext
             .getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val network = connectivity.activeNetwork ?: return Result.retry()
-        val caps = connectivity.getNetworkCapabilities(network) ?: return Result.retry()
-        if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED))
+        val network = connectivity.activeNetwork ?: run {
+            UpdateCoordinator.record(applicationContext, "目前無網路，稍後重試")
             return Result.retry()
+        }
+        val caps = connectivity.getNetworkCapabilities(network) ?: return Result.retry()
+        if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)) {
+            UpdateCoordinator.record(applicationContext, "等待 Wi-Fi／非計量網路")
+            return Result.retry()
+        }
         return try {
             val channel = UpdateCoordinator.channel(applicationContext)
             val installed = applicationContext.packageManager
                 .getPackageInfo(applicationContext.packageName, 0).versionName ?: return Result.failure()
             val candidate = chooseRelease(fetchReleases(), channel, installed)
-                ?: return Result.success()
+                ?: run {
+                    UpdateCoordinator.record(applicationContext,
+                        "檢查完成：目前已是最新版本 v$installed")
+                    return Result.success()
+                }
+            UpdateCoordinator.record(applicationContext, "發現新版本 ${candidate.tag}")
             val file = UpdateCoordinator.readyFile(applicationContext)
             if (UpdateCoordinator.readyVersion(applicationContext) == candidate.tag &&
                 UpdateCoordinator.readyDigest(applicationContext) == candidate.digest &&
@@ -48,19 +59,24 @@ class UpdateCheckWorker(appContext: Context, parameters: WorkerParameters) :
                 return Result.success()
             }
             UpdateCoordinator.clearReady(applicationContext)
+            UpdateCoordinator.record(applicationContext, "開始下載 ${candidate.tag}")
             val parent = file.parentFile ?: return Result.failure()
             if (!parent.isDirectory && !parent.mkdirs()) return Result.failure()
             val tmp = File(parent, "download.part")
             try {
                 download(candidate, tmp)
-                if (!verifyApk(applicationContext, tmp, candidate.tag, candidate.digest))
+                if (!verifyApk(applicationContext, tmp, candidate.tag, candidate.digest)) {
+                    UpdateCoordinator.record(applicationContext, "更新檔簽章或 SHA-256 驗證失敗")
                     return Result.failure()
+                }
                 if (!tmp.renameTo(file)) return Result.retry()
                 UpdateCoordinator.markReady(applicationContext, candidate.tag, candidate.digest)
                 UpdateCoordinator.notifyReady(applicationContext, candidate.tag)
                 Result.success()
             } finally { tmp.delete() }
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            UpdateCoordinator.record(applicationContext,
+                "更新檢查失敗：" + (error.message ?: "網路或伺服器異常").take(55))
             if (runAttemptCount < 3) Result.retry() else Result.failure()
         }
     }
@@ -129,6 +145,7 @@ class UpdateCheckWorker(appContext: Context, parameters: WorkerParameters) :
             require(connection.contentLengthLong == -1L ||
                 connection.contentLengthLong == candidate.size)
             var total = 0L
+            var lastPercent = -1
             val md = MessageDigest.getInstance("SHA-256")
             connection.inputStream.use { input ->
                 tmp.outputStream().use { output ->
@@ -137,6 +154,16 @@ class UpdateCheckWorker(appContext: Context, parameters: WorkerParameters) :
                         val count = input.read(bytes)
                         if (count < 0) break
                         total += count
+                        if (candidate.size > 0L) {
+                            val pct = ((total.toDouble() / candidate.size) * 100).toInt()
+                                .coerceIn(0, 100)
+                            val band = (pct / 25) * 25
+                            if (band > lastPercent && band > 0) {
+                                lastPercent = band
+                                UpdateCoordinator.record(applicationContext,
+                                    "下載 ${candidate.tag}：$band%")
+                            }
+                        }
                         require(total <= candidate.size &&
                             total <= ReleaseUpdatePolicy.MAX_APK_BYTES)
                         md.update(bytes, 0, count)
