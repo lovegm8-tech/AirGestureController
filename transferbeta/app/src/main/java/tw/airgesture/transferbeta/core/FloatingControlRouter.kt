@@ -4,8 +4,9 @@ import tw.airgesture.transferbeta.GestureSequence
 
 /**
  * Routes one MediaPipe camera stream to either touch control or transfer.
- * A two-second fist wins over tapping. Short taps are sent on RELEASE only,
- * never during the two-second hold. No Android dependency: test on JVM.
+ * Grabbing requires 3 seconds; confirming a received offer stays at 2 seconds.
+ * Short taps are sent on RELEASE only, never during a long fist hold.
+ * No Android dependency: test on JVM.
  */
 class FloatingControlRouter(pointerDwellMs:Long=2000L, sensitivity:Int=1) {
     enum class Command { SEND, RECEIVE, SWIPE_UP, SWIPE_DOWN, SWIPE_BACK, TAP, MEDIA_PLAY_PAUSE }
@@ -14,7 +15,8 @@ class FloatingControlRouter(pointerDwellMs:Long=2000L, sensitivity:Int=1) {
         val pointer: PointerDwellEngine.Result? = null
     )
 
-    private val fist = GestureSequence(holdMillis = 2_000L, unknownGraceMillis = 900L)
+    private val fist = GestureSequence(holdMillis = 3_000L,
+        unknownGraceMillis = 900L, receiveHoldMillis = 2_000L)
     private val swipes = GestureDecisionEngine(
         GestureDecisionEngine.Options(fastSwipeAssistEnabled = true,
             minimumConfidence = .58f,
