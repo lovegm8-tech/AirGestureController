@@ -49,11 +49,18 @@ final class ShareViewController: UIViewController {
 
         for provider in providers {
             let types = provider.registeredTypeIdentifiers
-            let fileType = types.first { identifier in
+            // Prefer an actual media/file representation; URL-only providers must remain URLs.
+            let visualType = types.first { identifier in
                 guard let type = UTType(identifier) else { return false }
                 return type.conforms(to: .image) || type.conforms(to: .movie)
-                    || type.conforms(to: .pdf) || type.conforms(to: .data)
+                    || type.conforms(to: .pdf)
             }
+            let hasWebURL = provider.hasItemConformingToTypeIdentifier(UTType.url.identifier)
+            let fileType = visualType ?? (hasWebURL ? nil : types.first { identifier in
+                guard let type = UTType(identifier) else { return false }
+                return type.conforms(to: .data)
+                    && !type.conforms(to: .plainText)
+            })
             if let type = fileType {
                 group.enter()
                 provider.loadFileRepresentation(forTypeIdentifier: type) { input, _ in
