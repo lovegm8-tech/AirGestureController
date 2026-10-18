@@ -70,7 +70,7 @@ class AirGrabBundleTest {
                 AirGrabBundle.Source("b.jpg") { ByteArrayInputStream(byteArrayOf(2)) }
             ))
             try {
-                AirGrabBundle.unpack(bundle.inputStream(), 3) { ByteArrayOutputStream() }
+                AirGrabBundle.unpack(bundle.inputStream(), 3, { ByteArrayOutputStream() })
                 fail("wrong manifest count must fail")
             } catch (_: IllegalArgumentException) { }
         } finally { bundle.delete() }
@@ -85,10 +85,10 @@ class AirGrabBundleTest {
             zip.closeEntry()
         }
         try {
-            AirGrabBundle.unpack(ByteArrayInputStream(bytes.toByteArray()), 2) {
+            AirGrabBundle.unpack(ByteArrayInputStream(bytes.toByteArray()), 2, {
                 fail("no destination may be opened for path traversal")
                 ByteArrayOutputStream()
-            }
+            })
             fail("unsafe path must fail")
         } catch (_: IllegalArgumentException) { }
     }
