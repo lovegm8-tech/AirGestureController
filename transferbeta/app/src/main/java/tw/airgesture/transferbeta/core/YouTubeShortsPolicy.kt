@@ -13,6 +13,15 @@ object YouTubeShortsPolicy {
     const val FORCE_SCREEN_TAP = 1
     const val MEDIA_KEY_ONLY = 2
 
+    fun isPlayerClass(className: String?): Boolean {
+        if (className == null) return false
+        val value = className.lowercase()
+        return value.contains("reelwatch") ||
+            value.contains("reelplayer") ||
+            value.contains("shortsplayer") ||
+            value.contains("shortswatch")
+    }
+
     fun isPlayerResource(viewId: String?): Boolean {
         if (viewId == null) return false
         val id = viewId.substringAfterLast('/').lowercase()
