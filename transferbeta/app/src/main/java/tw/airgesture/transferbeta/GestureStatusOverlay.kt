@@ -161,7 +161,8 @@ class GestureStatusOverlay(private val context: Context) {
                         WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
                     PixelFormat.TRANSLUCENT
                 ).apply {
-                    gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                    gravity = Gravity.TOP or Gravity.RIGHT
+                    x = dp(8) // Align all 3 recognition badges to the far right.
                     y = dp(186)
                 }
                 wm.addView(view, params)
