@@ -1050,13 +1050,19 @@ class MultiPeerTransferManager(private val app: Context) {
                         } else if (batch != null && batch.policy.bytesFinished(id)) {
                             ui("影片／檔案已送出，等待 " + p.hint + " 驗證 SHA-256")
                             val payloadId = update.payloadId
+                            // Large original bundles need two sequential
+                            // SHA-256 checks and MediaStore extraction. Give
+                            // slow receivers more time without stalling forever.
+                            val sizeMiB = (batch.file?.length() ?: 0L) / (1024L * 1024L)
+                            val verifyTimeout = (60_000L + sizeMiB * 170L)
+                                .coerceAtMost(600_000L)
                             main.postDelayed({
                                 if (active === batch && p.outgoingPayload == payloadId &&
                                     batch.policy.transferring() == id &&
                                     batch.policy.state(id) == MultiReceiverBatch.State.VERIFYING) {
                                     failRecipient(batch, id, "接收端驗證逾時")
                                 }
-                            }, 60_000L)
+                            }, verifyTimeout)
                         }
                     }
                     PayloadTransferUpdate.Status.FAILURE,
