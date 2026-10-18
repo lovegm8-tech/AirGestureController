@@ -959,6 +959,7 @@ class MultiPeerTransferManager(private val app: Context) {
                             incomingQueueAcknowledged = true
                             incomingPayload = payload.id
                             incomingSpeed.reset()
+                            p.lastProgress = -1
                             if (incomingFinished) verifyFile()
                         }
                     }
