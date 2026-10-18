@@ -38,7 +38,7 @@ class GestureTestActivity : Activity() {
             gravity = Gravity.CENTER
         })
         root.addView(TextView(this).apply {
-            text = "張掌上／下揮動：捲動下方清單\n張掌向右揮：返回上一頁\n短握拳放開：點擊畫面中央\n食指停留：點擊游標指向的項目\n跨裝置抓取請回到相簿測試，必須先連線接收設備。"
+            text = "張掌上／下揮動：捲動下方清單\n張掌向右揮：返回上一頁\n直接握拳保持 1.5 秒：點擊畫面中央\n食指停留：點擊游標指向的項目\n跨裝置抓取請回到相簿測試，必須先連線接收設備。"
             textSize = 15f
             setTextColor(0xff293950.toInt())
             setPadding(0, dp(14), 0, dp(14))
