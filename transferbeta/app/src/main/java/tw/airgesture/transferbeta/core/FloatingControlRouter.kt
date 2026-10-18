@@ -1,59 +1,59 @@
 package tw.airgesture.transferbeta.core
 
-import tw.airgesture.transferbeta.GestureSequence
-
 /**
- * Routes one MediaPipe camera stream to either touch control or transfer.
- * Grabbing requires 3 seconds; confirming a received offer stays at 2 seconds.
- * Short taps are sent on RELEASE only, never during a long fist hold.
- * No Android dependency: test on JVM.
+ * One MediaPipe stream controls gestures and file transfer.
+ * - Palm -> fist (two confirmed observations each): send, once
+ * - Direct fist held 2 s: tap, or YouTube media play/pause
+ * - Incoming offer: fist -> palm: receive, never tap/send
+ * The gesture controller does not raise AI/camera FPS.
  */
-class FloatingControlRouter(pointerDwellMs:Long=2000L, sensitivity:Int=1) {
+class FloatingControlRouter(pointerDwellMs: Long = 2000L, sensitivity: Int = 1) {
     enum class Command { SEND, RECEIVE, SWIPE_UP, SWIPE_DOWN, SWIPE_BACK, TAP, MEDIA_PLAY_PAUSE }
     data class Decision(
         val command: Command? = null,
         val pointer: PointerDwellEngine.Result? = null
     )
 
-    private val fist = GestureSequence(holdMillis = 3_000L,
-        unknownGraceMillis = 900L, receiveHoldMillis = 2_000L)
     private val swipes = GestureDecisionEngine(
         GestureDecisionEngine.Options(fastSwipeAssistEnabled = true,
             minimumConfidence = .58f,
-            swipeDistance = when(sensitivity){ 0->.18f;2->.09f;else->.13f })
+            swipeDistance = when (sensitivity) { 0 -> .18f; 2 -> .09f; else -> .13f })
     )
     private val pointer = PointerDwellEngine(dwellMs = pointerDwellMs)
-    private var palmFrames = 0
-    private var lastPalm = -1L
-    private var armed = false
-    private var shortFistSince = -1L
-    private var lastFist = -1L
-    private var fistFrames = 0
-    private var releasedFrames = 0
-    private var consumed = false
+
+    private var palmSamples = 0
+    private var lastPalmAt = -1L
+    private var palmArmed = false
+    private var fistSince = -1L
+    private var lastFistAt = -1L
+    private var fistSamples = 0
+    private var grabCandidate = false
+    private var fistConsumed = false
+    private var releasePalmSamples = 0
+    private var otherSamples = 0
 
     fun reset() {
-        fist.reset()
         swipes.reset()
         pointer.reset()
-        palmFrames = 0
-        lastPalm = -1L
-        armed = false
-        shortFistSince = -1L
-        lastFist = -1L
-        fistFrames = 0
-        releasedFrames = 0
-        consumed = false
+        palmSamples = 0
+        lastPalmAt = -1L
+        palmArmed = false
+        fistSince = -1L
+        lastFistAt = -1L
+        fistSamples = 0
+        grabCandidate = false
+        fistConsumed = false
+        releasePalmSamples = 0
+        otherSamples = 0
     }
 
-    private fun clearShort() {
-        shortFistSince = -1L
-        lastFist = -1L
-        fistFrames = 0
-        releasedFrames = 0
-        consumed = false
-        palmFrames = 0
-        armed = false
+    private fun clearFist() {
+        fistSince = -1L
+        lastFistAt = -1L
+        fistSamples = 0
+        grabCandidate = false
+        fistConsumed = false
+        releasePalmSamples = 0
     }
 
     fun accept(
@@ -67,29 +67,14 @@ class FloatingControlRouter(pointerDwellMs:Long=2000L, sensitivity:Int=1) {
         receivingOffer: Boolean,
         youtubeForeground: Boolean
     ): Decision {
-        // This must match the hand-recognition badge and the service's pose threshold.
         val shape = if (confidence >= .58f) category else null
-        val hold = fist.accept(
-            if (shape == "Closed_Fist" || shape == "Open_Palm") shape else "",
-            nowMs, receiveAvailable = receivingOffer
-        )
-        val transfer = when (hold) {
-            GestureSequence.Result.SEND -> Command.SEND
-            GestureSequence.Result.RECEIVE -> Command.RECEIVE
-            else -> null
-        }
-        if (transfer != null) consumed = true
-
-        val s = when (shape) {
+        val gestureShape = when (shape) {
             "Open_Palm" -> GestureDecisionEngine.Shape.OPEN_PALM
             "Closed_Fist" -> GestureDecisionEngine.Shape.CLOSED_FIST
             null -> GestureDecisionEngine.Shape.NO_HAND
             else -> GestureDecisionEngine.Shape.OTHER
         }
-        val swipe = swipes.accept(GestureDecisionEngine.Frame(
-            s, palmY, if (shape == null) 0f else confidence, palmX
-        ), nowMs)
-        val cursor = if (shape == "Pointing_Up" && confidence >= .65f &&
+        val pointerResult = if (shape == "Pointing_Up" && confidence >= .65f &&
             indexX != null && indexY != null) {
             pointer.accept(indexX, indexY, nowMs)
         } else {
@@ -97,63 +82,101 @@ class FloatingControlRouter(pointerDwellMs:Long=2000L, sensitivity:Int=1) {
             null
         }
 
-        var shortClick: Command? = null
+        var action: Command? = null
         when (shape) {
             "Open_Palm" -> {
-                if (shortFistSince >= 0L || consumed) {
-                    releasedFrames++
-                    if (releasedFrames >= 2) {
-                        if (!consumed && shortFistSince >= 0L &&
-                            fistFrames >= 2 && nowMs >= lastFist &&
-                            nowMs - lastFist <= 650L &&
-                            nowMs - shortFistSince < 2_000L) {
-                            shortClick = if (youtubeForeground)
-                                Command.MEDIA_PLAY_PAUSE else Command.TAP
+                otherSamples = 0
+                // Two palm readings prevent a single noisy frame from releasing
+                // the fist or arming a file grab.
+                palmSamples = if (lastPalmAt >= 0L &&
+                    nowMs >= lastPalmAt && nowMs - lastPalmAt <= 650L) palmSamples + 1 else 1
+                lastPalmAt = nowMs
+                if (fistSince >= 0L) {
+                    releasePalmSamples++
+                    if (releasePalmSamples >= 2) {
+                        if (!fistConsumed && receivingOffer && fistSamples >= 2 &&
+                            nowMs >= lastFistAt && nowMs - lastFistAt <= 1100L) {
+                            action = Command.RECEIVE
                         }
-                        clearShort()
+                        clearFist()
+                        // The palm immediately after a fist is a RELEASE,
+                        // not a new file-grab preparation.
+                        palmArmed = false
+                        palmSamples = 0
+                        swipes.reset()
                     }
-                } else {
-                    palmFrames = if (lastPalm >= 0L && nowMs - lastPalm <= 550L)
-                        palmFrames + 1 else 1
-                    if (palmFrames >= 2) armed = true
+                } else if (palmSamples >= 2) {
+                    palmArmed = true
                 }
-                lastPalm = nowMs
             }
             "Closed_Fist" -> {
-                palmFrames = 0
-                releasedFrames = 0
-                if (shortFistSince < 0L && armed && lastPalm >= 0L &&
-                    nowMs >= lastPalm && nowMs - lastPalm <= 950L) {
-                    shortFistSince = nowMs
+                otherSamples = 0
+                releasePalmSamples = 0
+                if (fistSince < 0L) {
+                    fistSince = nowMs
+                    fistSamples = 0
+                    grabCandidate = palmArmed && lastPalmAt >= 0L &&
+                        nowMs >= lastPalmAt && nowMs - lastPalmAt <= 950L
+                    palmArmed = false
+                } else if (lastFistAt < 0L || nowMs < lastFistAt ||
+                    nowMs - lastFistAt > 900L) {
+                    // A genuine tracking interruption starts the dwell again;
+                    // a previously-fired fist remains latched until released.
+                    fistSince = nowMs
+                    fistSamples = 0
+                    if (!fistConsumed) grabCandidate = false
                 }
-                if (shortFistSince >= 0L && !consumed) {
-                    if (lastFist >= 0L && nowMs - lastFist > 550L) fistFrames = 0
-                    fistFrames++
-                    lastFist = nowMs
+                fistSamples++
+                lastFistAt = nowMs
+                palmSamples = 0
+                if (!fistConsumed && fistSamples >= 2) {
+                    if (grabCandidate && !receivingOffer) {
+                        // Explicit palm -> fist has priority even if held >2 s.
+                        action = Command.SEND
+                        fistConsumed = true
+                    } else if (!receivingOffer && !grabCandidate &&
+                        nowMs >= fistSince && nowMs - fistSince >= 2_000L) {
+                        action = if (youtubeForeground) Command.MEDIA_PLAY_PAUSE else Command.TAP
+                        fistConsumed = true
+                    }
                 }
             }
             else -> {
-                if (lastFist >= 0L && nowMs - lastFist > 650L) clearShort()
-                if (lastPalm >= 0L && nowMs - lastPalm > 650L) {
-                    palmFrames = 0
-                    armed = false
+                // Tracking blips must not turn into a fresh palm -> fist.
+                if (lastPalmAt >= 0L && (nowMs < lastPalmAt ||
+                        nowMs - lastPalmAt > 950L)) {
+                    palmSamples = 0
+                    palmArmed = false
                 }
+                releasePalmSamples = 0
+                otherSamples++
+                if (otherSamples >= 2 && fistSince >= 0L &&
+                    lastFistAt >= 0L && nowMs >= lastFistAt &&
+                    nowMs - lastFistAt >= 850L) clearFist()
             }
         }
 
-        if (transfer != null) return Decision(transfer)
-        if (shortClick != null) return Decision(shortClick)
-        val swipeCommand = when (swipe) {
+        // An incoming offer blocks tapping and grabbing while awaiting its
+        // explicit fist -> palm confirmation.
+        val swipeAction = if (action == null && fistSince < 0L &&
+            !receivingOffer) swipes.accept(GestureDecisionEngine.Frame(
+            gestureShape, palmY, if (shape == null) 0f else confidence, palmX
+        ), nowMs) else {
+            swipes.reset()
+            null
+        }
+        if (action == null) action = when (swipeAction) {
             GestureDecisionEngine.Action.SWIPE_UP -> Command.SWIPE_UP
             GestureDecisionEngine.Action.SWIPE_DOWN -> Command.SWIPE_DOWN
             GestureDecisionEngine.Action.SWIPE_BACK -> Command.SWIPE_BACK
-            else -> null // Prevent original engine's early/double fist clicks.
+            else -> null
         }
-        if (swipeCommand != null) {
-            armed = false
-            shortFistSince = -1L
-            return Decision(swipeCommand)
+        if (action == Command.SWIPE_UP || action == Command.SWIPE_DOWN ||
+            action == Command.SWIPE_BACK) {
+            // Swiping an open palm must not arm a subsequent accidental grab.
+            palmArmed = false
+            palmSamples = 0
         }
-        return Decision(pointer = cursor)
+        return Decision(command = action, pointer = pointerResult)
     }
 }
