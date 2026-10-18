@@ -10,7 +10,9 @@ class AdaptivePowerPolicy(
     private val deepIdleIntervalMs: Long = 2100L,
     private val deepIdleAfterMs: Long = 60_000L,
     private val activeIntervalMs: Long = 165L,
-    private val activeKeepAliveMs: Long = 2200L
+    private val activeKeepAliveMs: Long = 2200L,
+    private val firstHandBurstMs: Long = 900L,
+    private val returningHandGapMs: Long = 650L
 ) {
     enum class Mode { STOPPED, ECO, ACTIVE }
     @Volatile private var policy=1
@@ -21,17 +23,25 @@ class AdaptivePowerPolicy(
     private var lastInference = Long.MIN_VALUE
     @Volatile private var activeUntil = Long.MIN_VALUE
     @Volatile private var idleSince = Long.MIN_VALUE
+    // Briefly accelerate only when a hand enters/re-enters the camera.
+    // Continuous hand tracking returns to normal ACTIVE cadence.
+    private var lastHandSeenAt = Long.MIN_VALUE
+    private var recognitionBurstUntil = Long.MIN_VALUE
 
     fun start() {
         enabled = true
         lastInference = Long.MIN_VALUE
         idleSince = Long.MIN_VALUE
+        lastHandSeenAt = Long.MIN_VALUE
+        recognitionBurstUntil = Long.MIN_VALUE
     }
     fun stop() {
         enabled = false
         receiverAwaiting = false
         idleSince = Long.MIN_VALUE
         activeUntil = Long.MIN_VALUE
+        lastHandSeenAt = Long.MIN_VALUE
+        recognitionBurstUntil = Long.MIN_VALUE
     }
 
     /** Incoming transfer offers must remain instantly responsive. */
@@ -41,7 +51,11 @@ class AdaptivePowerPolicy(
         screenOn = on
         lastInference = Long.MIN_VALUE
         idleSince = Long.MIN_VALUE
-        if (!on) activeUntil = Long.MIN_VALUE
+        if (!on) {
+            activeUntil = Long.MIN_VALUE
+            lastHandSeenAt = Long.MIN_VALUE
+            recognitionBurstUntil = Long.MIN_VALUE
+        }
     }
 
     fun mode(nowMs: Long): Mode = when {
@@ -66,7 +80,12 @@ class AdaptivePowerPolicy(
         }
         val interval = when (mode(nowMs)) {
             Mode.STOPPED -> return false
-            Mode.ACTIVE -> when(policy){0->220L;2->115L;else->activeIntervalMs}
+            Mode.ACTIVE -> when(policy){
+                0 -> 220L
+                2 -> 115L
+                else -> if (recognitionBurstUntil != Long.MIN_VALUE &&
+                    nowMs <= recognitionBurstUntil) 115L else activeIntervalMs
+            }
             Mode.ECO -> {
                 if (idleSince == Long.MIN_VALUE || nowMs < idleSince)
                     idleSince = nowMs
@@ -83,6 +102,13 @@ class AdaptivePowerPolicy(
 
     fun observeHand(found: Boolean, nowMs: Long) {
         if (found && enabled && screenOn) {
+            // The first hand can be detected before Open_Palm / Closed_Fist
+            // confidence settles. A short burst reduces the NEXT sample wait.
+            val returning = lastHandSeenAt == Long.MIN_VALUE ||
+                nowMs < lastHandSeenAt ||
+                nowMs - lastHandSeenAt >= returningHandGapMs
+            if (returning) recognitionBurstUntil = nowMs + firstHandBurstMs
+            lastHandSeenAt = nowMs
             idleSince = nowMs
             activeUntil = nowMs + activeKeepAliveMs
         }
