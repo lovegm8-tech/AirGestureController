@@ -22,6 +22,26 @@ object ShareEntryPolicy {
             .filter { it.startsWith("content://", ignoreCase = true) }
             .distinct().singleOrNull()
     }
+    /**
+     * Multi-share must come from the explicit Android EXTRA_STREAM list.
+     * ClipData may contain thumbnails and other supplementary grants.
+     * Only when EXTRA_STREAM is absent do we accept distinct ClipData URIs.
+     */
+    fun chooseMultipleOriginals(
+        action: String?,
+        explicitStreams: List<String?>?,
+        clipUris: List<String?>
+    ): List<String>? {
+        if (action != "android.intent.action.SEND_MULTIPLE") return null
+        val picked = explicitStreams ?: clipUris
+        if (picked.size !in 2..AirGrabBundle.MAX_FILES) return null
+        if (picked.any { it == null || !it.startsWith("content://", ignoreCase = true) })
+            return null
+        val values = picked.filterNotNull()
+        if (values.distinct().size != values.size) return null
+        return values
+    }
+
     fun shouldHandleSilently(action: String?): Boolean =
         action == "android.intent.action.SEND"
 }
