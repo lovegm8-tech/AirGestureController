@@ -4,7 +4,7 @@ import kotlin.math.abs
 
 /** Android-independent state machine: steady-palm rearm can be tested on the JVM. */
 class GestureDecisionEngine(private val options: Options = Options()) {
-    enum class Shape { OPEN_PALM, CLOSED_FIST, OTHER, NO_HAND }
+    enum class Shape { OPEN_PALM, CLOSED_FIST, TRACKED_HAND, OTHER, NO_HAND }
     enum class Action { SWIPE_UP, SWIPE_DOWN, SWIPE_BACK, SWIPE_LEFT, TAP_CENTER, MEDIA_PLAY_PAUSE }
     data class Frame(val shape: Shape, val palmY: Float? = null, val confidence: Float = 1f, val palmX: Float? = null)
     data class Options(
@@ -32,6 +32,8 @@ class GestureDecisionEngine(private val options: Options = Options()) {
     private var anchorX: Float? = null
     private var anchorTime = 0L
     private var lastOpenTime = Long.MIN_VALUE
+    // Last usable landmark coordinate, including uncertain pose frames after a palm.
+    private var lastMotionFrameMs = Long.MIN_VALUE
     private var lastHandTime = Long.MIN_VALUE
     private var lastTime = Long.MIN_VALUE
     private var openFrames = 0
@@ -66,12 +68,12 @@ class GestureDecisionEngine(private val options: Options = Options()) {
             // FIST frame must still arrive within the maximum frame gap.
             if (longFistPending && lastConfirmedFistMs != Long.MIN_VALUE &&
                 nowMs - lastConfirmedFistMs > options.longFistMaximumFrameGapMs) clearLongFist()
-            // A single blurry frame during a fast swipe must not erase the
-            // already verified origin. We never create an action on a lost frame:
-            // a new, valid open palm endpoint is still required.
+            // One blurry/missing frame may occur mid-motion. Keep the origin
+            // briefly, but NEVER infer an endpoint or fire on a missing hand.
             val bridge = options.fastSwipeAssistEnabled && !blocked &&
-                anchorY != null && lastOpenTime != Long.MIN_VALUE &&
-                nowMs >= lastOpenTime && nowMs - lastOpenTime <= options.fastPalmGapMs
+                anchorY != null && lastMotionFrameMs != Long.MIN_VALUE &&
+                nowMs >= lastMotionFrameMs &&
+                nowMs - lastMotionFrameMs <= options.fastPalmGapMs
             if (!bridge) {
                 disarm()
                 clearSettling()
@@ -130,6 +132,7 @@ class GestureDecisionEngine(private val options: Options = Options()) {
             anchorX = frame.palmX
             anchorTime = nowMs
             lastOpenTime = nowMs
+            lastMotionFrameMs = nowMs
             openFrames = 2
             fistFrames = 0
             fistArmed = true
@@ -142,13 +145,14 @@ class GestureDecisionEngine(private val options: Options = Options()) {
             fistFrames = 0
             val y = frame.palmY ?: return null
             if (y !in 0f..1f) return null
-            if (options.fastSwipeAssistEnabled && lastOpenTime != Long.MIN_VALUE &&
-                (nowMs < lastOpenTime || nowMs - lastOpenTime > options.fastPalmGapMs)) {
-                // Do not connect separate appearances of a hand into one swipe.
+            if (options.fastSwipeAssistEnabled && lastMotionFrameMs != Long.MIN_VALUE &&
+                (nowMs < lastMotionFrameMs || nowMs - lastMotionFrameMs > options.fastPalmGapMs)) {
+                // A newly seen palm after an extended gap starts a new gesture.
                 disarm()
             }
             openFrames++
             lastOpenTime = nowMs
+            lastMotionFrameMs = nowMs
             if (options.fastSwipeAssistEnabled && anchorY == null) {
                 // Start at the FIRST confirmed palm frame, not the second.
                 // Action and fist still require at least two valid palm frames.
@@ -159,34 +163,30 @@ class GestureDecisionEngine(private val options: Options = Options()) {
             }
             if (openFrames >= 2) fistArmed = true
             if (openFrames < 2) return null
-            val anchor = anchorY
-            if (anchor == null) {
+            if (anchorY == null) {
                 anchorY = y
                 anchorX = frame.palmX
                 anchorTime = nowMs
                 return null
             }
-            val age = nowMs - anchorTime
-            if (age > options.maximumSwipeDurationMs) {
-                anchorY = y
-                anchorX = frame.palmX
-                anchorTime = nowMs
+            return evaluateSwipe(frame.palmX, y, nowMs, allowRestart = true)
+        }
+        if (shape == Shape.TRACKED_HAND) {
+            // A reliably recognized palm arms motion. The endpoint only needs
+            // live hand landmarks; the classifier may temporarily say "None".
+            // This path never arms a grab, fist tap, or pointer click.
+            val x = frame.palmX
+            val y = frame.palmY
+            if (!options.fastSwipeAssistEnabled || anchorY == null ||
+                openFrames < 1 || x == null || y == null ||
+                x !in 0f..1f || y !in 0f..1f ||
+                lastMotionFrameMs == Long.MIN_VALUE || nowMs < lastMotionFrameMs ||
+                nowMs - lastMotionFrameMs > options.fastPalmGapMs) {
+                disarm()
                 return null
             }
-            if (age < options.minimumSwipeDurationMs) return null
-            val dy = y - anchor
-            val dx = if (frame.palmX != null && anchorX != null) frame.palmX - anchorX!! else 0f
-            // Only a clear user-right motion can invoke Android edge-back.
-            if (dx >= options.backSwipeDistance && dx > abs(dy) * 1.45f) {
-                return fire(Action.SWIPE_BACK, nowMs)
-            }
-            // Distinct open-palm leftward swipe: starts anywhere within view,
-            // Android executes a full right-edge-to-left swipe.
-            if (dx <= -options.leftSwipeDistance && -dx > abs(dy) * 1.45f) {
-                return fire(Action.SWIPE_LEFT, nowMs)
-            }
-            if (abs(dy) < options.swipeDistance || abs(dy) < abs(dx) * 1.10f) return null
-            return fire(if (dy < 0f) Action.SWIPE_UP else Action.SWIPE_DOWN, nowMs)
+            lastMotionFrameMs = nowMs
+            return evaluateSwipe(x, y, nowMs, allowRestart = false)
         }
         // CLOSED_FIST: deliberately require a recent open palm rather than any arbitrary fist.
         if (shape == Shape.CLOSED_FIST) {
@@ -205,6 +205,33 @@ class GestureDecisionEngine(private val options: Options = Options()) {
             if (fistFrames >= 2) return fire(Action.TAP_CENTER, nowMs)
         }
         return null
+    }
+
+    private fun evaluateSwipe(x: Float?, y: Float, nowMs: Long, allowRestart: Boolean): Action? {
+        val originY = anchorY ?: return null
+        val age = nowMs - anchorTime
+        if (age < 0L || age > options.maximumSwipeDurationMs) {
+            if (allowRestart) {
+                anchorY = y
+                anchorX = x
+                anchorTime = nowMs
+            } else {
+                // A long ambiguous pose must never start another swipe on its own.
+                disarm()
+            }
+            return null
+        }
+        if (age < options.minimumSwipeDurationMs) return null
+        val dy = y - originY
+        val dx = if (x != null && anchorX != null) x - anchorX!! else 0f
+        if (dx >= options.backSwipeDistance && dx > abs(dy) * 1.45f) {
+            return fire(Action.SWIPE_BACK, nowMs)
+        }
+        if (dx <= -options.leftSwipeDistance && -dx > abs(dy) * 1.45f) {
+            return fire(Action.SWIPE_LEFT, nowMs)
+        }
+        if (abs(dy) < options.swipeDistance || abs(dy) < abs(dx) * 1.10f) return null
+        return fire(if (dy < 0f) Action.SWIPE_UP else Action.SWIPE_DOWN, nowMs)
     }
 
     private fun fire(action: Action, nowMs: Long): Action {
@@ -236,6 +263,7 @@ class GestureDecisionEngine(private val options: Options = Options()) {
         anchorX = null
         anchorTime = 0L
         lastOpenTime = Long.MIN_VALUE
+        lastMotionFrameMs = Long.MIN_VALUE
         openFrames = 0
         fistFrames = 0
         fistArmed = false
