@@ -4,14 +4,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class TransferCapacityTest {
-    @Test fun largeOriginalVideoUpTo2GiBAccepted() {
+    @Test fun largeOriginalVideosNotCappedAt2GiB() {
         val valid = "a".repeat(64)
-        val almost2gb = TransferPolicy.MAX_BYTES - 1
+        val over2GiB = 7L * 1024L * 1024L * 1024L
         assertTrue(TransferPolicy.validFileOffer(
-            "123456789012", "original-video.mov", almost2gb, valid))
+            "123456789012", "original-video.mov", over2GiB, valid))
         assertFalse(TransferPolicy.validFileOffer(
             "123456789012", "too-large.mov", TransferPolicy.MAX_BYTES + 1, valid))
-        assertEquals("2 GB", TransferPolicy.capacityLabel())
+        assertNotEquals("2 GB", TransferPolicy.capacityLabel())
     }
 
     @Test fun receiverMustHaveCompleteFileSizePlusReserve() {
@@ -27,5 +27,10 @@ class TransferCapacityTest {
         assertFalse(TransferPolicy.hasRoom(100, -1))
         assertFalse(TransferPolicy.hasRoom(Long.MAX_VALUE,
             TransferPolicy.MAX_BYTES + 1))
+        // Capacity checks must not overflow on very large adversarial values.
+        assertFalse(TransferPolicy.hasRoom(Long.MAX_VALUE, Long.MAX_VALUE))
+        assertTrue(TransferPolicy.hasRoom(
+            16L * 1024L * 1024L * 1024L,
+            7L * 1024L * 1024L * 1024L))
     }
 }
