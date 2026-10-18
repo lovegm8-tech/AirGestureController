@@ -92,8 +92,9 @@ object TransferStore {
         }
     }
 
-    fun safeName(name: String): String = name.replace(Regex("[/\\\\\\x00-\\x1f]"), "_")
-        .trim().take(120).ifEmpty { "file" }
+    fun safeName(name: String): String = name.map { character ->
+        if (character == '/' || character == '\\' || character.code < 32) '_' else character
+    }.joinToString("").trim().take(120).ifEmpty { "file" }
 
     fun digest(file: File): String {
         val d = MessageDigest.getInstance("SHA-256")
