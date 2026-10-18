@@ -1031,8 +1031,11 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
                 310L
             }
             FloatingControlRouter.Command.SWIPE_LEFT -> {
-                path.moveTo(size.x * .985f, y)
-                path.lineTo(size.x * .15f, y)
+                // Swipe app content, not the Samsung/Android right-edge Back
+                // gesture. Keep a 20% margin instead of starting at 98.5%.
+                val horizontal = ControlSwipeGeometry.inAppLeftSwipe(size.x)
+                path.moveTo(horizontal.startX, y)
+                path.lineTo(horizontal.endX, y)
                 310L
             }
             FloatingControlRouter.Command.TAP -> {
