@@ -16,6 +16,9 @@ class TransferCapacityTest {
 
     @Test fun receiverMustHaveCompleteFileSizePlusReserve() {
         assertTrue(TransferPolicy.hasRoom(
+            TransferPolicy.MAX_BYTES * 2 + TransferPolicy.MIN_FREE_HEADROOM,
+            TransferPolicy.MAX_BYTES))
+        assertFalse(TransferPolicy.hasRoom(
             TransferPolicy.MAX_BYTES + TransferPolicy.MIN_FREE_HEADROOM,
             TransferPolicy.MAX_BYTES))
         assertFalse(TransferPolicy.hasRoom(
