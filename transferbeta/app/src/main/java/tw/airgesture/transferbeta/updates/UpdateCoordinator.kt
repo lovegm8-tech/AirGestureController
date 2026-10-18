@@ -113,10 +113,10 @@ object UpdateCoordinator {
             messaging.isAutoInitEnabled = enabled
             if (enabled) messaging.subscribeToTopic(newChannel.topic)
         }
-        record(context, if (enabled)
-            "已啟用更新追蹤：" + if (newChannel == ReleaseUpdatePolicy.Channel.STABLE)
-                "正式機" else "測試機"
-            else "使用者已停用更新追蹤")
+        record(context, if (enabled) {
+            "已啟用更新追蹤：" +
+                (if (newChannel == ReleaseUpdatePolicy.Channel.STABLE) "正式機" else "測試機")
+        } else "使用者已停用更新追蹤")
         if (enabled) {
             schedulePeriodic(context)
             checkNow(context)
