@@ -12,8 +12,8 @@ android {
         applicationId = "tw.airgesture.transferbeta"
         minSdk = 29
         targetSdk = 35
-        versionCode = 20
-        versionName = "1.0.7"
+        versionCode = 21
+        versionName = "1.0.8"
         // Android Firebase client identifiers are public, not server credentials.
         // Unconfigured builds fall back to periodic GitHub polling.
         resValue("string", "google_app_id", System.getenv("FIREBASE_ANDROID_APP_ID") ?: "")
