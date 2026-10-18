@@ -992,7 +992,12 @@ class MultiPeerTransferManager(private val app: Context) {
             reportCaptureFailure("接收裝置已離線或正在傳輸")
             return
         }
-        if (current is Offered.FileOffer && !enoughStorageForIncoming(current.size)) {
+        val firstFileBytes = when (current) {
+            is Offered.FileOffer -> current.size
+            is Offered.QueueOffer -> current.files.first().size
+            else -> 0L
+        }
+        if (firstFileBytes > 0L && !enoughStorageForIncoming(firstFileBytes)) {
             reportCaptureFailure("接收空間不足，請先清理裝置儲存空間")
             return
         }
@@ -1010,7 +1015,7 @@ class MultiPeerTransferManager(private val app: Context) {
                 offeredBy = null
                 busy = false
             }
-            is Offered.FileOffer -> {
+            is Offered.QueueOffer, is Offered.FileOffer -> {
                 val sid = current.sid
                 incomingQueueAcknowledged = false
                 val request = JSONObject().put("type", "file_ready").put("sid", sid)
@@ -1104,7 +1109,8 @@ class MultiPeerTransferManager(private val app: Context) {
                     }
                     Payload.Type.FILE -> {
                         if (!p.verified || !busy || offeredBy != p.endpoint ||
-                            offered !is Offered.FileOffer || incomingPayload != -1L) {
+                            (offered !is Offered.FileOffer &&
+                                offered !is Offered.QueueOffer) || incomingPayload != -1L) {
                             client.cancelPayload(payload.id)
                         } else {
                             incomingFile = payload
@@ -1134,9 +1140,14 @@ class MultiPeerTransferManager(private val app: Context) {
                     failIncoming("檔案超過 " + TransferPolicy.capacityLabel())
                     return@post
                 }
-                val expected = offered as? Offered.FileOffer
-                if (isReceiving && expected != null && update.totalBytes >= 0 &&
-                    update.totalBytes != expected.size) {
+                val expectedBytes = when (val activeOffer = offered) {
+                    is Offered.FileOffer -> activeOffer.size
+                    is Offered.QueueOffer -> activeOffer.files
+                        .getOrNull(incomingQueueIndex)?.size
+                    else -> null
+                }
+                if (isReceiving && expectedBytes != null && update.totalBytes >= 0 &&
+                    update.totalBytes != expectedBytes) {
                     client.cancelPayload(update.payloadId)
                     failIncoming("傳入檔案大小不符合宣告")
                     return@post
@@ -1153,7 +1164,10 @@ class MultiPeerTransferManager(private val app: Context) {
                             // Large original bundles need two sequential
                             // SHA-256 checks and MediaStore extraction. Give
                             // slow receivers more time without stalling forever.
-                            val sizeMiB = (batch.file?.length() ?: 0L) / (1024L * 1024L)
+                            val sizeMiB = ((batch.queue?.getOrNull(
+                                batch.policy.nextIndex(id))?.info?.size
+                                ?: batch.file?.length() ?: 0L) / (1024L * 1024L))
+                                .coerceAtMost(20_000L)
                             val verifyTimeout = (60_000L + sizeMiB * 170L)
                                 .coerceAtMost(600_000L)
                             main.postDelayed({
@@ -1179,8 +1193,17 @@ class MultiPeerTransferManager(private val app: Context) {
                         if (percent != p.lastProgress) {
                             p.lastProgress = percent
                             val details = TransferSpeedTracker.summary(sample)
-                            ui(if (isReceiving) "接收中 $percent%$details"
-                                else "正在傳給 " + p.modelLabel + "：$percent%$details")
+                            val part = when (val offer = offered) {
+                                is Offered.QueueOffer ->
+                                    "第 ${incomingQueueIndex + 1}/${offer.files.size} 個 · "
+                                else -> ""
+                            }
+                            val sendingPart = batch?.queue?.let {
+                                "第 ${batch.policy.nextIndex(id) + 1}/${it.size} 個 · "
+                            } ?: ""
+                            ui(if (isReceiving) "${part}接收中 $percent%$details"
+                                else "正在傳給 " + p.modelLabel +
+                                    "：${sendingPart}$percent%$details")
                             if (isReceiving)
                                 visual(VisualPhase.RECEIVING, "接收中 " + percent + "%", percent)
                         }
@@ -1205,10 +1228,14 @@ class MultiPeerTransferManager(private val app: Context) {
         incomingPayload = -1L
         incomingFinished = false
         incomingQueueAcknowledged = false
+        incomingQueueIndex = 0
         onReceiverOfferState?.invoke(true)
-        val name = if (offer is Offered.FileOffer)
-            if (offer.items > 1) "${offer.items} 個原始檔案" else offer.name
-            else "網頁連結"
+        val name = when (offer) {
+            is Offered.QueueOffer -> "${offer.files.size} 個原始檔案（逐檔接收）"
+            is Offered.FileOffer -> if (offer.items > 1)
+                "${offer.items} 個原始檔案" else offer.name
+            is Offered.LinkOffer -> "網頁連結"
+        }
         notifyIncomingOffer(name)
         sendControl(p, JSONObject().put("type", "offer_seen").put("sid", offer.sid))
         ui("收到 " + name + " · 30 秒內握拳→張掌即可接收")
