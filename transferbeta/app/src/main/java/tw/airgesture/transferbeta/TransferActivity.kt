@@ -458,7 +458,7 @@ class TransferActivity : ComponentActivity() {
         })
         root.addView(text("設定首頁會禁止手勢誤觸；想驗證滑動請開啟上方測試區。隔空抓取則請在相簿等其他 App 測試。", 13f))
         root.addView(text("滑動｜張掌上下揮動；向右揮＝上一頁\n點擊｜直接握拳保持 1.5 秒（YouTube 播放／暫停）\n游標｜伸食指移動，停留 2 秒點擊\n傳送｜張掌→握拳抓取；收到分享後握拳→張掌接收", 15f))
-        root.addView(text("整天待命：亮屏無手自動降頻，熄屏完全釋放前鏡頭；解鎖後再恢復。\n隔空操作無須附近手機；只有傳檔需要配對。", 13f))
+        root.addView(text("整天待命：亮屏無手自動降頻，熄屏完全釋放前鏡頭；玩遊戲時也會自動暫停，離開遊戲後恢復。\n隔空操作無須附近手機；只有傳檔需要配對。", 13f))
         val advancedToggle = Button(this).apply { text = "進階設定與測試  ▾" }
         root.addView(advancedToggle)
         advanced = LinearLayout(this).apply {
@@ -559,6 +559,14 @@ class TransferActivity : ComponentActivity() {
             } else {
                 flash("請先啟用自動更新並選擇測試機或正式機")
             }
+        }
+        extraButton("玩遊戲時自動暫停隔空操作（開／關）") {
+            val enabled = !FloatingSettings.pauseInGames(this)
+            FloatingSettings.saveBool(this, "pause_in_games", enabled)
+            reloadLiveSettings()
+            flash(if (enabled)
+                "已啟用：進入遊戲自動釋放前鏡頭，離開後恢復"
+                else "已停用：玩遊戲時也會繼續辨識手勢", true)
         }
         extraButton("附近裝置自動搜尋（開／關）") {
             val newValue = !FloatingSettings.nearby(this)
