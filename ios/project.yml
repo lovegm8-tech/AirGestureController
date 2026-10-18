@@ -1,0 +1,37 @@
+name: AirGrabIOS
+options:
+  bundleIdPrefix: tw.airgrab
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+targets:
+  AirGrabIOS:
+    type: application
+    platform: iOS
+    sources:
+      - AirGrabIOS
+    info:
+      path: AirGrabIOS/Info.plist
+    entitlements:
+      path: AirGrabIOS/AirGrab.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: tw.airgrab.ios
+        TARGETED_DEVICE_FAMILY: "1"
+    dependencies:
+      - target: AirGrabShare
+        embed: true
+  AirGrabShare:
+    type: app-extension
+    platform: iOS
+    sources:
+      - AirGrabShare
+    info:
+      path: AirGrabShare/Info.plist
+    entitlements:
+      path: AirGrabShare/AirGrabShare.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: tw.airgrab.ios.share
+        TARGETED_DEVICE_FAMILY: "1"
