@@ -8,6 +8,79 @@ class MultiReceiverBatchTest {
     private val b = "tab"
     private val c = "iphone"
 
+    @Test fun eachRecipientAdvancesWithoutReSendingVerifiedFiles() {
+        val flow = MultiReceiverBatch("queue", 0L, fileCount = 4)
+        assertTrue(flow.announce(a, 0))
+        assertTrue(flow.announce(b, 0))
+        assertTrue(flow.accept(a, 100))
+        assertTrue(flow.accept(b, 200))
+        for (index in 0 until 4) {
+            assertEquals(a, flow.claimNext())
+            assertEquals(index, flow.nextIndex(a))
+            assertTrue(flow.bytesFinished(a))
+            assertTrue(flow.complete(a))
+            assertEquals(index + 1, flow.progress(a))
+            assertFalse(flow.accept(a, 500L))
+            if (index < 3) assertEquals(MultiReceiverBatch.State.QUEUED,
+                flow.state(a))
+            if (index == 0) {
+                assertEquals(a, flow.claimNext()) // queue insertion order
+                assertEquals(1, flow.nextIndex(a))
+                // claimNext() intentionally occupies the sender slot.
+                assertTrue(flow.fail(a))
+                break
+            }
+        }
+        assertEquals(1, flow.progress(a))
+        assertEquals(b, flow.claimNext())
+        assertEquals(0, flow.nextIndex(b))
+        assertTrue(flow.complete(b))
+        assertEquals(1, flow.progress(b))
+    }
+
+    @Test fun aPeerCompletesEntireBatchWhileAnotherFailsMidway() {
+        val flow = MultiReceiverBatch("queue", 0L, fileCount = 3)
+        flow.announce(a, 0)
+        flow.announce(b, 0)
+        flow.accept(a, 100)
+        flow.accept(b, 110)
+        for (i in 0 until 3) {
+            assertEquals(a, flow.claimNext())
+            assertEquals(i, flow.nextIndex(a))
+            assertTrue(flow.bytesFinished(a))
+            assertTrue(flow.complete(a))
+        }
+        assertEquals(MultiReceiverBatch.State.COMPLETE, flow.state(a))
+        assertEquals(1, flow.completedCount())
+        assertEquals(3, flow.progress(a))
+        assertEquals(b, flow.claimNext())
+        assertEquals(0, flow.nextIndex(b))
+        assertTrue(flow.complete(b))
+        assertEquals(b, flow.claimNext())
+        assertEquals(1, flow.nextIndex(b))
+        assertTrue(flow.fail(b))
+        assertEquals(1, flow.failedCount())
+        assertEquals(1, flow.progress(b)) // first file stays completed
+        flow.endUnclaimed(30_001)
+        assertTrue(flow.isFinished(30_001))
+    }
+
+    @Test fun latePeerCannotJoinAfterThirtySecondsButExistingPeerKeepsProgress() {
+        val flow = MultiReceiverBatch("queue", 0L, fileCount = 2)
+        flow.announce(a, 0)
+        flow.announce(b, 0)
+        assertTrue(flow.accept(a, 29_999))
+        flow.endUnclaimed(30_000)
+        assertFalse(flow.accept(b, 30_000))
+        assertEquals(a, flow.claimNext())
+        assertTrue(flow.complete(a))
+        assertEquals(1, flow.progress(a))
+        assertEquals(a, flow.claimNext())
+        assertTrue(flow.complete(a))
+        assertEquals(2, flow.progress(a))
+        assertTrue(flow.isFinished(30_000))
+    }
+
     @Test fun severalReceiversCanJoinIndependentlyBeforeThirtySeconds() {
         val flow = MultiReceiverBatch("session", 10_000L)
         assertTrue(flow.announce(a, 10_000))
