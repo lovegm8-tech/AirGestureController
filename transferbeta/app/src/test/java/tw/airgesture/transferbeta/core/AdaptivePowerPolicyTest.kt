@@ -104,8 +104,10 @@ class AdaptivePowerPolicyTest {
         assertTrue(p.shouldInfer(2150L))
         // 900ms from first appearance has elapsed. Sustained hand should
         // not continuously re-arm the faster burst or run at 115ms forever.
-        assertFalse(p.shouldInfer(2280L))
-        assertTrue(p.shouldInfer(2315L))
+        p.observeHand(true, 2450L)
+        assertTrue(p.shouldInfer(2450L))
+        assertFalse(p.shouldInfer(2580L))
+        assertTrue(p.shouldInfer(2615L))
         // When the last hand has been absent long enough, a new hand gets a
         // NEW temporary burst rather than waiting on the full ECO interval.
         p.observeHand(true, 3200L)
