@@ -453,7 +453,7 @@ class TransferActivity : ComponentActivity() {
             }
         })
         root.addView(text("設定首頁會禁止手勢誤觸；想驗證滑動請開啟上方測試區。隔空抓取則請在相簿等其他 App 測試。", 13f))
-        root.addView(text("滑動｜張掌上下揮動；向右揮＝上一頁\n點擊｜張掌→短握拳→放開（YouTube 播放／暫停）\n游標｜伸食指移動，停留 2 秒點擊\n傳送｜握拳 2 秒抓取；收到分享後握拳 2 秒接收", 15f))
+        root.addView(text("滑動｜張掌上下揮動；向右揮＝上一頁\n點擊｜直接握拳保持 2 秒（YouTube 播放／暫停）\n游標｜伸食指移動，停留 2 秒點擊\n傳送｜張掌→握拳抓取；收到分享後握拳→張掌接收", 15f))
         root.addView(text("整天待命：亮屏無手自動降頻，熄屏完全釋放前鏡頭；解鎖後再恢復。\n隔空操作無須附近手機；只有傳檔需要配對。", 13f))
         val advancedToggle = Button(this).apply { text = "進階設定與測試  ▾" }
         root.addView(advancedToggle)
@@ -569,7 +569,7 @@ class TransferActivity : ComponentActivity() {
                 AlertDialog.Builder(this)
                     .setTitle("AirGrab 多裝置：已連線 " + live.size + " 台")
                     .setMessage(summary +
-                        "\n\n傳送端抓取後開放接收 30 秒，已配對設備可各自握拳持續 2 秒加入。" +
+                        "\n\n傳送端抓取後開放接收 30 秒，已配對設備可各自握拳→張掌加入。" +
                         "\n最多記住 8 台裝置。清除配對會讓所有裝置下次重新核對數字。")
                     .setPositiveButton("保留配對", null)
                     .setNegativeButton("清除全部配對") { _, _ ->
@@ -919,7 +919,7 @@ class TransferActivity : ComponentActivity() {
                 }
                 linkOffer = LinkOffer(sid, checked)
                 val current = ++offerEpoch
-                flash("收到網址：請握拳維持 2 秒，接收對方影片／網頁")
+                flash("收到網址：請先握拳再張掌，接收對方影片／網頁")
                 main.postDelayed({
                     if (offerEpoch == current && linkOffer?.session == sid && !receiving) {
                         linkOffer = null; flash("網址接收等待逾時")
@@ -940,7 +940,7 @@ class TransferActivity : ComponentActivity() {
                 }
                 offer = Offer(sid, safeName(name), length, hash)
                 val check = ++offerEpoch
-                flash("接收請求：" + safeName(name) + "\n請握拳維持 2 秒")
+                flash("接收請求：" + safeName(name) + "\n請握拳→張掌接收")
                 main.postDelayed({
                     if (check == offerEpoch && offer?.session == sid && !receiving) {
                         offer = null; flash("接收等待逾時")
