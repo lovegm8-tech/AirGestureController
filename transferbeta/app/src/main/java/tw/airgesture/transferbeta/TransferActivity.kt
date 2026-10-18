@@ -369,6 +369,8 @@ class TransferActivity : ComponentActivity() {
             setPadding(0, 10, 0, 10)
         }
         root.addView(text("懸浮操作", 28f))
+        root.addView(text("目前版本：v" + BuildConfig.VERSION_NAME +
+            "（版本代碼 " + BuildConfig.VERSION_CODE + "）", 14f))
         root.addView(text("免觸控操作、隔空抓取，一次啟用即可使用。", 15f))
         setupGuide = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -457,7 +459,7 @@ class TransferActivity : ComponentActivity() {
             }
         })
         root.addView(text("設定首頁會禁止手勢誤觸；想驗證滑動請開啟上方測試區。隔空抓取則請在相簿等其他 App 測試。", 13f))
-        root.addView(text("滑動｜張掌上下揮動；向右揮＝上一頁\n點擊｜直接握拳保持 1.5 秒（YouTube 播放／暫停）\n游標｜伸食指移動，停留 2 秒點擊\n傳送｜張掌→握拳抓取；收到分享後握拳→張掌接收", 15f))
+        root.addView(text("滑動｜張掌上下揮動；向右揮＝上一頁；向左揮＝從最右側向左滑\n點擊｜直接握拳保持 1.5 秒（YouTube 播放／暫停）\n游標｜伸食指移動，停留 2 秒點擊\n傳送｜張掌→握拳抓取；收到分享後握拳→張掌接收", 15f))
         root.addView(text("整天待命：亮屏無手自動降頻，熄屏完全釋放前鏡頭；玩遊戲時也會自動暫停，離開遊戲後恢復。\n隔空操作無須附近手機；只有傳檔需要配對。", 13f))
         val advancedToggle = Button(this).apply { text = "進階設定與測試  ▾" }
         root.addView(advancedToggle)
@@ -531,6 +533,15 @@ class TransferActivity : ComponentActivity() {
             reloadLiveSettings()
             flash(if (newValue) "已開啟操作確認動畫：成功送出手勢時短暫提示方向"
                 else "已關閉操作確認動畫（手勢仍可正常使用）", true)
+        }
+        extraButton("查看版本更新紀錄／更新進度") {
+            val versionLog = "v1.0.9｜新增左滑手勢、右側辨識提示、多檔逐檔無損傳送、遊戲自動暫停、辨識加速與握拳 1.5 秒\\n" +
+                "v1.0.8｜隔空操作與隔空抓取整合、單檔／多裝置傳輸\\n\\n"
+            AlertDialog.Builder(this).setTitle("懸浮操作 v" + BuildConfig.VERSION_NAME)
+                .setMessage(versionLog.replace("\\\\n", "\\n") +
+                    "更新流程紀錄（最近 12 筆）：\\n" +
+                    UpdateCoordinator.history(this))
+                .setPositiveButton("完成", null).show()
         }
         extraButton("自動更新：開關／選擇測試機或正式機") {
             val options = arrayOf("關閉自動更新", "測試機（先收到測試版）",
