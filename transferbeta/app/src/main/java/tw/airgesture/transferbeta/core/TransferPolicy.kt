@@ -8,9 +8,11 @@ object TransferPolicy {
     const val MAX_BYTES = 2L * 1024L * 1024L * 1024L
     const val MIN_FREE_HEADROOM = 64L * 1024L * 1024L
 
+    // Nearby stores an incoming FILE in temporary storage before the verified
+    // copy is made to MediaStore. Budget both copies to avoid disk exhaustion.
     fun hasRoom(availableBytes: Long, fileSize: Long): Boolean =
         availableBytes >= 0L && fileSize >= 0L && fileSize <= MAX_BYTES &&
-            availableBytes >= fileSize + MIN_FREE_HEADROOM
+            availableBytes >= fileSize * 2L + MIN_FREE_HEADROOM
 
     fun capacityLabel(): String = "2 GB"
     const val OFFER_TIMEOUT_MS = 30_000L
