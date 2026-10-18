@@ -3,7 +3,7 @@ package tw.airgesture.transferbeta.core
 /**
  * One MediaPipe stream controls gestures and file transfer.
  * - Palm -> fist (two confirmed observations each): send, once
- * - Direct fist held 2 s: tap, or YouTube media play/pause
+ * - Direct fist held 1.5 s: tap, or YouTube media play/pause
  * - Incoming offer: fist -> palm: receive, never tap/send
  * The gesture controller does not raise AI/camera FPS.
  */
@@ -131,11 +131,11 @@ class FloatingControlRouter(pointerDwellMs: Long = 2000L, sensitivity: Int = 1) 
                 palmSamples = 0
                 if (!fistConsumed && fistSamples >= 2) {
                     if (grabCandidate && !receivingOffer) {
-                        // Explicit palm -> fist has priority even if held >2 s.
+                        // Explicit palm -> fist has priority even if held >1.5 s.
                         action = Command.SEND
                         fistConsumed = true
                     } else if (!receivingOffer && !grabCandidate &&
-                        nowMs >= fistSince && nowMs - fistSince >= 2_000L) {
+                        nowMs >= fistSince && nowMs - fistSince >= 1_500L) {
                         action = if (youtubeForeground) Command.MEDIA_PLAY_PAUSE else Command.TAP
                         fistConsumed = true
                     }
