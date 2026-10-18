@@ -1030,6 +1030,11 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
                 path.lineTo(size.x * .60f, y)
                 310L
             }
+            FloatingControlRouter.Command.SWIPE_LEFT -> {
+                path.moveTo(size.x * .985f, y)
+                path.lineTo(size.x * .15f, y)
+                310L
+            }
             FloatingControlRouter.Command.TAP -> {
                 path.moveTo(x, y)
                 80L
