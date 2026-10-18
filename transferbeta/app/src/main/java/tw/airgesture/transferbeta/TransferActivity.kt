@@ -33,6 +33,9 @@ import android.widget.Button
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import tw.airgesture.transferbeta.core.FloatingSettings
+import tw.airgesture.transferbeta.core.ReleaseUpdatePolicy
+import tw.airgesture.transferbeta.updates.UpdateCoordinator
+import tw.airgesture.transferbeta.updates.UpdateInstallActivity
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
@@ -343,6 +346,7 @@ class TransferActivity : ComponentActivity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        UpdateCoordinator.initialize(this)
         if (intent?.action == Intent.ACTION_SEND) {
             // Legacy pinned Sharesheet targets may explicitly launch this Activity.
             // Forward straight to the UI-free intake rather than showing the home.
@@ -527,6 +531,34 @@ class TransferActivity : ComponentActivity() {
             reloadLiveSettings()
             flash(if (newValue) "已開啟操作確認動畫：成功送出手勢時短暫提示方向"
                 else "已關閉操作確認動畫（手勢仍可正常使用）", true)
+        }
+        extraButton("自動更新：開關／選擇測試機或正式機") {
+            val options = arrayOf("關閉自動更新", "測試機（先收到測試版）",
+                "正式機（只收到確認穩定的正式版）")
+            val selected = if (!UpdateCoordinator.enabled(this)) 0
+                else if (UpdateCoordinator.channel(this) == ReleaseUpdatePolicy.Channel.TEST) 1
+                else 2
+            AlertDialog.Builder(this).setTitle("自動更新 · 優先使用 Wi-Fi")
+                .setSingleChoiceItems(options, selected) { dialog, index ->
+                    UpdateCoordinator.configure(this, index != 0,
+                        if (index == 2) ReleaseUpdatePolicy.Channel.STABLE
+                        else ReleaseUpdatePolicy.Channel.TEST)
+                    flash(if (index == 0) "已關閉自動更新" else
+                        "已開啟自動更新： " + options[index] +
+                        "。新版 APK 下載驗證後仍可能需要確認安裝。", true)
+                    dialog.dismiss()
+                }.setNegativeButton("取消", null).show()
+        }
+        extraButton("立即檢查更新／安裝已下載版本") {
+            val ready = UpdateCoordinator.readyVersion(this)
+            if (UpdateCoordinator.enabled(this) && ready != null) {
+                startActivity(Intent(this, UpdateInstallActivity::class.java))
+            } else if (UpdateCoordinator.enabled(this)) {
+                UpdateCoordinator.checkNow(this)
+                flash("已排入 Wi-Fi 更新檢查，有新版會顯示通知", true)
+            } else {
+                flash("請先啟用自動更新並選擇測試機或正式機")
+            }
         }
         extraButton("附近裝置自動搜尋（開／關）") {
             val newValue = !FloatingSettings.nearby(this)
