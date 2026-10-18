@@ -243,6 +243,23 @@ class MultiPeerTransferManager(private val app: Context) {
     private fun search() {
         if (!started || !discoveryEnabled) return
         val cycle = ++scanEpoch
+        // Upcoming Nearby changes mean radios won't be enabled automatically.
+        // Respect the device owner's radio settings; retry without polling ML.
+        val wifiOn: Boolean? = try {
+            (app.getSystemService(Context.WIFI_SERVICE) as WifiManager).isWifiEnabled
+        } catch (_: Exception) { null }
+        val btOn: Boolean? = try {
+            (app.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager)
+                .adapter?.isEnabled
+        } catch (_: Exception) { null }
+        if (wifiOn == false && btOn == false) {
+            ui("附近連線需啟用 Wi-Fi 或藍牙，15 秒後重試")
+            scanning = false
+            main.postDelayed({
+                if (started && discoveryEnabled && cycle == scanEpoch) search()
+            }, 15_000L)
+            return
+        }
         val name = "Beta|" + deviceId
         val options = Strategy.P2P_CLUSTER
         client.stopDiscovery()
@@ -254,7 +271,9 @@ class MultiPeerTransferManager(private val app: Context) {
             DiscoveryOptions.Builder().setStrategy(options).build())
             .addOnFailureListener { ui("附近搜尋不可用：" + it.message) }
         scanning = true
-        ui("正在搜尋已配對的附近裝置（目前 " + connectedDeviceIds.size + " 台連線）")
+        ui(if (wifiOn == false && btOn == true)
+            "Wi-Fi 尚未啟用，目前以藍牙搜尋；開啟 Wi-Fi 可改善傳輸速度"
+            else "正在搜尋已配對的附近裝置（目前 " + connectedDeviceIds.size + " 台連線）")
         val now = android.os.SystemClock.uptimeMillis()
         val connected = isConnected
         val idleTrusted = rememberedDeviceIds.isNotEmpty() &&
