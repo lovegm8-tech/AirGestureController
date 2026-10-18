@@ -125,7 +125,7 @@ jobs:
           GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
         run: |
           set -euo pipefail
-          CHANNEL="${{ inputs.channel }}"
+          export CHANNEL="${{ inputs.channel }}"
           TOPIC="airgesture-$CHANNEL"
           python3 - <<'PY'
           import json,os
