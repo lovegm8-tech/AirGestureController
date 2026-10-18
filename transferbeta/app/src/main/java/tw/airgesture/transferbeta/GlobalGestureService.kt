@@ -532,7 +532,7 @@ class GlobalGestureService : LifecycleService() {
                 marks.size > 8) marks[8] else null
             val output = unified.accept(pose, trustedScore, px, py,
                 index?.let { 1f - it.x() }, index?.y(), now, receivingOffer,
-                GlobalGrabAccessibilityService.isYouTubeForeground())
+                GlobalGrabAccessibilityService.isYouTubeForeground(), name)
             when (val command = output.command) {
                 FloatingControlRouter.Command.SEND -> {
                     actionCount++
