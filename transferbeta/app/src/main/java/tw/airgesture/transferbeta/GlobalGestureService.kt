@@ -41,6 +41,7 @@ import tw.airgesture.transferbeta.core.HandFeedbackPolicy
 import tw.airgesture.transferbeta.core.FloatingControlRouter
 import tw.airgesture.transferbeta.core.TiltedPalmAssist
 import tw.airgesture.transferbeta.core.FloatingSettings
+import java.lang.ref.WeakReference
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
 
@@ -62,6 +63,18 @@ class GlobalGestureService : LifecycleService() {
         private const val NOTIFICATION = 4108
         @Volatile var isActive = false
             private set
+        @Volatile var isPausedForGame = false
+            private set
+        @Volatile private var activeInstance: WeakReference<GlobalGestureService>? = null
+
+        /** Accessibility sends changes only when the actual foreground window changes. */
+        fun onGameForegroundChanged(game: Boolean) {
+            val service = activeInstance?.get() ?: return
+            service.main.post {
+                if (activeInstance?.get() === service && isActive)
+                    service.setGameSuspended(game)
+            }
+        }
         @Volatile var transfer: MultiPeerTransferManager? = null
             private set
         @Volatile var framesSeen = 0L
@@ -121,6 +134,7 @@ class GlobalGestureService : LifecycleService() {
     private var cameraBound = false
     private var cameraResumeCheck: Runnable? = null
     private var cameraRetryCount = 0
+    @Volatile private var gameSuspended = false
     @Volatile private var receivingOffer = false
 
     private val screen = object : BroadcastReceiver() {
@@ -134,13 +148,13 @@ class GlobalGestureService : LifecycleService() {
                     // SCREEN_ON is often delivered before face unlock starts.
                     // Do not bind here. Wait for KEYGUARD to disappear.
                     cameraRetryCount = 0
-                    scheduleUnlockCheck(1000L)
+                    if (!gameSuspended) scheduleUnlockCheck(1000L)
                 }
                 Intent.ACTION_USER_PRESENT -> {
                     // A genuine unlock has been signalled by Android. Keyguard
                     // is rechecked in the delayed callback; never trust the
                     // broadcast alone to access the camera.
-                    if (isScreenOn && isActive) {
+                    if (isScreenOn && isActive && !gameSuspended) {
                         cameraRetryCount = 0
                         scheduleUnlockCheck(800L)
                     }
@@ -195,13 +209,48 @@ class GlobalGestureService : LifecycleService() {
         }
     }
 
+    /** Game suspension fully unbinds the front camera and also pauses Nearby
+     * discovery. Existing authenticated links and in-flight files stay alive. */
+    private fun setGameSuspended(foregroundGame: Boolean) {
+        val shouldPause = foregroundGame && FloatingSettings.pauseInGames(this)
+        if (shouldPause == gameSuspended) return
+        gameSuspended = shouldPause
+        isPausedForGame = shouldPause
+        if (shouldPause) {
+            cancelUnlockCheck()
+            cameraGeneration++ // stale CameraX bind futures must not revive camera
+            cameraBindPending = false
+            cameraBound = false
+            cameraRetryCount = 0
+            power.screenChanged(false)
+            connections.setDiscoveryEnabled(false)
+            provider?.unbindAll()
+            overlay.dismissHand()
+            overlay.dismissAction()
+            GlobalGrabAccessibilityService.setCursor(null)
+            GlobalGrabAccessibilityService.setPalm(null)
+            cameraExecutor.execute {
+                cursorShown = false
+                handFeedback.reset()
+                unified.reset()
+            }
+            lastGestureAction = "遊戲期間已暫停前鏡頭與手勢辨識"
+        } else if (isActive && isScreenOn) {
+            // Do not touch the camera until Android has completed face unlock.
+            lastGestureAction = "已離開遊戲，等待恢復隔空操作"
+            cameraRetryCount = 0
+            scheduleUnlockCheck(700L)
+        }
+    }
+
     private fun scheduleUnlockCheck(delayMillis: Long) {
         cancelUnlockCheck()
-        if (!isScreenOn || !isActive) return
+        if (!isScreenOn || !isActive || gameSuspended) return
         val expectedGeneration = cameraGeneration
         val check = Runnable {
             cameraResumeCheck = null
-            if (!isActive || !isScreenOn || cameraGeneration != expectedGeneration) return@Runnable
+            if (!isActive || !isScreenOn || gameSuspended ||
+                cameraGeneration != expectedGeneration) return@Runnable
             val state = currentUnlockState()
             if (unlockGate.confirmUnlocked(state.interactive,
                     state.keyguardLocked, state.deviceLocked)) {
@@ -225,6 +274,7 @@ class GlobalGestureService : LifecycleService() {
         super.onCreate()
         reloadFloatingSettings()
         connections = MultiPeerTransferManager(applicationContext)
+        activeInstance = WeakReference(this)
         overlay = GestureStatusOverlay(applicationContext)
         actionOverlay = overlay
         connections.onVisualEvent = { event -> overlay.showState(event) }
@@ -263,7 +313,9 @@ class GlobalGestureService : LifecycleService() {
         if(intent?.action == ACTION_SETTINGS_CHANGED) {
             if(isActive) {
                 reloadFloatingSettings()
-                connections.setDiscoveryEnabled(isScreenOn && mayBindCamera() && FloatingSettings.nearby(this))
+                setGameSuspended(GlobalGrabAccessibilityService.gameForeground)
+                connections.setDiscoveryEnabled(!gameSuspended && isScreenOn &&
+                    mayBindCamera() && FloatingSettings.nearby(this))
             }
             return START_NOT_STICKY
         }
@@ -298,6 +350,9 @@ class GlobalGestureService : LifecycleService() {
         actionCount = 0L
         lastRecognitionError = "無"
         isActive = true
+        gameSuspended = FloatingSettings.pauseInGames(this) &&
+            GlobalGrabAccessibilityService.gameForeground
+        isPausedForGame = gameSuspended
         transfer = connections
         GlobalGrabBridge.onGrabResult = { result ->
             main.post {
@@ -317,7 +372,7 @@ class GlobalGestureService : LifecycleService() {
         // A foreground start from the unlocked dashboard may bind after a
         // short grace period. Starting while locked leaves the camera free.
         power.screenChanged(false)
-        if (isScreenOn) scheduleUnlockCheck(700L)
+        if (isScreenOn && !gameSuspended) scheduleUnlockCheck(700L)
         return START_NOT_STICKY
     }
 
@@ -366,13 +421,13 @@ class GlobalGestureService : LifecycleService() {
 
     private fun bindCamera() {
         if (cameraBindPending || cameraBound || !isActive || !isScreenOn ||
-            !mayBindCamera()) return
+            gameSuspended || !mayBindCamera()) return
         val generation = cameraGeneration
         cameraBindPending = true
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             if (cameraGeneration != generation || !isActive || !isScreenOn ||
-                !mayBindCamera()) {
+                gameSuspended || !mayBindCamera()) {
                 if (cameraGeneration == generation) cameraBindPending = false
                 return@addListener
             }
@@ -419,7 +474,7 @@ class GlobalGestureService : LifecycleService() {
                 cameraBound = false
                 provider?.unbindAll()
                 if (cameraGeneration == generation && isActive && isScreenOn &&
-                    cameraRetryCount++ < 3) {
+                    !gameSuspended && cameraRetryCount++ < 3) {
                     scheduleUnlockCheck(1500L)
                 } else {
                     connections.reportCaptureFailure(
@@ -430,6 +485,7 @@ class GlobalGestureService : LifecycleService() {
     }
 
     private fun infer(frame: ImageProxy) {
+        if (gameSuspended) return
         framesSeen++
         val now = SystemClock.uptimeMillis()
         val movement = if (power.isDeepIdle(now)) {
@@ -566,6 +622,9 @@ class GlobalGestureService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        if (activeInstance?.get() === this) activeInstance = null
+        isPausedForGame = false
+        gameSuspended = false
         cancelUnlockCheck()
         cameraGeneration++
         isActive = false
