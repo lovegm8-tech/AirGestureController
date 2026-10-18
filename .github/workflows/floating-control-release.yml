@@ -1,4 +1,5 @@
 name: Floating Control 1.0.10 Signed Test APK
+# Explicit user-requested retry after fixing low-confidence fist regression.
 on:
   push:
     branches:
