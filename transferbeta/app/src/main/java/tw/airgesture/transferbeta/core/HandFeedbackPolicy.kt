@@ -6,11 +6,13 @@ enum class HandHint { NONE, HAND_SEEN, OPEN_PALM, CLOSED_FIST }
 
 class HandFeedbackPolicy(
     private val heartbeatMs: Long = 750L,
-    private val lostGraceMs: Long = 1500L
+    private val lostGraceMs: Long = 1500L,
+    private val weakClassificationGraceMs: Long = 320L
 ) {
     private var lastSeenAt: Long = Long.MIN_VALUE
     private var lastEmittedAt: Long = Long.MIN_VALUE
     private var lastHint = HandHint.NONE
+    private var lastClassifiedAt = Long.MIN_VALUE
 
     fun observe(found: Boolean, pose: String, nowMs: Long): HandHint? {
         val state = if (found) when (pose) {
@@ -18,7 +20,20 @@ class HandFeedbackPolicy(
             "Closed_Fist" -> HandHint.CLOSED_FIST
             else -> HandHint.HAND_SEEN
         } else HandHint.NONE
-        if (found) lastSeenAt = nowMs
+        if (found) {
+            lastSeenAt = nowMs
+            if (state == HandHint.OPEN_PALM || state == HandHint.CLOSED_FIST) {
+                lastClassifiedAt = nowMs
+            } else if ((lastHint == HandHint.OPEN_PALM ||
+                    lastHint == HandHint.CLOSED_FIST) &&
+                lastClassifiedAt != Long.MIN_VALUE &&
+                nowMs >= lastClassifiedAt &&
+                nowMs - lastClassifiedAt < weakClassificationGraceMs) {
+                // Hold the last confirmed visual briefly through uncertain ML
+                // frames. This is display-only and never feeds the action router.
+                return null
+            }
+        }
         val current = if (found) state
         else if (lastSeenAt != Long.MIN_VALUE && nowMs - lastSeenAt < lostGraceMs)
             return null
@@ -37,5 +52,6 @@ class HandFeedbackPolicy(
         lastSeenAt = Long.MIN_VALUE
         lastEmittedAt = Long.MIN_VALUE
         lastHint = HandHint.NONE
+        lastClassifiedAt = Long.MIN_VALUE
     }
 }
