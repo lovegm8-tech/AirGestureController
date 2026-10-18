@@ -6,6 +6,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 android {
+    buildFeatures { buildConfig = true }
     namespace = "tw.airgesture.transferbeta"
     compileSdk = 35
     defaultConfig {
