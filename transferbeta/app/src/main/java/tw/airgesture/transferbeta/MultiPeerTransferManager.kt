@@ -770,7 +770,10 @@ class MultiPeerTransferManager(private val app: Context) {
         val mode = VideoSendMode.fromKey(app.getSharedPreferences(
             "video_transfer", Context.MODE_PRIVATE).getString("mode", "auto"))
         worker.execute {
-            val description = VideoFormatInspector.inspect(candidate)
+            // A multi-file archive is intentionally never transcoded or probed
+            // as one video; each original's bytes must remain unmodified.
+            val description = if (multiCount > 1) null
+                else VideoFormatInspector.inspect(candidate)
             main.post {
                 if (!started || !isConnected || !busy || requestEpoch != epoch) return@post
                 val supportedContainer = name.endsWith(".mp4", true) ||
@@ -1336,7 +1339,7 @@ class MultiPeerTransferManager(private val app: Context) {
                             ?: error("無法寫入原始檔案")
                     }, { current, total ->
                         ui("正在還原原檔 ${current}/${total} · 逐檔核對 SHA-256")
-                    })
+                    }, maxUnpackedBytes = expected.size)
                 } ?: error("無法開啟原始檔案封裝")
                 check(records.size == expected.items)
                 for (uri in created) {
