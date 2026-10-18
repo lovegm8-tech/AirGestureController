@@ -67,7 +67,7 @@ struct ContentView: View {
                 }
                 Section("狀態") {
                     Text(model.status).font(.footnote)
-                    if model.busy { ProgressView() }
+                    if model.busy { ProgressView(value: model.progress) }
                 }
                 Section {
                     Text("區域網路直接傳輸，不重新壓縮；接收後會驗證 SHA-256。必須保持此 App 前景與同一 Wi-Fi／熱點。初版尚未提供中斷續傳。")
