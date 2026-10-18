@@ -4,6 +4,8 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityService.ScreenshotResult
 import android.accessibilityservice.AccessibilityService.TakeScreenshotCallback
 import android.accessibilityservice.GestureDescription
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Rect
@@ -40,6 +42,8 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         @Volatile var foregroundPackage: String? = null
             private set
         @Volatile var isConnected = false
+            private set
+        @Volatile var gameForeground = false
             private set
         @Volatile var lastControlStatus = "尚未連線無障礙服務"
             private set
@@ -93,6 +97,7 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
     private val main = Handler(Looper.getMainLooper())
     private var pending: RunningShare? = null
     private var nextAttempt: Runnable? = null
+    private var pendingGameExit: Runnable? = null
     private var flowTimeout: Runnable? = null
     private var browserCapture: BrowserCapture? = null
     private data class BrowserCapture(val origin: String, val expiry: Long)
@@ -115,13 +120,63 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         current = WeakReference(this)
         isConnected = true
         lastControlStatus = "無障礙服務已連線，等待手勢操作"
+        rootInActiveWindow?.packageName?.toString()?.let { processForegroundWindow(it) }
+    }
+
+    /** Only query Android's game category when a foreground window changes. */
+    @Suppress("DEPRECATION")
+    private fun isGameApplication(pkg: String): Boolean {
+        if (GameForegroundPolicy.isGame(pkg)) return true
+        return try {
+            val info = if (Build.VERSION.SDK_INT >= 33)
+                packageManager.getApplicationInfo(pkg,
+                    PackageManager.ApplicationInfoFlags.of(0L))
+            else packageManager.getApplicationInfo(pkg, 0)
+            GameForegroundPolicy.isGame(pkg, info.category,
+                info.flags and ApplicationInfo.FLAG_IS_GAME != 0)
+        } catch (_: Exception) { false }
+    }
+
+    private fun processForegroundWindow(pkg: String) {
+        if (pkg.isBlank() || GameForegroundPolicy.isTransientWindow(pkg)) return
+        foregroundPackage = pkg
+        if (isGameApplication(pkg)) {
+            pendingGameExit?.let(main::removeCallbacks)
+            pendingGameExit = null
+            if (!gameForeground) {
+                gameForeground = true
+                GlobalGestureService.onGameForegroundChanged(true)
+            }
+        } else if (gameForeground && pendingGameExit == null) {
+            // An app switch can briefly expose launchers, status panels and
+            // accessibility overlays. Recheck actual active window before
+            // reopening the front camera, avoiding focus-related flapping.
+            val exit = Runnable {
+                pendingGameExit = null
+                val currentPkg = rootInActiveWindow?.packageName?.toString()
+                    ?.takeUnless(GameForegroundPolicy::isTransientWindow)
+                    ?: foregroundPackage
+                if (!currentPkg.isNullOrBlank() && !isGameApplication(currentPkg)) {
+                    gameForeground = false
+                    GlobalGestureService.onGameForegroundChanged(false)
+                }
+            }
+            pendingGameExit = exit
+            main.postDelayed(exit, 1100L)
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Expensive node traversal only while a bounded, user-initiated share is pending.
+        // Observe only window transitions; never poll other apps' content.
         if (event == null) return
-        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED)
-            foregroundPackage = event.packageName?.toString()
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            event.packageName?.toString()?.let { processForegroundWindow(it) }
+        } else if (event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+            rootInActiveWindow?.packageName?.toString()?.let {
+                if (it != foregroundPackage) processForegroundWindow(it)
+            }
+        }
+        // Expensive node traversal only while a deliberate share is pending.
         if (pending == null && browserCapture == null) return
         if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
             event.eventType != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
@@ -830,11 +885,15 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         val locked = !power.isInteractive || keyguard.isKeyguardLocked
         val ownSettings = active == packageName && !GestureTestActivity.isVisible
         val sharing = pending != null || browserCapture != null
-        val ok = !locked && !ownSettings && !sharing && !active.isNullOrBlank()
+        val inGame = FloatingSettings.pauseInGames(this) &&
+            (gameForeground || (active != null && isGameApplication(active)))
+        val ok = !locked && !ownSettings && !sharing &&
+            !inGame && !active.isNullOrBlank()
         if (!ok) lastControlStatus = when {
             locked -> "螢幕未解鎖，已停止操作"
             ownSettings -> "設定首頁禁止誤觸；請進入手勢操作測試區"
             sharing -> "傳檔流程進行中，暫停一般手勢"
+            inGame -> "遊戲期間已自動暫停懸浮操作"
             else -> "未能確認目前顯示的 App"
         }
         return ok
@@ -993,6 +1052,8 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        pendingGameExit?.let(main::removeCallbacks)
+        pendingGameExit = null
         clearPending()
         pointerOverlay?.hide()
         pointerOverlay = null
