@@ -1276,6 +1276,23 @@ class MultiPeerTransferManager(private val app: Context) {
                         waiting.replies.containsKey(it.endpoint) }) finishProbe(waiting)
                 }
             }
+            "queue_offer" -> {
+                if (!p.supportsQueue || sid.length !in 12..100) return
+                val raw = json.optJSONArray("files") ?: return
+                if (raw.length() !in 2..AirGrabBundle.MAX_FILES) return
+                val files = ArrayList<ExpectedItem>()
+                for (i in 0 until raw.length()) {
+                    val item = raw.optJSONObject(i) ?: return
+                    val name = item.optString("name")
+                    val size = item.optLong("size", -1L)
+                    val hash = item.optString("hash")
+                    if (!TransferPolicy.validFileOffer(sid, name, size, hash) ||
+                        name != TransferPolicy.safeName(name) || size <= 0L ||
+                        AirGrabBundle.isBundle(name)) return
+                    files.add(ExpectedItem(name, size, hash))
+                }
+                receiveOffer(p, Offered.QueueOffer(sid, files))
+            }
             "file_offer" -> {
                 val name = json.optString("name")
                 val size = json.optLong("size", -1)
@@ -1303,7 +1320,9 @@ class MultiPeerTransferManager(private val app: Context) {
             }
             "file_ready" -> {
                 val batch = active ?: return
-                if (batch.sid != sid || batch.file == null) return
+                if (batch.sid != sid ||
+                    (batch.file == null && batch.queue == null)) return
+                if (batch.queue != null && !p.supportsQueue) return
                 if (batch.policy.accept(p.endpoint, SystemClock.uptimeMillis())) {
                     ui(p.modelLabel + " 已加入傳輸佇列")
                     sendControl(p, JSONObject().put("type", "file_queued").put("sid", sid))
@@ -1328,15 +1347,20 @@ class MultiPeerTransferManager(private val app: Context) {
             "file_verified", "file_invalid" -> {
                 val batch = active ?: return
                 if (batch.sid != sid || batch.policy.transferring() != p.endpoint) return
+                val index = batch.policy.nextIndex(p.endpoint)
+                if (batch.queue != null && json.optInt("index", -1) != index)
+                    return // stale or duplicate acknowledgement
                 val ok = json.optString("type") == "file_verified"
                 if (ok) {
                     if (batch.policy.complete(p.endpoint)) {
-                        ui(p.modelLabel + " 已完成驗證，成功 " +
-                            batch.policy.completedCount() + " 台裝置")
-                        visual(VisualPhase.SEND_COMPLETE,
+                        val verified = batch.policy.progress(p.endpoint)
+                        val total = batch.queue?.size ?: 1
+                        ui(p.modelLabel + "：已完成 ${verified}/${total} 個檔案")
+                        if (verified == total) visual(VisualPhase.SEND_COMPLETE,
                             "裝置接收成功 · 其他接收者繼續")
                     }
-                } else failRecipient(batch, p.endpoint, "接收端 SHA-256 驗證失敗")
+                } else failRecipient(batch, p.endpoint,
+                    "第 ${index + 1} 個原始檔 SHA-256 驗證失敗")
                 startNextFile()
                 finishBroadcastIfDone(batch)
             }
@@ -1363,8 +1387,15 @@ class MultiPeerTransferManager(private val app: Context) {
 
     private fun startNextFile() {
         val batch = active ?: return
-        val file = batch.file ?: return
+        if (batch.file == null && batch.queue == null) return
         val next = batch.policy.claimNext() ?: return
+        val index = batch.policy.nextIndex(next)
+        val part = batch.queue?.getOrNull(index)
+        val file = part?.file ?: batch.file
+        if (file == null) {
+            failRecipient(batch, next, "佇列檔案不存在")
+            return
+        }
         val p = peers[next]
         if (p?.verified != true) {
             failRecipient(batch, next, "裝置已離線")
@@ -1381,8 +1412,11 @@ class MultiPeerTransferManager(private val app: Context) {
                         "無法送出檔案：" + it.message)
                 }
             }
-            ui("開始傳給 " + p.modelLabel +
-                "；其他接收端已排隊，互不影響")
+            val phase = batch.queue?.let {
+                "第 ${index + 1}/${it.size} 個 · ${part?.info?.name}；"
+            } ?: ""
+            ui("開始傳給 " + p.modelLabel + "：" + phase +
+                "其他接收端已排隊，互不影響")
         } catch (e: Exception) {
             failRecipient(batch, next, "檔案無法開啟：" + e.message)
         }
