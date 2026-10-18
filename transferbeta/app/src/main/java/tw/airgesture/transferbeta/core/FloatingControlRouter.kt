@@ -80,9 +80,15 @@ class FloatingControlRouter(pointerDwellMs: Long = 2000L, sensitivity: Int = 1) 
         val gestureShape = when (shape) {
             "Open_Palm" -> GestureDecisionEngine.Shape.OPEN_PALM
             "Closed_Fist" -> GestureDecisionEngine.Shape.CLOSED_FIST
-            null, "None" -> if (mayTrackUncertainHand)
-                GestureDecisionEngine.Shape.TRACKED_HAND
-                else GestureDecisionEngine.Shape.NO_HAND
+            null, "None" -> when {
+                mayTrackUncertainHand -> GestureDecisionEngine.Shape.TRACKED_HAND
+                // Even a weakly predicted fist or pointing gesture ends swipe
+                // tracking; otherwise a later None frame could reuse its origin.
+                validHandPosition && rawCategory != null &&
+                    rawCategory.isNotBlank() && rawCategory != "None" &&
+                    rawCategory != "Open_Palm" -> GestureDecisionEngine.Shape.OTHER
+                else -> GestureDecisionEngine.Shape.NO_HAND
+            }
             else -> GestureDecisionEngine.Shape.OTHER
         }
         val pointerResult = if (shape == "Pointing_Up" && confidence >= .65f &&
