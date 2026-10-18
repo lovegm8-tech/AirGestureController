@@ -132,7 +132,7 @@ class ShareReceiverActivity : Activity() {
                         val ready = GlobalGestureService.transfer
                         if (GlobalGestureService.isActive && ready?.isConnected == true) {
                             ready.reportShareStarted("已取得三星相簿原檔 · 正在建立接收請求")
-                            ready.offerFile(candidate, safe)
+                            ready.offerFile(candidate, safe, deleteWhenDone = true)
                             // Ownership transferred to background transport; do not delete here.
                             staged = null
                             finish()
