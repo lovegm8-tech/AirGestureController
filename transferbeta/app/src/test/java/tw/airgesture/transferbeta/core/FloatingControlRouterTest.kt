@@ -136,6 +136,36 @@ class FloatingControlRouterTest {
         assertEquals(1, events.count { it.command == FloatingControlRouter.Command.SWIPE_UP })
     }
 
+    @Test fun openPalmLeftSwipeMovesFromRightEdgeWithoutGrabbing() {
+        val router = FloatingControlRouter()
+        val events = listOf(
+            step(router, "Open_Palm", 1000L, px = .88f, py = .5f),
+            step(router, "Open_Palm", 1100L, px = .83f, py = .5f),
+            step(router, "Open_Palm", 1250L, px = .38f, py = .5f),
+            step(router, "Open_Palm", 1350L, px = .18f, py = .5f)
+        )
+        assertEquals(1, events.count {
+            it.command == FloatingControlRouter.Command.SWIPE_LEFT
+        })
+        assertFalse(events.any {
+            it.command == FloatingControlRouter.Command.SEND ||
+                it.command == FloatingControlRouter.Command.RECEIVE
+        })
+        assertNull(step(router, "Closed_Fist", 1600L).command)
+    }
+
+    @Test fun palmVerticalMovementDoesNotTriggerLeftSwipe() {
+        val router = FloatingControlRouter()
+        val events = listOf(
+            step(router, "Open_Palm", 1000L, px = .80f, py = .90f),
+            step(router, "Open_Palm", 1100L, px = .78f, py = .80f),
+            step(router, "Open_Palm", 1250L, px = .63f, py = .31f)
+        )
+        assertTrue(events.none {
+            it.command == FloatingControlRouter.Command.SWIPE_LEFT
+        })
+    }
+
     @Test fun openPalmRightSwipeRoutesBack() {
         val r = FloatingControlRouter()
         val events = listOf(
