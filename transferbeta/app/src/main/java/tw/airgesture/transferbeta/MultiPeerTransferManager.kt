@@ -20,6 +20,7 @@ import android.provider.MediaStore
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.*
 import org.json.JSONObject
+import tw.airgesture.transferbeta.ioslink.TransferRelay
 import tw.airgesture.transferbeta.core.GrabContentPolicy
 import tw.airgesture.transferbeta.core.MediaFilePolicy
 import tw.airgesture.transferbeta.core.MediaKind
@@ -700,8 +701,10 @@ class MultiPeerTransferManager(private val app: Context) {
             reportCaptureFailure("找不到有效網址，無法分享")
             return
         }
+        val queuedForIphone = TransferRelay.offerLink(app, url)
         if (!isConnected || busy) {
-            reportCaptureFailure("尚未連線或上一份內容正在傳送")
+            if (queuedForIphone) ui("iPhone 待接收，請在 iPhone 點選取得")
+            else reportCaptureFailure("尚未連線或上一份內容正在傳送")
             return
         }
         busy = true
@@ -711,10 +714,6 @@ class MultiPeerTransferManager(private val app: Context) {
     }
 
     fun offerFile(candidate: File, originalName: String) {
-        if (!isConnected || busy) {
-            reportCaptureFailure("尚未連線或上一份檔案正在傳送")
-            return
-        }
         if (!candidate.isFile || candidate.length() <= 0 ||
             candidate.length() > TransferPolicy.MAX_BYTES) {
             reportCaptureFailure("檔案不存在、為空或超過 " + TransferPolicy.capacityLabel())
@@ -722,6 +721,12 @@ class MultiPeerTransferManager(private val app: Context) {
         }
         val name = TransferPolicy.safeName(originalName)
             ?: run { reportCaptureFailure("檔案名稱無效"); return }
+        val queuedForIphone = TransferRelay.offerFile(app, candidate, name)
+        if (!isConnected || busy) {
+            if (queuedForIphone) ui("檔案正在準備給 iPhone，請打開接收畫面")
+            else reportCaptureFailure("尚未連線或上一份檔案正在傳送")
+            return
+        }
         busy = true
         val requestEpoch = ++epoch
         val mode = VideoSendMode.fromKey(app.getSharedPreferences(

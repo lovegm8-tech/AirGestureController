@@ -602,6 +602,9 @@ class TransferActivity : ComponentActivity() {
                 ?: flash("請先啟動隔空抓取服務")
         }
         extraButton("重新搜尋裝置") { GlobalGestureService.transfer?.refresh() }
+        extraButton("iPhone 14 配對／無損傳輸") {
+            startActivity(Intent(this, tw.airgesture.transferbeta.ioslink.IosLinkPairingActivity::class.java))
+        }
         extraButton("已配對裝置與多台連線") {
             val current = GlobalGestureService.transfer
             if (current == null) {

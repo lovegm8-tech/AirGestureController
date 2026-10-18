@@ -33,6 +33,7 @@ import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.gesturerecognizer.GestureRecognizer
+import tw.airgesture.transferbeta.ioslink.TransferRelay
 import tw.airgesture.transferbeta.core.AdaptivePowerPolicy
 import tw.airgesture.transferbeta.core.CameraUnlockGate
 import tw.airgesture.transferbeta.core.VisualEvent
@@ -480,7 +481,7 @@ class GlobalGestureService : LifecycleService() {
             when (val command = output.command) {
                 FloatingControlRouter.Command.SEND -> {
                     actionCount++
-                    if (!connections.isConnected) {
+                    if (!connections.isConnected && !TransferRelay.isEnabled(applicationContext)) {
                         lastGestureAction = "無法傳送：尚未連線附近裝置"
                         connections.reportCaptureFailure(
                             "尚未連線附近裝置，請在兩台手機啟用懸浮操作，完成配對後再試")
