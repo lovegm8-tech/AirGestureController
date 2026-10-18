@@ -861,8 +861,12 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
 
     private fun executeControl(command: FloatingControlRouter.Command) {
         if (!controlAllowed()) return
-        if (command == FloatingControlRouter.Command.MEDIA_PLAY_PAUSE) {
-            if (activeTargetPackage() != YOUTUBE) {
+        // Live window check at the actual dispatch point: the camera's cached
+        // foreground app can be outdated by status/share overlays.
+        val actualForeground = activeTargetPackage()
+        val resolved = ControlTargetPolicy.commandForForeground(command, actualForeground)
+        if (resolved == FloatingControlRouter.Command.MEDIA_PLAY_PAUSE) {
+            if (actualForeground != YOUTUBE) {
                 lastControlStatus = "YouTube 未在前景，未發送播放鍵"
                 return
             }
@@ -873,7 +877,7 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
             audio.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP,
                 KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, 0))
             lastControlStatus = "已發送 YouTube 播放／暫停鍵"
-            GlobalGestureService.showAcceptedControlAction(command)
+            GlobalGestureService.showAcceptedControlAction(resolved)
             return
         }
         val size = screenSize()
@@ -881,7 +885,7 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         val x = size.x * .5f
         val y = size.y * .5f
         val path = Path()
-        val duration = when (command) {
+        val duration = when (resolved) {
             FloatingControlRouter.Command.SWIPE_UP -> {
                 path.moveTo(x, size.y * .74f)
                 path.lineTo(x, size.y * .30f)
@@ -907,15 +911,15 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
             GestureDescription.StrokeDescription(path, 0L, duration)
         ).build(), object : GestureResultCallback() {
             override fun onCompleted(gestureDescription: GestureDescription?) {
-                lastControlStatus = "手勢執行完成：" + command.name
+                lastControlStatus = "手勢執行完成：" + resolved.name
             }
             override fun onCancelled(gestureDescription: GestureDescription?) {
-                lastControlStatus = "手勢被系統中斷：" + command.name
+                lastControlStatus = "手勢被系統中斷：" + resolved.name
             }
         }, null)
-        lastControlStatus = if (sent) "手勢已送出：" + command.name
-            else "系統拒絕操作：" + command.name
-        if (sent) GlobalGestureService.showAcceptedControlAction(command)
+        lastControlStatus = if (sent) "手勢已送出：" + resolved.name
+            else "系統拒絕操作：" + resolved.name
+        if (sent) GlobalGestureService.showAcceptedControlAction(resolved)
     }
 
     override fun onDestroy() {
