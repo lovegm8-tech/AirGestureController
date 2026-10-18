@@ -101,6 +101,7 @@ class AdaptivePowerPolicyTest {
         p.observeHand(true, 1750L)
         assertTrue(p.shouldInfer(1750L))
         p.observeHand(true, 2150L)
+        assertTrue(p.shouldInfer(2150L))
         // 900ms from first appearance has elapsed. Sustained hand should
         // not continuously re-arm the faster burst or run at 115ms forever.
         assertFalse(p.shouldInfer(2280L))
