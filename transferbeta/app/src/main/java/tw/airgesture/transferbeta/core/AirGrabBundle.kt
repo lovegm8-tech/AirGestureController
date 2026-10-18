@@ -114,12 +114,13 @@ object AirGrabBundle {
                     require(manifest == null && records.size == expectedCount)
                     val buffer = ByteArray(MAX_MANIFEST_BYTES + 1)
                     var readTotal = 0
-                    while (true) {
+                    while (readTotal < buffer.size) {
                         val n = zip.read(buffer, readTotal, buffer.size - readTotal)
                         if (n < 0) break
+                        if (n == 0) continue
                         readTotal += n
-                        require(readTotal <= MAX_MANIFEST_BYTES) { "檔案清單過大" }
                     }
+                    require(readTotal <= MAX_MANIFEST_BYTES) { "檔案清單過大" }
                     manifest = String(buffer, 0, readTotal, Charsets.UTF_8)
                     zip.closeEntry()
                     require(zip.nextEntry == null) { "傳輸包有多餘資料" }
