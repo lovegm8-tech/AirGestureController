@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+    <key>CFBundleDisplayName</key><string>隔空抓取</string>
+    <key>NSCameraUsageDescription</key><string>掃描 Android 手機上的配對 QR Code。</string>
+    <key>NSLocalNetworkUsageDescription</key><string>用區域網路直接傳送和接收您選擇的檔案。</string>
+    <key>UIFileSharingEnabled</key><true/>
+    <key>LSSupportsOpeningDocumentsInPlace</key><true/>
+    <key>UILaunchScreen</key><dict/>
+</dict></plist>
