@@ -12,15 +12,26 @@ class FloatingControlRouterTest {
         ix: Float? = null, iy: Float? = null
     ) = r.accept(pose, .90f, px, py, ix, iy, time, offer, youtube)
 
-    @Test fun directFistHeldTwoSecondsTapsExactlyOnce() {
+    @Test fun directFistHeldOnePointFiveSecondsTapsExactlyOnce() {
         val r = FloatingControlRouter()
         val outputs = (0..36).map {
             step(r, "Closed_Fist", 1000L + 100L * it).command
         }
-        assertTrue(outputs.take(20).all { it == null })
-        assertEquals(FloatingControlRouter.Command.TAP, outputs[20])
+        assertTrue(outputs.take(15).all { it == null })
+        assertEquals(FloatingControlRouter.Command.TAP, outputs[15])
         assertEquals(1, outputs.count { it == FloatingControlRouter.Command.TAP })
         assertFalse(outputs.contains(FloatingControlRouter.Command.SEND))
+    }
+
+    @Test fun directFistMustNotTapBeforeExactlyFifteenHundredMillis() {
+        val r = FloatingControlRouter()
+        for (i in 0..14) {
+            assertNull(step(r, "Closed_Fist", 1000L + i * 100L).command)
+        }
+        assertNull(step(r, "Closed_Fist", 2499L).command)
+        assertEquals(FloatingControlRouter.Command.TAP,
+            step(r, "Closed_Fist", 2500L).command)
+        assertNull(step(r, "Closed_Fist", 2600L).command)
     }
 
     @Test fun directFistInYoutubeSendsMediaCommandAndNotTap() {
@@ -28,6 +39,8 @@ class FloatingControlRouterTest {
         val outputs = (0..35).map {
             step(r, "Closed_Fist", 1000L + it * 100L, youtube = true).command
         }
+        assertTrue(outputs.take(15).all { it == null })
+        assertEquals(FloatingControlRouter.Command.MEDIA_PLAY_PAUSE, outputs[15])
         assertEquals(1, outputs.count {
             it == FloatingControlRouter.Command.MEDIA_PLAY_PAUSE
         })
@@ -141,7 +154,7 @@ class FloatingControlRouterTest {
         assertFalse(step(r, "Pointing_Up", 3200L, ix = .4f, iy = .5f).pointer?.click ?: true)
     }
 
-    @Test fun classifiedHandAt60PercentCanTriggerTwoSecondTap() {
+    @Test fun classifiedHandAt60PercentCanTriggerOnePointFiveSecondTap() {
         val r = FloatingControlRouter()
         val actions = (0..25).map {
             r.accept("Closed_Fist", .60f, null, null, null, null,
