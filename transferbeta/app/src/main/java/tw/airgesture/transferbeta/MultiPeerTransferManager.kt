@@ -1112,6 +1112,15 @@ class MultiPeerTransferManager(private val app: Context) {
                             (offered !is Offered.FileOffer &&
                                 offered !is Offered.QueueOffer) || incomingPayload != -1L) {
                             client.cancelPayload(payload.id)
+                        } else if (offered is Offered.QueueOffer &&
+                            !((offered as Offered.QueueOffer).files
+                                .getOrNull(incomingQueueIndex)
+                                ?.let { enoughStorageForIncoming(it.size) } == true)) {
+                            client.cancelPayload(payload.id)
+                            val offer = offered as Offered.QueueOffer
+                            sendControl(p, JSONObject().put("type", "file_invalid")
+                                .put("sid", offer.sid).put("index", incomingQueueIndex))
+                            failIncoming("第 ${incomingQueueIndex + 1} 個檔案接收空間不足")
                         } else {
                             incomingFile = payload
                             incomingQueueAcknowledged = true
@@ -1438,6 +1447,7 @@ class MultiPeerTransferManager(private val app: Context) {
         incomingPayload = -1
         incomingFinished = false
         incomingQueueAcknowledged = false
+        incomingQueueIndex = 0
         closeIncomingPrompt()
         onReceiverOfferState?.invoke(false)
         reportCaptureFailure(reason)
@@ -1544,7 +1554,15 @@ class MultiPeerTransferManager(private val app: Context) {
     }
 
     private fun verifyFile() {
-        val expected = offered as? Offered.FileOffer ?: return
+        val offer = offered ?: return
+        val index = incomingQueueIndex
+        val expected = when (offer) {
+            is Offered.FileOffer -> offer
+            is Offered.QueueOffer -> offer.files.getOrNull(index)?.let {
+                Offered.FileOffer(offer.sid, it.name, it.size, it.sha)
+            } ?: return
+            else -> return
+        }
         val owner = offeredBy ?: return
         val payload = incomingFile ?: return
         incomingFile = null // do not verify twice
@@ -1596,25 +1614,47 @@ class MultiPeerTransferManager(private val app: Context) {
                     VideoPlaybackProbe.explain(app, dest!!) else null
                 main.post {
                     val p = peers[owner]
-                    if (offered !== expected || offeredBy != owner || p?.verified != true)
-                        return@post
-                    sendControl(p, JSONObject().put("type", "file_verified")
-                        .put("sid", expected.sid))
-                    busy = false
-                    offered = null
-                    offeredBy = null
+                    if (offered !== offer || offeredBy != owner ||
+                        p?.verified != true || incomingQueueIndex != index) return@post
+                    val ack = JSONObject().put("type", "file_verified")
+                        .put("sid", expected.sid)
+                    if (offer is Offered.QueueOffer) ack.put("index", index)
+                    sendControl(p, ack)
                     incomingPayload = -1
                     incomingFinished = false
-                    ui(playback ?: ("已接收並驗證檔案：" + expected.name))
-                    visual(VisualPhase.RECEIVE_COMPLETE, "接收成功 · SHA-256 已驗證")
+                    incomingQueueAcknowledged = true
+                    if (offer is Offered.QueueOffer) {
+                        incomingQueueIndex++
+                        ui("已驗證 ${incomingQueueIndex}/${offer.files.size} 個原始檔")
+                        if (incomingQueueIndex == offer.files.size) {
+                            busy = false
+                            offered = null
+                            offeredBy = null
+                            visual(VisualPhase.RECEIVE_COMPLETE,
+                                "${offer.files.size} 個原檔已全部驗證")
+                        }
+                    } else {
+                        busy = false
+                        offered = null
+                        offeredBy = null
+                        ui(playback ?: ("已接收並驗證檔案：" + expected.name))
+                        visual(VisualPhase.RECEIVE_COMPLETE,
+                            "接收成功 · SHA-256 已驗證")
+                    }
                 }
             } catch (e: Exception) {
                 try { dest?.let { app.contentResolver.delete(it, null, null) } }
                 catch (_: Exception) {}
                 main.post {
-                    peers[owner]?.let { sendControl(it, JSONObject()
-                        .put("type", "file_invalid").put("sid", expected.sid)) }
-                    failIncoming("接收檔案驗證失敗：" + e.message)
+                    if (offered !== offer || offeredBy != owner) return@post
+                    peers[owner]?.let {
+                        val failure = JSONObject().put("type", "file_invalid")
+                            .put("sid", expected.sid)
+                        if (offer is Offered.QueueOffer) failure.put("index", index)
+                        sendControl(it, failure)
+                    }
+                    failIncoming("第 ${index + 1} 個檔案驗證失敗：" + e.message +
+                        "；已成功的檔案會保留")
                 }
             }
         }
