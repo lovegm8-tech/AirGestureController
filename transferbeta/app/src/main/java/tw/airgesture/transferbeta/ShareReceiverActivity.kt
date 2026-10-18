@@ -155,9 +155,8 @@ class ShareReceiverActivity : Activity() {
         }
     }
 
-    /** Multi-file selection remains in the source app. One share and one
-     * receive gesture produce an authenticated bundle, unpacked to originals
-     * on the receiving device. Do not treat ClipData previews as selected files. */
+    /** Multi-share uses staged originals and a per-file queue, not a ZIP.
+     * The receiver approves one session and verifies each file independently. */
     @Suppress("DEPRECATION")
     private fun receiveMultiple(incoming: Intent) {
         val explicit = if (Build.VERSION.SDK_INT >= 33)
@@ -179,39 +178,53 @@ class ShareReceiverActivity : Activity() {
         }
         GlobalGrabBridge.accessibility?.get()?.externalShareDelivered()
         handling = true
-        transfer.reportShareStarted("正在準備 ${originals.size} 個原始檔案…")
+        transfer.reportShareStarted("正在逐檔準備 ${originals.size} 個原始檔案…")
         io.execute {
-            var target: File? = null
+            val staged = mutableListOf<MultiPeerTransferManager.StagedFile>()
             try {
-                val sources = originals.map { uri ->
-                    AirGrabBundle.Source(readName(uri)) {
-                        contentResolver.openInputStream(uri)
-                            ?: error("無法讀取原始檔案")
-                    }
-                }
                 val cache = File(cacheDir, "sharesheet-staging").apply { mkdirs() }
-                target = File.createTempFile("airgrab-", AirGrabBundle.EXTENSION, cache)
-                val packed = target!!
-                AirGrabBundle.pack(packed, sources) { position, total ->
+                for ((index, uri) in originals.withIndex()) {
+                    val name = TransferPolicy.safeName(readName(uri))
+                        ?: error("第 ${index + 1} 個檔案名稱無效")
+                    // Stage EACH original independently, without a combined
+                    // ZIP. Android's temporary Sharesheet URI access can expire
+                    // after the transparent share Activity closes.
+                    val temp = File.createTempFile("airgrab-part-", ".tmp", cache)
+                    staged.add(MultiPeerTransferManager.StagedFile(temp, name))
+                    var copied = 0L
+                    contentResolver.openInputStream(uri)?.use { input ->
+                        FileOutputStream(temp).buffered().use { output ->
+                            val buffer = ByteArray(128 * 1024)
+                            while (true) {
+                                val n = input.read(buffer)
+                                if (n < 0) break
+                                if (n == 0) continue
+                                copied += n
+                                check(copied <= TransferPolicy.MAX_BYTES) {
+                                    "單檔超過裝置可處理的大小"
+                                }
+                                output.write(buffer, 0, n)
+                            }
+                        }
+                    } ?: error("第 ${index + 1} 個原始檔案沒有讀取權限")
+                    require(copied > 0) { "第 ${index + 1} 個原始檔案是空的" }
                     main.post {
                         GlobalGestureService.transfer?.reportShareStarted(
-                            "封裝原始檔 ${position}/${total} · 不壓縮、不轉檔")
+                            "準備原始檔 ${index + 1}/${originals.size} · 逐檔佇列")
                     }
                 }
                 main.post {
                     val ready = GlobalGestureService.transfer
                     if (GlobalGestureService.isActive && ready?.isConnected == true) {
-                        ready.offerFile(packed, packed.name,
-                            multiCount = originals.size, deleteWhenDone = true)
-                        target = null // transport owns this staged bundle
-                        finish()
+                        ready.offerFiles(staged.toList())
+                        finish() // Background queue owns all staged originals.
                     } else {
-                        packed.delete()
+                        staged.forEach { it.file.delete() }
                         notifyAndFinish("準備完成，但接收裝置已斷線")
                     }
                 }
             } catch (e: Exception) {
-                target?.delete()
+                staged.forEach { it.file.delete() }
                 notifyAndFinish("多檔抓取失敗：" + (e.message ?: "原始檔案讀取失敗"))
             }
         }
