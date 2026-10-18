@@ -859,6 +859,69 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         if (sent) GlobalGestureService.showAcceptedPointerTap()
     }
 
+    /**
+     * Inspect the current YouTube window only when the user completes a
+     * deliberate 2-second fist. The camera stream never walks UI nodes.
+     * A generic "Shorts" navigation tab is intentionally NOT a match.
+     */
+    private fun isShortsPlayerOpen(): Boolean {
+        val root = rootInActiveWindow
+        if (root?.packageName?.toString() == YOUTUBE && hasShortsPlayerMarker(root))
+            return true
+        // A non-touchable overlay can sometimes become the active window;
+        // inspect the YouTube application root from interactive windows then.
+        return try {
+            windows.any { info ->
+                val node = info.root
+                node?.packageName?.toString() == YOUTUBE &&
+                    hasShortsPlayerMarker(node)
+            }
+        } catch (_: Exception) { false }
+    }
+
+    private fun hasShortsPlayerMarker(root: AccessibilityNodeInfo): Boolean {
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        var checked = 0
+        while (queue.isNotEmpty() && checked++ < 220) {
+            val node = queue.removeFirst()
+            if (YouTubeShortsPolicy.isPlayerResource(node.viewIdResourceName) ||
+                YouTubeShortsPolicy.isPlayerClass(node.className?.toString())) return true
+            // No continuous text polling or content interpretation. Only
+            // non-sensitive UI metadata for the confirmed foreground player.
+            for (i in 0 until node.childCount.coerceAtMost(40)) {
+                node.getChild(i)?.let(queue::addLast)
+            }
+        }
+        return false
+    }
+
+    /** Shorts handles a single screen tap, not the Android media key. */
+    private fun dispatchShortsScreenTap() {
+        val size = screenSize()
+        if (size.x <= 0 || size.y <= 0) return
+        val x = YouTubeShortsPolicy.tapX(size.x)
+        val y = YouTubeShortsPolicy.tapY(size.y)
+        val stroke = GestureDescription.StrokeDescription(
+            Path().apply { moveTo(x, y) }, 0L, 75L
+        )
+        val sent = dispatchGesture(
+            GestureDescription.Builder().addStroke(stroke).build(),
+            object : GestureResultCallback() {
+                override fun onCompleted(gestureDescription: GestureDescription?) {
+                    lastControlStatus = "已點按 Shorts 播放畫面（無法確認影片狀態）"
+                }
+                override fun onCancelled(gestureDescription: GestureDescription?) {
+                    lastControlStatus = "Shorts 畫面點按被系統中斷"
+                }
+            }, null
+        )
+        lastControlStatus = if (sent) "已送出 Shorts 單次畫面點按"
+            else "系統拒絕 Shorts 畫面點按"
+        if (sent) GlobalGestureService.showAcceptedControlAction(
+            FloatingControlRouter.Command.MEDIA_PLAY_PAUSE)
+    }
+
     private fun executeControl(command: FloatingControlRouter.Command) {
         if (!controlAllowed()) return
         // Live window check at the actual dispatch point: the camera's cached
@@ -868,6 +931,13 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         if (resolved == FloatingControlRouter.Command.MEDIA_PLAY_PAUSE) {
             if (actualForeground != YOUTUBE) {
                 lastControlStatus = "YouTube 未在前景，未發送播放鍵"
+                return
+            }
+            val shortsMode = FloatingSettings.youtubeShortsMode(this)
+            val isShorts = shortsMode == YouTubeShortsPolicy.AUTO &&
+                isShortsPlayerOpen()
+            if (YouTubeShortsPolicy.useScreenTap(shortsMode, isShorts)) {
+                dispatchShortsScreenTap()
                 return
             }
             val audio = getSystemService(AUDIO_SERVICE) as AudioManager
