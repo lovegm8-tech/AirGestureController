@@ -1276,11 +1276,115 @@ class MultiPeerTransferManager(private val app: Context) {
         reportCaptureFailure(reason)
     }
 
+    /** A multi-file package is verified twice: first the authenticated outer
+     * SHA-256 envelope, then each original SHA-256 from the internal manifest.
+     * MediaStore rows remain hidden (IS_PENDING=1) until EVERY file passes.
+     * Any failure removes all rows, including partially published ones. */
+    private fun verifyBundle(
+        expected: Offered.FileOffer, owner: String, payload: Payload
+    ) {
+        visual(VisualPhase.VERIFYING, "正在驗證 ${expected.items} 個原始檔案")
+        worker.execute {
+            val created = mutableListOf<Uri>()
+            try {
+                val source = payload.asFile()?.asUri()
+                    ?: error("多檔傳輸內容不存在")
+                val digest = MessageDigest.getInstance("SHA-256")
+                var outerBytes = 0L
+                app.contentResolver.openInputStream(source)?.use { input ->
+                    val bytes = ByteArray(128 * 1024)
+                    while (true) {
+                        val count = input.read(bytes)
+                        if (count < 0) break
+                        if (count == 0) continue
+                        outerBytes += count
+                        check(outerBytes <= expected.size &&
+                            outerBytes <= TransferPolicy.MAX_BYTES)
+                        digest.update(bytes, 0, count)
+                    }
+                } ?: error("無法讀取多檔傳輸包")
+                val outerHash = digest.digest().joinToString("") {
+                    "%02x".format(it)
+                }
+                check(TransferPolicy.matchingHash(expected.sha,
+                    outerHash, expected.size, outerBytes)) {
+                    "完整傳輸包 SHA-256 驗證失敗"
+                }
+
+                val records = app.contentResolver.openInputStream(source)?.use { input ->
+                    AirGrabBundle.unpack(input, expected.items, { name ->
+                        val spec = MediaFilePolicy.destination(name)
+                        val collection = when (spec.kind) {
+                            MediaKind.IMAGE -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                            MediaKind.VIDEO -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                            MediaKind.DOWNLOAD -> MediaStore.Downloads.EXTERNAL_CONTENT_URI
+                        }
+                        val uri = app.contentResolver.insert(collection, ContentValues().apply {
+                            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                            put(MediaStore.MediaColumns.MIME_TYPE, spec.mime)
+                            put(MediaStore.MediaColumns.RELATIVE_PATH, spec.folder + "/")
+                            put(MediaStore.MediaColumns.IS_PENDING, 1)
+                        }) ?: error("無法儲存原始檔案")
+                        created.add(uri)
+                        app.contentResolver.openOutputStream(uri, "w")
+                            ?: error("無法寫入原始檔案")
+                    }, { current, total ->
+                        ui("正在還原原檔 ${current}/${total} · 逐檔核對 SHA-256")
+                    })
+                } ?: error("無法開啟原始檔案封裝")
+                check(records.size == expected.items)
+                for (uri in created) {
+                    check(app.contentResolver.update(uri, ContentValues().apply {
+                        put(MediaStore.MediaColumns.IS_PENDING, 0)
+                    }, null, null) > 0) { "無法發布已驗證的檔案" }
+                }
+                main.post {
+                    val peer = peers[owner]
+                    if (offered !== expected || offeredBy != owner ||
+                        peer?.verified != true) {
+                        created.forEach {
+                            try { app.contentResolver.delete(it, null, null) }
+                            catch (_: Exception) {}
+                        }
+                        return@post
+                    }
+                    sendControl(peer, JSONObject().put("type", "file_verified")
+                        .put("sid", expected.sid))
+                    busy = false
+                    offered = null
+                    offeredBy = null
+                    incomingPayload = -1L
+                    incomingFinished = false
+                    ui("已接收 ${records.size} 個原始檔案，逐檔 SHA-256 驗證成功")
+                    visual(VisualPhase.RECEIVE_COMPLETE,
+                        "${records.size} 個原始檔案已完整接收")
+                }
+            } catch (e: Exception) {
+                created.asReversed().forEach {
+                    try { app.contentResolver.delete(it, null, null) }
+                    catch (_: Exception) {}
+                }
+                main.post {
+                    if (offered !== expected || offeredBy != owner) return@post
+                    peers[owner]?.takeIf { it.verified }?.let { peer ->
+                        sendControl(peer, JSONObject().put("type", "file_invalid")
+                            .put("sid", expected.sid))
+                    }
+                    failIncoming("多檔驗證失敗：" + (e.message ?: "檔案不完整"))
+                }
+            }
+        }
+    }
+
     private fun verifyFile() {
         val expected = offered as? Offered.FileOffer ?: return
         val owner = offeredBy ?: return
         val payload = incomingFile ?: return
         incomingFile = null // do not verify twice
+        if (expected.items > 1) {
+            verifyBundle(expected, owner, payload)
+            return
+        }
         visual(VisualPhase.VERIFYING, "接收完畢，正在驗證 SHA-256")
         worker.execute {
             var dest: Uri? = null
