@@ -12,14 +12,26 @@ class FloatingControlRouterTest {
         ix: Float? = null, iy: Float? = null
     ) = r.accept(pose, .90f, px, py, ix, iy, time, offer, youtube)
 
-    @Test fun fistHeldTwoSecondsSendsWithNoPrecedingPalm() {
+    @Test fun fistHeldThreeSecondsSendsOnlyOnceWithNoPrecedingPalm() {
         val r = FloatingControlRouter()
         var sendCount = 0
-        for (i in 0..35) {
-            if (step(r, "Closed_Fist", 1000L + i * 100L).command ==
-                FloatingControlRouter.Command.SEND) sendCount++
+        for (i in 0..45) {
+            val decision = step(r, "Closed_Fist", 1000L + i * 100L).command
+            if (i < 30) assertNotEquals(FloatingControlRouter.Command.SEND, decision)
+            if (decision == FloatingControlRouter.Command.SEND) sendCount++
         }
         assertEquals(1, sendCount)
+    }
+
+    @Test fun fistReleasedBetweenTwoAndThreeSecondsDoesNotSendOrTap() {
+        val r = FloatingControlRouter()
+        step(r, "Open_Palm", 900L)
+        step(r, "Open_Palm", 1000L)
+        val decisions = (0..27).map {
+            step(r, "Closed_Fist", 1100L + it * 100L).command
+        } + listOf(step(r, "Open_Palm", 3950L).command,
+            step(r, "Open_Palm", 4100L).command)
+        assertTrue(decisions.all { it == null })
     }
 
     @Test fun offerChangesLongFistFromSendToReceive() {
@@ -57,11 +69,11 @@ class FloatingControlRouterTest {
         val r = FloatingControlRouter()
         step(r, "Open_Palm", 1000L)
         step(r, "Open_Palm", 1100L)
-        val outputs = (0..27).map {
+        val outputs = (0..37).map {
             step(r, "Closed_Fist", 1200L + it * 100L).command
         } + listOf(
-            step(r, "Open_Palm", 4000L).command,
-            step(r, "Open_Palm", 4100L).command
+            step(r, "Open_Palm", 5000L).command,
+            step(r, "Open_Palm", 5100L).command
         )
         assertEquals(1, outputs.count { it == FloatingControlRouter.Command.SEND })
         assertEquals(0, outputs.count { it == FloatingControlRouter.Command.TAP })
@@ -96,12 +108,13 @@ class FloatingControlRouterTest {
         assertFalse(step(r, "Pointing_Up", 3200L, ix = .4f, iy = .5f).pointer?.click ?: true)
     }
 
-    @Test fun classifiedHandAt60PercentCanStillTriggerTwoSecondGrab() {
+    @Test fun classifiedHandAt60PercentCanStillTriggerThreeSecondGrab() {
         val r = FloatingControlRouter()
         var count = 0
-        for (i in 0..30) {
+        for (i in 0..40) {
             val decision = r.accept("Closed_Fist", .60f, null, null, null, null,
                 1000L + i * 100L, false, false)
+            if (i < 30) assertNotEquals(FloatingControlRouter.Command.SEND, decision.command)
             if (decision.command == FloatingControlRouter.Command.SEND) count++
         }
         assertEquals(1, count)
