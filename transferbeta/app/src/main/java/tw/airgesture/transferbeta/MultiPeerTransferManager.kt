@@ -20,6 +20,7 @@ import android.provider.MediaStore
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.*
 import org.json.JSONObject
+import tw.airgesture.transferbeta.core.AirGrabBundle
 import tw.airgesture.transferbeta.core.GrabContentPolicy
 import tw.airgesture.transferbeta.core.MediaFilePolicy
 import tw.airgesture.transferbeta.core.MediaKind
@@ -66,6 +67,7 @@ class MultiPeerTransferManager(private val app: Context) {
         var modelLabel = hint
         var nearbyReady = false
         var verified = false
+        var supportsBundles = false
         var authPending = false
         var awaitingPair = false
         var numericApproved = false
@@ -89,7 +91,8 @@ class MultiPeerTransferManager(private val app: Context) {
     private sealed class Offered {
         abstract val sid: String
         data class FileOffer(
-            override val sid: String, val name: String, val size: Long, val sha: String
+            override val sid: String, val name: String, val size: Long,
+            val sha: String, val items: Int = 1
         ) : Offered()
         data class LinkOffer(override val sid: String, val url: String) : Offered()
     }
@@ -99,7 +102,8 @@ class MultiPeerTransferManager(private val app: Context) {
         val json: JSONObject,
         val policy: MultiReceiverBatch,
         val file: File? = null,
-        val url: String? = null
+        val url: String? = null,
+        val deleteAfterTransfer: Boolean = false
     ) {
         var awaitingVerificationPayload = -1L
     }
@@ -127,6 +131,8 @@ class MultiPeerTransferManager(private val app: Context) {
     private var searchStartedAt = 0L
     private var fastDiscoveryUntil = 0L
     private var pendingVideo: PendingVideo? = null
+    private var pendingFileCount = 1
+    private var pendingOwnedFile: File? = null
     private var transcoder: CompatibilityVideoTranscoder? = null
     private var displayedPair: String? = null
     private var lastConnected = false
@@ -214,7 +220,13 @@ class MultiPeerTransferManager(private val app: Context) {
         transcoder?.cancel()
         transcoder = null
         peers.clear()
+        active?.let { batch ->
+            if (batch.deleteAfterTransfer) batch.file?.delete()
+        }
         active = null
+        pendingOwnedFile?.delete()
+        pendingOwnedFile = null
+        pendingFileCount = 1
         pendingVideo = null
         offered = null
         offeredBy = null
@@ -605,7 +617,8 @@ class MultiPeerTransferManager(private val app: Context) {
         }
         if (!p.ownProofVerified) {
             p.ownProofVerified = true
-            sendControl(p, JSONObject().put("type", "auth_ready"))
+            sendControl(p, JSONObject().put("type", "auth_ready")
+                .put("bundle_v1", true))
         }
         finishAuthentication(p)
     }
@@ -644,10 +657,14 @@ class MultiPeerTransferManager(private val app: Context) {
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
-    private fun beginBroadcast(json: JSONObject, file: File? = null, url: String? = null) {
+    private fun beginBroadcast(
+        json: JSONObject, file: File? = null, url: String? = null,
+        deleteAfterTransfer: Boolean = false
+    ) {
         val now = SystemClock.uptimeMillis()
         val sid = json.getString("sid")
-        val batch = Outgoing(sid, json, MultiReceiverBatch(sid, now), file, url)
+        val batch = Outgoing(sid, json, MultiReceiverBatch(sid, now),
+            file, url, deleteAfterTransfer)
         active = batch
         for (p in peers.values) announceToPeer(batch, p)
         ui("已開放 30 秒多人接收；連線 " + connectedDeviceIds.size + " 台")
@@ -663,6 +680,7 @@ class MultiPeerTransferManager(private val app: Context) {
 
     private fun announceToPeer(batch: Outgoing, p: Peer) {
         if (!p.verified || active !== batch) return
+        if (batch.json.optInt("items", 1) > 1 && !p.supportsBundles) return
         val now = SystemClock.uptimeMillis()
         if (batch.policy.announce(p.endpoint, now)) {
             sendControl(p, batch.json)
@@ -689,7 +707,10 @@ class MultiPeerTransferManager(private val app: Context) {
         val failures = batch.policy.failedCount()
         active = null
         busy = false
-        ui("多人傳送結束：成功 " + successes + " 台，未完成 " + failures + " 台")
+        if (batch.deleteAfterTransfer) batch.file?.delete()
+        val items = batch.json.optInt("items", 1)
+        ui("多人傳送結束：每台 " + items + " 個檔案；成功 " +
+            successes + " 台，未完成 " + failures + " 台")
         visual(if (successes > 0) VisualPhase.SEND_COMPLETE else VisualPhase.FAILURE,
             "成功 " + successes + " 台 · 失敗或未接收 " + failures + " 台")
     }
@@ -710,19 +731,41 @@ class MultiPeerTransferManager(private val app: Context) {
             .put("sid", sid).put("url", url), url = url)
     }
 
-    fun offerFile(candidate: File, originalName: String) {
+    fun offerFile(
+        candidate: File, originalName: String,
+        multiCount: Int = 1, deleteWhenDone: Boolean = false
+    ) {
+        fun reject(reason: String) {
+            if (deleteWhenDone) candidate.delete()
+            reportCaptureFailure(reason)
+        }
         if (!isConnected || busy) {
-            reportCaptureFailure("尚未連線或上一份檔案正在傳送")
+            reject("尚未連線或上一份檔案正在傳送")
             return
         }
         if (!candidate.isFile || candidate.length() <= 0 ||
             candidate.length() > TransferPolicy.MAX_BYTES) {
-            reportCaptureFailure("檔案不存在、為空或超過 " + TransferPolicy.capacityLabel())
+            reject("檔案不存在、為空或超過 " + TransferPolicy.capacityLabel())
             return
         }
         val name = TransferPolicy.safeName(originalName)
-            ?: run { reportCaptureFailure("檔案名稱無效"); return }
+            ?: run { reject("檔案名稱無效"); return }
+        if (multiCount != 1 && (multiCount !in 2..AirGrabBundle.MAX_FILES ||
+            !AirGrabBundle.isBundle(name))) {
+            reject("多檔封裝格式或數量無效")
+            return
+        }
+        if (multiCount == 1 && AirGrabBundle.isBundle(name)) {
+            reject("不允許以單檔模式傳送 AirGrab 封裝")
+            return
+        }
+        if (multiCount > 1 && peers.values.none { it.verified && it.supportsBundles }) {
+            reject("接收端尚未支援多檔傳輸，請先更新兩台手機")
+            return
+        }
         busy = true
+        pendingFileCount = multiCount
+        pendingOwnedFile = if (deleteWhenDone) candidate else null
         val requestEpoch = ++epoch
         val mode = VideoSendMode.fromKey(app.getSharedPreferences(
             "video_transfer", Context.MODE_PRIVATE).getString("mode", "auto"))
@@ -799,6 +842,9 @@ class MultiPeerTransferManager(private val app: Context) {
     private fun failPreparation(reason: String) {
         busy = false
         pendingVideo = null
+        pendingOwnedFile?.delete()
+        pendingOwnedFile = null
+        pendingFileCount = 1
         ++epoch
         reportCaptureFailure(reason)
     }
@@ -811,9 +857,14 @@ class MultiPeerTransferManager(private val app: Context) {
                     if (!started || !isConnected || !busy ||
                         requestEpoch != epoch) return@post
                     val sid = UUID.randomUUID().toString()
+                    val itemCount = pendingFileCount
+                    val owned = pendingOwnedFile === file
+                    pendingOwnedFile = null
+                    pendingFileCount = 1
                     beginBroadcast(JSONObject().put("type", "file_offer")
                         .put("sid", sid).put("name", name)
-                        .put("size", file.length()).put("hash", sha), file = file)
+                        .put("size", file.length()).put("hash", sha)
+                        .put("items", itemCount), file = file, deleteAfterTransfer = owned)
                 }
             } catch (e: Exception) {
                 main.post { if (requestEpoch == epoch)
@@ -941,6 +992,7 @@ class MultiPeerTransferManager(private val app: Context) {
                                     }
                                 }
                                 "auth_ready" -> if (p.authPending) {
+                                    p.supportsBundles = json.optBoolean("bundle_v1", false)
                                     p.remoteReady = true
                                     finishAuthentication(p)
                                 }
@@ -1048,7 +1100,9 @@ class MultiPeerTransferManager(private val app: Context) {
         incomingFinished = false
         incomingQueueAcknowledged = false
         onReceiverOfferState?.invoke(true)
-        val name = if (offer is Offered.FileOffer) offer.name else "網頁連結"
+        val name = if (offer is Offered.FileOffer)
+            if (offer.items > 1) "${offer.items} 個原始檔案" else offer.name
+            else "網頁連結"
         notifyIncomingOffer(name)
         sendControl(p, JSONObject().put("type", "offer_seen").put("sid", offer.sid))
         ui("收到 " + name + " · 30 秒內握拳→張掌即可接收")
@@ -1094,8 +1148,13 @@ class MultiPeerTransferManager(private val app: Context) {
                 val size = json.optLong("size", -1)
                 val hash = json.optString("hash")
                 if (!TransferPolicy.validFileOffer(sid, name, size, hash)) return
+                val items = json.optInt("items", 1)
+                if (AirGrabBundle.isBundle(name)) {
+                    if (items !in 2..AirGrabBundle.MAX_FILES || !p.supportsBundles)
+                        return
+                } else if (items != 1) return
                 receiveOffer(p, Offered.FileOffer(sid,
-                    TransferPolicy.safeName(name)!!, size, hash))
+                    TransferPolicy.safeName(name)!!, size, hash, items))
             }
             "link_offer" -> {
                 val url = json.optString("url")
