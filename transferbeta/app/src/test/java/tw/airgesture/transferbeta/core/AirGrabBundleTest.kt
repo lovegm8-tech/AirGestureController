@@ -30,10 +30,10 @@ class AirGrabBundleTest {
             val progress = mutableListOf<Int>()
             val records = AirGrabBundle.unpack(bundle.inputStream(), 3, { name ->
                 ByteArrayOutputStream().also { restored[name] = it }
-            }) { index, count ->
+            }, { index, count ->
                 assertEquals(3, count)
                 progress.add(index)
-            }
+            })
             assertEquals(listOf(1, 2, 3), progress)
             assertEquals(data.map { it.first }, records.map { it.name })
             for ((name, bytes) in data) {
