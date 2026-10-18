@@ -10,6 +10,7 @@ object GestureActionCuePolicy {
             FloatingControlRouter.Command.SWIPE_UP -> GestureActionCue("↑", "向上滑")
             FloatingControlRouter.Command.SWIPE_DOWN -> GestureActionCue("↓", "向下滑")
             FloatingControlRouter.Command.SWIPE_BACK -> GestureActionCue("→", "返回上一頁")
+            FloatingControlRouter.Command.SWIPE_LEFT -> GestureActionCue("←", "由右往左滑")
             FloatingControlRouter.Command.TAP -> GestureActionCue("●", "點擊")
             FloatingControlRouter.Command.MEDIA_PLAY_PAUSE ->
                 GestureActionCue("⏯", "播放／暫停")
