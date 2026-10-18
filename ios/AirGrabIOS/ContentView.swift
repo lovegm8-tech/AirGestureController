@@ -60,6 +60,9 @@ struct ContentView: View {
                         ShareLink(item: file) {
                             Label(file.lastPathComponent, systemImage: "square.and.arrow.up")
                         }
+                        if let url = model.receivedWebLink(from: file) {
+                            Link("開啟收到的網址", destination: url)
+                        }
                     }
                 }
                 Section("狀態") {
