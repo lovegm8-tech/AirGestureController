@@ -5,11 +5,18 @@ package tw.airgesture.transferbeta.core
 class MultiReceiverBatch(
     val session: String,
     private val offeredAtMs: Long,
-    private val acceptWindowMs: Long = TransferPolicy.OFFER_TIMEOUT_MS
+    private val acceptWindowMs: Long = TransferPolicy.OFFER_TIMEOUT_MS,
+    val fileCount: Int = 1
 ) {
+    init { require(fileCount in 1..32) }
     enum class State { OFFERED, SEEN, QUEUED, SENDING, VERIFYING, COMPLETE, FAILED }
     private val receivers = linkedMapOf<String, State>()
     private var sendingTo: String? = null
+    // Zero-based next file index for each peer; failure or arrival of another
+    // peer cannot rewind the files that this peer already verified.
+    private val verifiedCount = linkedMapOf<String, Int>()
+    fun nextIndex(id: String): Int = verifiedCount[id] ?: 0
+    fun progress(id: String): Int = verifiedCount[id] ?: 0
 
     fun canAccept(nowMs: Long) = nowMs >= offeredAtMs &&
         nowMs - offeredAtMs < acceptWindowMs
@@ -27,6 +34,7 @@ class MultiReceiverBatch(
         if (!canAccept(nowMs)) return false
         if (receivers[id] !in setOf(State.OFFERED, State.SEEN)) return false
         receivers[id] = State.QUEUED
+        verifiedCount[id] = 0
         return true
     }
     fun claimNext(): String? {
@@ -46,7 +54,9 @@ class MultiReceiverBatch(
     fun complete(id: String): Boolean {
         if (sendingTo != id || receivers[id] !in setOf(State.VERIFYING, State.SENDING))
             return false
-        receivers[id] = State.COMPLETE
+        val confirmed = (verifiedCount[id] ?: 0) + 1
+        verifiedCount[id] = confirmed
+        receivers[id] = if (confirmed < fileCount) State.QUEUED else State.COMPLETE
         sendingTo = null
         return true
     }
