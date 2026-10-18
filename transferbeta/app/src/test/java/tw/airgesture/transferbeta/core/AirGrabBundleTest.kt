@@ -93,6 +93,65 @@ class AirGrabBundleTest {
         } catch (_: IllegalArgumentException) { }
     }
 
+    @Test fun fileIntegrityMismatchRejectsWholeBatch() {
+        val bundle = File.createTempFile("airgrab-original", AirGrabBundle.EXTENSION)
+        try {
+            AirGrabBundle.pack(bundle, listOf(
+                AirGrabBundle.Source("one.jpg") {
+                    ByteArrayInputStream(byteArrayOf(1, 2, 3))
+                },
+                AirGrabBundle.Source("two.jpg") {
+                    ByteArrayInputStream(byteArrayOf(4, 5, 6))
+                }
+            ))
+            // Re-encode a valid ZIP with intentionally incorrect manifest hash.
+            val changed = ByteArrayOutputStream()
+            java.util.zip.ZipInputStream(bundle.inputStream()).use { input ->
+                ZipOutputStream(changed).use { output ->
+                    while (true) {
+                        val entry = input.nextEntry ?: break
+                        output.putNextEntry(ZipEntry(entry.name))
+                        val bytes = input.readBytes()
+                        if (entry.name.endsWith("AIRGRAB-V1.manifest")) {
+                            val original = bytes.toString(Charsets.UTF_8)
+                            val lines = original.split('\n').toMutableList()
+                            val cells = lines[1].split('\t').toMutableList()
+                            cells[3] = "0".repeat(64)
+                            lines[1] = cells.joinToString("\t")
+                            output.write(lines.joinToString("\n").toByteArray())
+                        } else output.write(bytes)
+                        output.closeEntry()
+                    }
+                }
+            }
+            try {
+                AirGrabBundle.unpack(ByteArrayInputStream(changed.toByteArray()), 2, {
+                    ByteArrayOutputStream()
+                })
+                fail("tampered digest must not be accepted")
+            } catch (_: IllegalArgumentException) { }
+        } finally { bundle.delete() }
+    }
+
+    @Test fun unpackedSizeCannotExceedAuthenticatedContainerAllowance() {
+        val bundle = File.createTempFile("airgrab-budget", AirGrabBundle.EXTENSION)
+        try {
+            AirGrabBundle.pack(bundle, listOf(
+                AirGrabBundle.Source("one.jpg") {
+                    ByteArrayInputStream(ByteArray(20))
+                },
+                AirGrabBundle.Source("two.jpg") {
+                    ByteArrayInputStream(ByteArray(20))
+                }
+            ))
+            try {
+                AirGrabBundle.unpack(bundle.inputStream(), 2,
+                    { ByteArrayOutputStream() }, maxUnpackedBytes = 30L)
+                fail("decompression expansion over declared bytes must be rejected")
+            } catch (_: IllegalArgumentException) { }
+        } finally { bundle.delete() }
+    }
+
     @Test fun rejectsTooManyItemsBeforeReading() {
         val path = File.createTempFile("airgrab-limit", AirGrabBundle.EXTENSION)
         try {
