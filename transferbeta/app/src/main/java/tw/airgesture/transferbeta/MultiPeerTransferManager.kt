@@ -804,7 +804,7 @@ class MultiPeerTransferManager(private val app: Context) {
                 }
                 main.post {
                     if (!started || !busy || !isConnected || epoch != requestEpoch ||
-                        stagedQueue !== candidates && stagedQueue?.size != candidates.size) {
+                        stagedQueue == null) {
                         // A stopped or replaced session owns cleanup.
                         return@post
                     }
