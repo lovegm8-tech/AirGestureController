@@ -65,7 +65,7 @@
         </activity>
         <activity android:name=".GestureTestActivity" android:exported="false" />
         <!-- Transparent separate Sharesheet task: only this receives external
-             ACTION_SEND. It never constructs or reveals the AirGrab dashboard. -->
+             ACTION_SEND and ACTION_SEND_MULTIPLE. It never constructs or reveals the AirGrab dashboard. -->
         <activity
             android:name=".ShareReceiverActivity"
             android:exported="true"
@@ -75,6 +75,11 @@
             android:excludeFromRecents="true">
             <intent-filter>
                 <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="*/*"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <data android:mimeType="*/*"/>
             </intent-filter>
