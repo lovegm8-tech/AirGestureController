@@ -14,7 +14,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 /** All offers must originate from an explicit Android share action. */
 object TransferStore {
-    private const val OFFER_LIFETIME_MS = 10 * 60 * 1000L
+    private const val OFFER_LIFETIME_MS = 30 * 1000L
     private val offers = ConcurrentHashMap<String, Offer>()
 
     data class Offer(val id: String, val file: File, val name: String,
@@ -70,6 +70,24 @@ object TransferStore {
     private fun newDestination(context: Context): File {
         val dir = File(context.filesDir, "airgrab/offers").apply { mkdirs() }
         return File(dir, UUID.randomUUID().toString())
+    }
+
+    fun stageFile(context: Context, source: File, displayName: String) {
+        require(source.isFile && source.length() > 0)
+        val dest = newDestination(context)
+        try {
+            source.inputStream().buffered().use { input -> dest.outputStream().buffered().use { output -> input.copyTo(output, 256 * 1024) } }
+            offers[dest.name] = Offer(dest.name, dest, safeName(displayName), "application/octet-stream")
+            prune()
+        } catch (e: Exception) { dest.delete(); throw e }
+    }
+
+    fun stageLink(context: Context, url: String) {
+        require(url.startsWith("https://") || url.startsWith("http://"))
+        val dest = newDestination(context)
+        dest.writeText(url, Charsets.UTF_8)
+        offers[dest.name] = Offer(dest.name, dest, "shared-link.txt", "text/plain")
+        prune()
     }
 
     fun list(): JSONArray {

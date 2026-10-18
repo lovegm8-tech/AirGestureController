@@ -9,6 +9,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
 import android.widget.Toast
+import tw.airgesture.transferbeta.ioslink.TransferRelay
 import tw.airgesture.transferbeta.core.ShareEntryPolicy
 import tw.airgesture.transferbeta.core.SharedTextPolicy
 import tw.airgesture.transferbeta.core.TransferPolicy
@@ -60,8 +61,8 @@ class ShareReceiverActivity : Activity() {
             return
         }
         val transfer = GlobalGestureService.transfer
-        if (!GlobalGestureService.isActive || transfer == null || !transfer.isConnected) {
-            notifyAndFinish("AirGrab 尚未連線，請先開啟隔空抓取再分享")
+        if (!GlobalGestureService.isActive || transfer == null || (!transfer.isConnected && !TransferRelay.isEnabled(this))) {
+            notifyAndFinish("尚未連線 Android 或 iPhone，請先啟動懸浮操作及 iPhone 連線")
             return
         }
         // Browser Sharesheets can attach incidental ClipData previews alongside
@@ -124,7 +125,7 @@ class ShareReceiverActivity : Activity() {
                     val candidate = temp
                     main.post {
                         val ready = GlobalGestureService.transfer
-                        if (GlobalGestureService.isActive && ready?.isConnected == true) {
+                        if (GlobalGestureService.isActive && ready != null && (ready.isConnected || TransferRelay.isEnabled(this))) {
                             ready.reportShareStarted("已取得三星相簿原檔 · 正在建立接收請求")
                             ready.offerFile(candidate, safe)
                             // Ownership transferred to background transport; do not delete here.

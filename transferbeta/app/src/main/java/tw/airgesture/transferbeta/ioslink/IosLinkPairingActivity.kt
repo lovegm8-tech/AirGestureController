@@ -57,8 +57,9 @@ class IosLinkPairingActivity : ComponentActivity() {
             setOnClickListener { onClick() }
             content.addView(this)
         }
-        label("隔空抓取：iPhone 14 配對")
+        label("懸浮操作：iPhone 14 配對")
         label("目前測試版使用同一個 Wi-Fi／熱點。iPhone 打開 App 掃描下方 QR Code。")
+        label("啟動傳輸後，S26 Ultra 原本張掌→握拳抓取會建立 iPhone 待收項目，有效 30 秒。")
         val pairing = pairingAddress()
         if (pairing == null) {
             label("沒有偵測到 Wi-Fi 區域網路 IPv4 位址，請先連接 Wi-Fi。")

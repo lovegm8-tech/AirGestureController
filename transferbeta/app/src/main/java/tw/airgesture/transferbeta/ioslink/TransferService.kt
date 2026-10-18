@@ -35,6 +35,7 @@ class TransferService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == STOP) { stopSelf(); return START_NOT_STICKY }
         if (active.compareAndSet(false, true)) {
+            isServing = true
             val channel = "airgrab_local"
             (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
                 .createNotificationChannel(NotificationChannel(channel, "隔空抓取區域網路傳輸",
@@ -56,7 +57,7 @@ class TransferService : Service() {
                     }
                 } catch (_: Exception) {
                     // Socket closes when the user disables the service.
-                } finally { listener = null; active.set(false); stopSelf() }
+                } finally { listener = null; active.set(false); isServing = false; stopSelf() }
             }
         }
         return START_NOT_STICKY
@@ -172,6 +173,7 @@ class TransferService : Service() {
     }
 
     override fun onDestroy() {
+        isServing = false
         active.set(false)
         try { listener?.close() } catch (_: Exception) {}
         workers.shutdownNow()
@@ -179,8 +181,10 @@ class TransferService : Service() {
     }
 
     companion object {
+        @Volatile var isServing: Boolean = false
+            private set
         const val PORT = 48773
-        const val STOP = "tw.airgesture.controller.transfer.STOP"
+        const val STOP = "tw.airgesture.transferbeta.ioslink.STOP"
         private const val MAX_UPLOAD = 10L * 1024 * 1024 * 1024
     }
 }
