@@ -201,4 +201,80 @@ class FloatingControlRouterTest {
         }
         assertTrue(events.all { it.command == null })
     }
+
+    @Test fun quickUpwardMotionUsesLandmarkEndpointAfterOneConfirmedPalm() {
+        val r = FloatingControlRouter()
+        assertNull(step(r, "Open_Palm", 1000L, px = .50f, py = .85f).command)
+        // Classifier says None, but the same tracked hand has moved up.
+        assertEquals(FloatingControlRouter.Command.SWIPE_UP,
+            step(r, "None", 1130L, px = .51f, py = .48f).command)
+        assertNull(step(r, "None", 1240L, px = .52f, py = .25f).command)
+    }
+
+    @Test fun blurredUnknownHandCanContinueMotionWithoutNewPalmLabel() {
+        val r = FloatingControlRouter()
+        step(r, "Open_Palm", 1000L, px = .5f, py = .8f)
+        assertNull(step(r, "None", 1120L, px = .5f, py = .77f).command)
+        assertEquals(FloatingControlRouter.Command.SWIPE_UP,
+            step(r, "None", 1240L, px = .5f, py = .49f).command)
+    }
+
+    @Test fun missingLandmarksCannotFakeSwipeOrReconnectAfterLongGap() {
+        val r = FloatingControlRouter()
+        step(r, "Open_Palm", 1000L, py = .85f)
+        assertNull(step(r, "None", 1130L, px = null, py = null).command)
+        assertNull(step(r, "None", 1400L, py = .32f).command)
+        assertNull(step(r, "None", 1500L, py = .20f).command)
+    }
+
+    @Test fun fistAndPointingPoseNeverCountAsSwipeEndpoint() {
+        val fist = FloatingControlRouter()
+        step(fist, "Open_Palm", 1000L, py = .85f)
+        assertNull(step(fist, "Closed_Fist", 1140L, py = .25f).command)
+        assertNull(step(fist, "None", 1260L, py = .15f).command)
+        val pointer = FloatingControlRouter()
+        step(pointer, "Open_Palm", 1000L, py = .84f)
+        assertNull(step(pointer, "Pointing_Up", 1140L, py = .25f, ix = .5f, iy = .2f).command)
+        assertNull(step(pointer, "None", 1270L, py = .10f).command)
+    }
+
+    @Test fun weakFistClassifierIsNotMisreadAsHandMotion() {
+        val r = FloatingControlRouter()
+        step(r, "Open_Palm", 1000L, py = .8f)
+        val weakFist = r.accept("", .45f, .5f, .3f, null, null,
+            1120L, false, false, "Closed_Fist")
+        assertNull(weakFist.command)
+        assertNull(step(r, "None", 1250L, py = .1f).command)
+    }
+
+    @Test fun unknownTrackedHandCannotInitiateSwipeWithoutPalm() {
+        val r = FloatingControlRouter()
+        assertNull(step(r, "None", 1000L, py = .85f).command)
+        assertNull(step(r, "None", 1150L, py = .25f).command)
+    }
+
+    @Test fun horizontalMotionAfterPalmTriggersCorrectDirection() {
+        val left = FloatingControlRouter()
+        step(left, "Open_Palm", 1000L, px = .80f)
+        assertEquals(FloatingControlRouter.Command.SWIPE_LEFT,
+            step(left, "None", 1130L, px = .42f).command)
+        val right = FloatingControlRouter()
+        step(right, "Open_Palm", 1000L, px = .2f)
+        assertEquals(FloatingControlRouter.Command.SWIPE_BACK,
+            step(right, "None", 1130L, px = .60f).command)
+    }
+
+    @Test fun receivingOfferDisablesTrackedHandSwipes() {
+        val r = FloatingControlRouter()
+        step(r, "Open_Palm", 1000L, offer = true, py = .8f)
+        assertNull(step(r, "None", 1140L, offer = true, py = .25f).command)
+    }
+
+    @Test fun lowConfidenceOpenPalmCanBeTrackedOnlyWhenLandmarksRemain() {
+        val r = FloatingControlRouter()
+        step(r, "Open_Palm", 1000L, py = .80f)
+        assertEquals(FloatingControlRouter.Command.SWIPE_UP,
+            r.accept("", .4f, .5f, .42f, null, null,
+                1150L, false, false, "Open_Palm").command)
+    }
 }
