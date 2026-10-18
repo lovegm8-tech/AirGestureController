@@ -169,7 +169,7 @@ final class TransferModel: ObservableObject {
                 do {
                     while remaining > 0 {
                         let (type, bytes) = try await socket.receive()
-                        guard type == 2, !bytes.isEmpty, bytes.count <= remaining else {
+                        guard type == 2, !bytes.isEmpty, Int64(bytes.count) <= remaining else {
                             throw AirGrabError.invalidFrame
                         }
                         try handle.write(contentsOf: bytes)
@@ -231,6 +231,16 @@ final class TransferModel: ObservableObject {
                 status = "原始檔案傳送成功（SHA-256 已驗證）"
             } catch { status = "傳送失敗：" + error.localizedDescription }
         }
+    }
+
+    func receivedWebLink(from file: URL) -> URL? {
+        guard file.lastPathComponent.hasSuffix("-link.txt")
+                || file.lastPathComponent.hasSuffix("shared-link.txt"),
+              let content = try? String(contentsOf: file, encoding: .utf8),
+              let range = content.range(of: "https?://[^\\s<>]+", options: .regularExpression),
+              let url = URL(string: String(content[range])),
+              url.scheme == "https" || url.scheme == "http" else { return nil }
+        return url
     }
 
     private func receivedFolder() -> URL {
