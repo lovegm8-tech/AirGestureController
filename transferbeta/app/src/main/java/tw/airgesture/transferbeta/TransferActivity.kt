@@ -1142,14 +1142,15 @@ class TransferActivity : ComponentActivity() {
 }
 
 /**
- * One deliberate closed fist held for 2 seconds triggers one action.
- * An outstanding incoming offer makes the gesture RECEIVE; otherwise it is SEND.
+ * A deliberate held fist triggers SEND or RECEIVE after separate thresholds.
+ * An outstanding incoming offer uses receiveHoldMillis; otherwise use holdMillis.
  * A brief unrecognized camera frame is tolerated, but never starts a gesture.
  * The fist must be released before it can trigger again.
  */
 class GestureSequence(
     private val holdMillis: Long = 2_000L,
-    private val unknownGraceMillis: Long = 550L
+    private val unknownGraceMillis: Long = 550L,
+    private val receiveHoldMillis: Long = holdMillis
 ) {
     enum class Result { NONE, SEND, RECEIVE }
 
@@ -1180,7 +1181,8 @@ class GestureSequence(
                     fistSince = now
                 }
                 lastFistSeen = now
-                if (now - fistSince < holdMillis) return Result.NONE
+                val requiredHold = if (receiveAvailable) receiveHoldMillis else holdMillis
+                if (now - fistSince < requiredHold) return Result.NONE
                 fired = true
                 return if (receiveAvailable) Result.RECEIVE else Result.SEND
             }
