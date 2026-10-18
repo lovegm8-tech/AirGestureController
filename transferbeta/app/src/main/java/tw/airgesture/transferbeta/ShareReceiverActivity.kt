@@ -9,6 +9,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
 import android.widget.Toast
+import tw.airgesture.transferbeta.core.AirGrabBundle
 import tw.airgesture.transferbeta.core.ShareEntryPolicy
 import tw.airgesture.transferbeta.core.SharedTextPolicy
 import tw.airgesture.transferbeta.core.TransferPolicy
@@ -55,13 +56,18 @@ class ShareReceiverActivity : Activity() {
             notifyAndFinish("已有一個檔案正在準備中，請稍後再試")
             return
         }
-        if (incoming?.action != Intent.ACTION_SEND) {
+        if (incoming?.action != Intent.ACTION_SEND &&
+            incoming?.action != Intent.ACTION_SEND_MULTIPLE) {
             finish()
             return
         }
         val transfer = GlobalGestureService.transfer
         if (!GlobalGestureService.isActive || transfer == null || !transfer.isConnected) {
             notifyAndFinish("AirGrab 尚未連線，請先開啟隔空抓取再分享")
+            return
+        }
+        if (incoming.action == Intent.ACTION_SEND_MULTIPLE) {
+            receiveMultiple(incoming)
             return
         }
         // Browser Sharesheets can attach incidental ClipData previews alongside
@@ -115,7 +121,7 @@ class ShareReceiverActivity : Activity() {
                                 if (count < 0) break
                                 bytes += count.toLong()
                                 if (bytes > TransferPolicy.MAX_BYTES)
-                                    error("檔案超過 256 MB 的傳送限制")
+                                    error("檔案超過 " + TransferPolicy.capacityLabel() + " 的傳送限制")
                                 output.write(buffer, 0, count)
                             }
                             check(bytes > 0L) { "原始檔案是空的" }
@@ -146,6 +152,68 @@ class ShareReceiverActivity : Activity() {
                 transfer.offerLink(safeLink)
                 finish()
             } else notifyAndFinish("分享來源沒有提供唯一有效網址或原始檔；請檢查分享入口")
+        }
+    }
+
+    /** Multi-file selection remains in the source app. One share and one
+     * receive gesture produce an authenticated bundle, unpacked to originals
+     * on the receiving device. Do not treat ClipData previews as selected files. */
+    @Suppress("DEPRECATION")
+    private fun receiveMultiple(incoming: Intent) {
+        val explicit = if (Build.VERSION.SDK_INT >= 33)
+            incoming.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        else incoming.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
+        val clip = (0 until (incoming.clipData?.itemCount ?: 0))
+            .map { incoming.clipData?.getItemAt(it)?.uri?.toString() }
+        val originals = ShareEntryPolicy.chooseMultipleOriginals(
+            incoming.action, explicit?.map { it.toString() }, clip
+        )?.map(Uri::parse)
+        if (originals == null) {
+            notifyAndFinish("請一次選取 2～${AirGrabBundle.MAX_FILES} 個原始檔案；不可包含重複或無權限的項目")
+            return
+        }
+        val transfer = GlobalGestureService.transfer
+        if (!GlobalGestureService.isActive || transfer?.isConnected != true) {
+            notifyAndFinish("尚未連線接收設備")
+            return
+        }
+        GlobalGrabBridge.accessibility?.get()?.externalShareDelivered()
+        handling = true
+        transfer.reportShareStarted("正在準備 ${originals.size} 個原始檔案…")
+        io.execute {
+            var target: File? = null
+            try {
+                val sources = originals.map { uri ->
+                    AirGrabBundle.Source(readName(uri)) {
+                        contentResolver.openInputStream(uri)
+                            ?: error("無法讀取原始檔案")
+                    }
+                }
+                val cache = File(cacheDir, "sharesheet-staging").apply { mkdirs() }
+                target = File.createTempFile("airgrab-", AirGrabBundle.EXTENSION, cache)
+                val packed = target!!
+                AirGrabBundle.pack(packed, sources) { position, total ->
+                    main.post {
+                        GlobalGestureService.transfer?.reportShareStarted(
+                            "封裝原始檔 ${position}/${total} · 不壓縮、不轉檔")
+                    }
+                }
+                main.post {
+                    val ready = GlobalGestureService.transfer
+                    if (GlobalGestureService.isActive && ready?.isConnected == true) {
+                        ready.offerFile(packed, packed.name,
+                            multiCount = originals.size, deleteWhenDone = true)
+                        target = null // transport owns this staged bundle
+                        finish()
+                    } else {
+                        packed.delete()
+                        notifyAndFinish("準備完成，但接收裝置已斷線")
+                    }
+                }
+            } catch (e: Exception) {
+                target?.delete()
+                notifyAndFinish("多檔抓取失敗：" + (e.message ?: "原始檔案讀取失敗"))
+            }
         }
     }
 
