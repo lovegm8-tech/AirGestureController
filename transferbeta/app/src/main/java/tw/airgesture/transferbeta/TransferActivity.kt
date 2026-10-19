@@ -689,6 +689,7 @@ class TransferActivity : ComponentActivity() {
         }
         extraButton("查看版本更新紀錄／更新進度") {
             val versionLog = """
+                開發測試中（尚未編譯 APK）｜新增 NFC 近距離接觸探測；僅支援本 App 前景 NFC 讀卡，暫不支援相簿前景直接取得照片
                 v1.0.15｜修正 S26 Ultra 前鏡頭未鏡像影像的左右手正反判斷：掌心可起滑、手背不可起滑；不影響傳檔與握拳\n                v1.0.14｜首頁獨立控制前鏡頭手勢／Nearby 傳檔；純傳檔模式不用開相機或無障礙服務；解鎖後恢復附近搜尋；通知顯示模式
                 v1.0.13｜掌心朝向前鏡頭才可起滑／重新起滑；手背不能啟動滑動；右側提示可起滑狀態；握拳、抓取與接收維持原樣
                 v1.0.12｜上滑判定恢復 v1.0.10；張掌顯示手掌位置圓圈與軌跡；減少幽靈手提示、加快提示消失
@@ -712,6 +713,9 @@ class TransferActivity : ComponentActivity() {
                 else "已停用：玩遊戲時也會繼續辨識手勢", true)
         }
         // Nearby is controlled by the independent homepage switch.
+        extraButton("NFC 碰一碰 · 技術驗證（不發送照片）") {
+            startActivity(Intent(this, NfcProbeActivity::class.java))
+        }
         extraButton("手動選擇照片或檔案發送") { picker.launch(arrayOf("*/*")) }
         val videoModeButton = Button(this).apply {
             fun showMode() {
