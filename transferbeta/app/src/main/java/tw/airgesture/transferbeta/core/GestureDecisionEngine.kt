@@ -6,7 +6,15 @@ import kotlin.math.abs
 class GestureDecisionEngine(private val options: Options = Options()) {
     enum class Shape { OPEN_PALM, CLOSED_FIST, TRACKED_HAND, OTHER, NO_HAND }
     enum class Action { SWIPE_UP, SWIPE_DOWN, SWIPE_BACK, SWIPE_LEFT, TAP_CENTER, MEDIA_PLAY_PAUSE }
-    data class Frame(val shape: Shape, val palmY: Float? = null, val confidence: Float = 1f, val palmX: Float? = null)
+    data class Frame(
+        val shape: Shape,
+        val palmY: Float? = null,
+        val confidence: Float = 1f,
+        val palmX: Float? = null,
+        // Only a confirmed palm-facing-camera pose may start or rearm a swipe.
+        // A changed orientation AFTER anchoring can still be tracked briefly.
+        val palmFacing: Boolean = true
+    )
     data class Options(
         val minimumConfidence: Float = .65f,
         val swipeDistance: Float = .13f,
@@ -62,7 +70,11 @@ class GestureDecisionEngine(private val options: Options = Options()) {
     fun accept(frame: Frame, nowMs: Long): Action? {
         if (lastTime != Long.MIN_VALUE && nowMs < lastTime) reset()
         lastTime = nowMs
-        val shape = if (frame.confidence < options.minimumConfidence) Shape.NO_HAND else frame.shape
+        val detected = if (frame.confidence < options.minimumConfidence) Shape.NO_HAND else frame.shape
+        // A backwards open hand is a motion endpoint ONLY after an earlier
+        // genuine front-palm start. It cannot create or rearm an anchor.
+        val shape = if (detected == Shape.OPEN_PALM && !frame.palmFacing)
+            Shape.TRACKED_HAND else detected
         if (shape == Shape.NO_HAND) {
             // Brief detection loss can happen while closing the fist; a valid
             // FIST frame must still arrive within the maximum frame gap.
