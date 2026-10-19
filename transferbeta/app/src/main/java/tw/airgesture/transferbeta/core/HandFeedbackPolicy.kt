@@ -2,7 +2,7 @@ package tw.airgesture.transferbeta.core
 
 /** Hand tracking feedback, independent from transfer status.
  * A visible hand is NOT a complete send or receive gesture. */
-enum class HandHint { NONE, HAND_SEEN, OPEN_PALM, CLOSED_FIST }
+enum class HandHint { NONE, HAND_SEEN, OPEN_PALM, OPEN_PALM_NOT_READY, CLOSED_FIST }
 
 class HandFeedbackPolicy(
     private val heartbeatMs: Long = 750L,
@@ -14,17 +14,23 @@ class HandFeedbackPolicy(
     private var lastHint = HandHint.NONE
     private var lastClassifiedAt = Long.MIN_VALUE
 
-    fun observe(found: Boolean, pose: String, nowMs: Long): HandHint? {
+    fun observe(
+        found: Boolean, pose: String, nowMs: Long, palmFacing: Boolean = true
+    ): HandHint? {
         val state = if (found) when (pose) {
-            "Open_Palm" -> HandHint.OPEN_PALM
+            "Open_Palm" -> if (palmFacing) HandHint.OPEN_PALM
+                else HandHint.OPEN_PALM_NOT_READY
             "Closed_Fist" -> HandHint.CLOSED_FIST
             else -> HandHint.HAND_SEEN
         } else HandHint.NONE
         if (found) {
             lastSeenAt = nowMs
-            if (state == HandHint.OPEN_PALM || state == HandHint.CLOSED_FIST) {
+            if (state == HandHint.OPEN_PALM ||
+                state == HandHint.OPEN_PALM_NOT_READY ||
+                state == HandHint.CLOSED_FIST) {
                 lastClassifiedAt = nowMs
             } else if ((lastHint == HandHint.OPEN_PALM ||
+                    lastHint == HandHint.OPEN_PALM_NOT_READY ||
                     lastHint == HandHint.CLOSED_FIST) &&
                 lastClassifiedAt != Long.MIN_VALUE &&
                 nowMs >= lastClassifiedAt &&
