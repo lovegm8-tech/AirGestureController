@@ -10,6 +10,18 @@ class NfcTapProtocolTest {
         assertTrue(NfcTapProtocol.isSuccessfulProbe(NfcTapProtocol.respond(select)))
     }
 
+    @Test fun nfcSessionApduStaysDistinctFromReadOnlyProbe() {
+        val request = NfcTapProtocol.getSessionCommand()
+        assertTrue(NfcTapProtocol.isSessionCommand(request))
+        assertFalse(NfcTapProtocol.isSessionCommand(NfcTapProtocol.selectApdu()))
+        val reply = NfcTapProtocol.sessionResponse("abc123def456",
+            "0123456789abcdef0123456789abcdef")
+        assertEquals("abc123def456",
+            NfcTapProtocol.decodeSessionResponse(reply)?.peerId)
+        assertNull(NfcTapProtocol.decodeSessionResponse(
+            NfcTapProtocol.notReadyResponse()))
+    }
+
     @Test fun unrelatedAidIsRejected() {
         val other = NfcTapProtocol.selectApdu()
         other[8] = (other[8].toInt() xor 0x20).toByte()
