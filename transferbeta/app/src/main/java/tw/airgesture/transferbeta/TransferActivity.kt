@@ -432,6 +432,75 @@ class TransferActivity : ComponentActivity() {
         root.addView(text("目前版本：v" + BuildConfig.VERSION_NAME +
             "（版本代碼 " + BuildConfig.VERSION_CODE + "）", 14f))
         root.addView(text("免觸控操作、隔空抓取，一次啟用即可使用。", 15f))
+        val modePanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(20, 16, 20, 20)
+            background = GradientDrawable().apply {
+                cornerRadius = 22f
+                setColor(0xffe8f1fb.toInt())
+                setStroke(2, 0xffb8cff1.toInt())
+            }
+        }
+        modePanel.addView(text("功能獨立開關", 20f))
+        fun modeRow(label: String, description: String, toggle: Switch): LinearLayout {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val wording = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+            }
+            wording.addView(text(label, 17f))
+            wording.addView(text(description, 13f))
+            row.addView(wording, LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            row.addView(toggle)
+            return row
+        }
+        gestureSwitch = Switch(this).apply {
+            isChecked = FloatingSettings.gestureCamera(this@TransferActivity)
+            contentDescription = "前鏡頭手勢辨識"
+            setOnCheckedChangeListener { _, checked ->
+                if (updatingModeControls) return@setOnCheckedChangeListener
+                if (checked && !permissionGranted(Manifest.permission.CAMERA)) {
+                    updatingModeControls = true
+                    isChecked = false
+                    updatingModeControls = false
+                    permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA))
+                    return@setOnCheckedChangeListener
+                }
+                FloatingSettings.saveBool(this@TransferActivity,
+                    "gesture_camera_enabled", checked)
+                reloadLiveSettings()
+                refreshHome()
+            }
+        }
+        modePanel.addView(modeRow("前鏡頭手勢",
+            "關閉後釋放前鏡頭，不影響附近傳檔", gestureSwitch))
+        transferSwitch = Switch(this).apply {
+            isChecked = FloatingSettings.nearby(this@TransferActivity)
+            contentDescription = "附近裝置傳檔"
+            setOnCheckedChangeListener { _, checked ->
+                if (updatingModeControls) return@setOnCheckedChangeListener
+                if (checked && !nearbyGranted()) {
+                    updatingModeControls = true
+                    isChecked = false
+                    updatingModeControls = false
+                    val missing = nearbyPermissions().filterNot { permissionGranted(it) }
+                    if (missing.isNotEmpty()) permissionLauncher.launch(missing.toTypedArray())
+                    return@setOnCheckedChangeListener
+                }
+                FloatingSettings.saveBool(this@TransferActivity,
+                    "nearby_enabled", checked)
+                reloadLiveSettings()
+                refreshHome()
+            }
+        }
+        modePanel.addView(modeRow("附近裝置傳檔",
+            "亮屏搜尋、傳送和接收；熄屏暫停搜尋", transferSwitch))
+        modeDescription = text(modeLabel(), 14f)
+        modePanel.addView(modeDescription)
+        root.addView(modePanel)
         setupGuide = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(20, 14, 20, 18)
@@ -484,14 +553,15 @@ class TransferActivity : ComponentActivity() {
             text = "開始設定"
             minHeight = (resources.displayMetrics.density * 64).toInt()
             setOnClickListener {
-                if (hasPermissions() && hasAccessibilityPermission() &&
+                if (FloatingSettings.gestureCamera(this@TransferActivity) &&
+                    hasModePermissions() && hasModeAccessibility() &&
                     !Settings.canDrawOverlays(this@TransferActivity)) {
                     startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                         Uri.parse("package:" + packageName)))
                     return@setOnClickListener
                 }
                 when (tw.airgesture.transferbeta.core.HomeScreenPolicy.decide(
-                    hasPermissions(), hasAccessibilityPermission(),
+                    hasModePermissions(), hasModeAccessibility(),
                     GlobalGestureService.isActive,
                     GlobalGestureService.transfer?.isConnected == true
                 ).action) {
@@ -511,7 +581,9 @@ class TransferActivity : ComponentActivity() {
         root.addView(Button(this).apply {
             text = "手勢操作測試區 · 實際測試滑動和點擊"
             setOnClickListener {
-                if (!GlobalGestureService.isActive || !hasAccessibilityPermission()) {
+                if (!GlobalGestureService.isActive ||
+                    !FloatingSettings.gestureCamera(this@TransferActivity) ||
+                    !hasAccessibilityPermission()) {
                     AlertDialog.Builder(this@TransferActivity)
                         .setMessage("請先完成權限設定並啟動懸浮操作，再進行手勢測試。")
                         .setPositiveButton("知道了", null).show()
