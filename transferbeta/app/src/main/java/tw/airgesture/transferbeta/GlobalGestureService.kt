@@ -488,7 +488,10 @@ class GlobalGestureService : LifecycleService() {
         if (gameSuspended) return
         framesSeen++
         val now = SystemClock.uptimeMillis()
-        val movement = if (power.isDeepIdle(now)) {
+        // Cheap motion sampling now runs in balanced standby too, so a hand
+        // arriving from below the camera can request an early ML inference.
+        // It never produces touch actions without confirmed hand landmarks.
+        val movement = if (power.shouldSampleIdleMotion(now)) {
             motionSampler.observe(frame, now)
         } else {
             motionSampler.reset()
