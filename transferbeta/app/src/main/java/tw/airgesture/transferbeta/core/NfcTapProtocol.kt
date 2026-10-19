@@ -30,6 +30,22 @@ object NfcTapProtocol {
         return marker + ok
     }
 
+    // The existing read-only diagnostic SELECT remains backwards compatible.
+    // GET_SESSION is a separate authenticated-Nearby binding stage; it must
+    // never be treated as permission to read another app's current media.
+    private val sessionCommand = byteArrayOf(0x80.toByte(), 0x10, 0, 0, 0)
+    fun getSessionCommand(): ByteArray = sessionCommand.copyOf()
+    fun isSessionCommand(apdu: ByteArray?): Boolean =
+        apdu != null && apdu.contentEquals(sessionCommand)
+    fun sessionResponse(peerId: String, nonce: String): ByteArray =
+        NfcTapSessionCodec.encode(peerId, nonce) + ok
+    fun decodeSessionResponse(response: ByteArray?): NfcTapSessionCodec.Session? {
+        if (response == null || response.size < 3 ||
+            !response.copyOfRange(response.size - 2, response.size).contentEquals(ok)) return null
+        return NfcTapSessionCodec.decode(response.copyOf(response.size - 2))
+    }
+    fun notReadyResponse(): ByteArray = byteArrayOf(0x69, 0x85.toByte())
+
     fun isSuccessfulProbe(response: ByteArray?): Boolean =
         response != null && response.contentEquals(marker + ok)
 
