@@ -11,7 +11,7 @@ class IdleMotionDetectorTest {
         val p = IdleMotionDetector()
         assertFalse(p.observe(still(), 1000L))
         val entering = still()
-        for (i in 160 until 168) entering[i] += 42
+        for (i in 160 until 166) entering[i] += 42
         assertTrue(p.observe(entering, 1180L))
     }
 
