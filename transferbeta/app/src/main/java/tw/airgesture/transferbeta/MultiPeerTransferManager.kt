@@ -111,7 +111,8 @@ class MultiPeerTransferManager(private val app: Context) {
         val file: File? = null,
         val url: String? = null,
         val deleteAfterTransfer: Boolean = false,
-        val queue: List<PreparedItem>? = null
+        val queue: List<PreparedItem>? = null,
+        val targetPeerId: String? = null
     ) {
         var awaitingVerificationPayload = -1L
     }
@@ -123,6 +124,14 @@ class MultiPeerTransferManager(private val app: Context) {
     )
 
     private val peers = linkedMapOf<String, Peer>()
+
+    private data class PendingNfcBind(
+        val endpoint: String, val peerId: String, val sid: String,
+        val callback: (Boolean, String, String) -> Unit
+    )
+    private var pendingNfcBind: PendingNfcBind? = null
+    private var boundNfcTarget: Pair<String, String>? = null // peer id, one-use sid
+    private var incomingNfcSession: Triple<String, String, Long>? = null
     private var active: Outgoing? = null
     private var offered: Offered? = null
     private var offeredBy: String? = null
@@ -196,6 +205,33 @@ class MultiPeerTransferManager(private val app: Context) {
     /** Suspend radio discovery while the screen is locked; preserve live endpoints. */
     @Volatile private var discoveryEnabled = true
 
+    /** Bind the NFC contact to an already verified, remembered Nearby endpoint.
+     * The receiver must prove it issued the one-time NFC nonce before any
+     * targeted offer may be sent. Callback always returns on main thread.
+     */
+    fun bindNfcTap(peerId: String, nonce: String,
+        callback: (Boolean, String, String) -> Unit) {
+        main.post {
+            val p = peers.values.firstOrNull { it.verified && it.hint == peerId }
+            if (!started || p == null || pendingNfcBind != null ||
+                !nonce.matches(Regex("[0-9a-f]{32}"))) {
+                callback(false, "", "尚未和碰觸的手機建立已驗證連線，請先讓雙方亮屏並完成配對")
+                return@post
+            }
+            val sid = UUID.randomUUID().toString()
+            val pending = PendingNfcBind(p.endpoint, peerId, sid, callback)
+            pendingNfcBind = pending
+            sendControl(p, JSONObject().put("type", "nfc_bind_request")
+                .put("sid", sid).put("nonce", nonce))
+            main.postDelayed({
+                if (pendingNfcBind === pending) {
+                    pendingNfcBind = null
+                    callback(false, "", "NFC 身分驗證逾時；確認兩支手機仍保持附近連線")
+                }
+            }, 10_000L)
+        }
+    }
+
     fun setDiscoveryEnabled(enabled: Boolean) {
         if (discoveryEnabled == enabled) return
         discoveryEnabled = enabled
@@ -222,6 +258,10 @@ class MultiPeerTransferManager(private val app: Context) {
     fun stop() {
         if (!started) return
         started = false
+        pendingNfcBind?.callback?.invoke(false, "", "背景傳檔服務已停止")
+        pendingNfcBind = null
+        incomingNfcSession = null
+        boundNfcTarget = null
         epoch++
         scanEpoch++
         client.stopDiscovery()
@@ -476,6 +516,12 @@ class MultiPeerTransferManager(private val app: Context) {
             pendingDigits = null
         }
         try { client.disconnectFromEndpoint(p.endpoint) } catch (_: Exception) {}
+        if (pendingNfcBind?.endpoint == p.endpoint) {
+            pendingNfcBind?.callback?.invoke(false, "", "NFC 驗證時附近裝置已斷線")
+            pendingNfcBind = null
+        }
+        if (incomingNfcSession?.first == p.endpoint) incomingNfcSession = null
+        if (boundNfcTarget?.first == p.hint) boundNfcTarget = null
         val batch = active
         if (batch != null && batch.policy.fail(p.endpoint)) {
             ui("裝置 " + p.hint + " 失敗：" + reason + "；其他裝置繼續")
@@ -674,17 +720,21 @@ class MultiPeerTransferManager(private val app: Context) {
     private fun beginBroadcast(
         json: JSONObject, file: File? = null, url: String? = null,
         deleteAfterTransfer: Boolean = false,
-        queue: List<PreparedItem>? = null
+        queue: List<PreparedItem>? = null,
+        targetPeerId: String? = null
     ) {
         val now = SystemClock.uptimeMillis()
         val sid = json.getString("sid")
         val batch = Outgoing(sid, json,
             MultiReceiverBatch(sid, now, fileCount = queue?.size ?: 1),
-            file, url, deleteAfterTransfer, queue)
+            file, url, deleteAfterTransfer, queue, targetPeerId)
         active = batch
         for (p in peers.values) announceToPeer(batch, p)
-        ui("已開放 30 秒多人接收；連線 " + connectedDeviceIds.size + " 台")
-        visual(VisualPhase.WAITING_FOR_RECEIVER, "已分享 · 30 秒內多台可接收")
+        ui(if (targetPeerId != null) "NFC 已指定接收裝置，等待原檔完成接收"
+            else "已開放 30 秒多人接收；連線 " + connectedDeviceIds.size + " 台")
+        visual(VisualPhase.WAITING_FOR_RECEIVER, if (targetPeerId != null)
+            "NFC 碰觸驗證完成 · 正在傳給指定裝置"
+            else "已分享 · 30 秒內多台可接收")
         main.postDelayed({
             if (active !== batch) return@postDelayed
             batch.policy.endUnclaimed(SystemClock.uptimeMillis())
@@ -695,7 +745,8 @@ class MultiPeerTransferManager(private val app: Context) {
     }
 
     private fun announceToPeer(batch: Outgoing, p: Peer) {
-        if (!p.verified || active !== batch) return
+        if (!p.verified || active !== batch ||
+            (batch.targetPeerId != null && batch.targetPeerId != p.hint)) return
         if (batch.queue != null && !p.supportsQueue) return
         if (batch.json.optInt("items", 1) > 1 && !p.supportsBundles) return
         val now = SystemClock.uptimeMillis()
@@ -731,6 +782,72 @@ class MultiPeerTransferManager(private val app: Context) {
             successes + " 台，未完成 " + failures + " 台")
         visual(if (successes > 0) VisualPhase.SEND_COMPLETE else VisualPhase.FAILURE,
             "成功 " + successes + " 台 · 失敗或未接收 " + failures + " 台")
+    }
+
+    /** NFC workflow: only send to the VERIFIED peer selected by actual contact.
+     * This separate path never transcodes: PHOTO/VIDEO/DOCUMENT stay byte-exact.
+     */
+    fun offerNfcFile(candidate: File, originalName: String,
+        peerId: String, session: String) {
+        val selected = boundNfcTarget
+        boundNfcTarget = null
+        fun reject(reason: String) {
+            candidate.delete()
+            reportCaptureFailure(reason)
+        }
+        if (selected != (peerId to session) || !started || busy ||
+            peers.values.none { it.verified && it.hint == peerId }) {
+            reject("NFC 接觸驗證無效或接收端已斷線")
+            return
+        }
+        val name = TransferPolicy.safeName(originalName)
+        if (name == null || !candidate.isFile || candidate.length() <= 0L ||
+            candidate.length() > TransferPolicy.MAX_BYTES) {
+            reject("NFC 原始檔不存在或不符合傳送限制")
+            return
+        }
+        busy = true
+        pendingOwnedFile = candidate
+        val requestEpoch = ++epoch
+        worker.execute {
+            try {
+                val hash = sha256(candidate)
+                main.post {
+                    if (!started || epoch != requestEpoch || !busy ||
+                        peers.values.none { it.verified && it.hint == peerId }) {
+                        if (pendingOwnedFile === candidate) failPreparation("NFC 接收端已斷線")
+                        return@post
+                    }
+                    pendingOwnedFile = null
+                    beginBroadcast(JSONObject().put("type", "file_offer")
+                        .put("sid", UUID.randomUUID().toString())
+                        .put("name", name).put("size", candidate.length())
+                        .put("hash", hash).put("items", 1)
+                        .put("nfc_session", session),
+                        file = candidate, deleteAfterTransfer = true,
+                        targetPeerId = peerId)
+                }
+            } catch (error: Exception) {
+                main.post { if (requestEpoch == epoch)
+                    failPreparation("NFC 原檔 SHA-256 準備失敗：" + error.message) }
+            }
+        }
+    }
+
+    fun offerNfcLink(raw: String, peerId: String, session: String) {
+        val selected = boundNfcTarget
+        boundNfcTarget = null
+        val url = GrabContentPolicy.safeWebUrl(raw)
+        if (selected != (peerId to session) || url == null ||
+            !started || busy || peers.values.none { it.verified && it.hint == peerId }) {
+            reportCaptureFailure("NFC 網址無效或接收裝置已離線")
+            return
+        }
+        busy = true
+        beginBroadcast(JSONObject().put("type", "link_offer")
+            .put("sid", UUID.randomUUID().toString())
+            .put("url", url).put("nfc_session", session),
+            url = url, targetPeerId = peerId)
     }
 
     fun offerLink(raw: String) {
@@ -1222,7 +1339,7 @@ class MultiPeerTransferManager(private val app: Context) {
         }
     }
 
-    private fun receiveOffer(p: Peer, offer: Offered) {
+    private fun receiveOffer(p: Peer, offer: Offered, nfcSession: String? = null) {
         if (offered?.sid == offer.sid && offeredBy == p.endpoint) {
             sendControl(p, JSONObject().put("type", "offer_seen").put("sid", offer.sid))
             return
@@ -1245,8 +1362,18 @@ class MultiPeerTransferManager(private val app: Context) {
                 "${offer.items} 個原始檔案" else offer.name
             is Offered.LinkOffer -> "網頁連結"
         }
-        notifyIncomingOffer(name)
+        val permit = incomingNfcSession
+        val autoAccept = nfcSession != null && permit != null &&
+            permit.first == p.endpoint && permit.second == nfcSession &&
+            SystemClock.uptimeMillis() <= permit.third
+        if (autoAccept) incomingNfcSession = null
+        if (!autoAccept) notifyIncomingOffer(name)
         sendControl(p, JSONObject().put("type", "offer_seen").put("sid", offer.sid))
+        if (autoAccept) {
+            ui("NFC 已驗證碰觸的已配對裝置，開始接收原始內容")
+            confirmReceive()
+            return
+        }
         ui("收到 " + name + " · 30 秒內握拳→張掌即可接收")
         visual(VisualPhase.OFFER_RECEIVED, "收到分享 · 握拳→張掌接收")
         main.postDelayed({
@@ -1264,6 +1391,25 @@ class MultiPeerTransferManager(private val app: Context) {
     private fun handleControl(p: Peer, json: JSONObject) {
         val sid = json.optString("sid")
         when (json.optString("type")) {
+            "nfc_bind_request" -> {
+                val nonce = json.optString("nonce")
+                if (sid.length !in 12..100 || !p.verified) return
+                val allowed = NfcTapSessionStore.consume(app, nonce)
+                if (allowed) incomingNfcSession = Triple(
+                    p.endpoint, sid, SystemClock.uptimeMillis() + 30_000L)
+                sendControl(p, JSONObject().put("type",
+                    if (allowed) "nfc_bind_ok" else "nfc_bind_reject").put("sid", sid))
+            }
+            "nfc_bind_ok", "nfc_bind_reject" -> {
+                val pending = pendingNfcBind ?: return
+                if (pending.endpoint != p.endpoint || pending.sid != sid) return
+                pendingNfcBind = null
+                val accepted = json.optString("type") == "nfc_bind_ok"
+                if (accepted) boundNfcTarget = pending.peerId to pending.sid
+                pending.callback(accepted, if (accepted) pending.sid else "",
+                    if (accepted) "已與指定已配對裝置完成 NFC 身分驗證"
+                    else "NFC 一次性驗證失敗，請重新碰觸手機")
+            }
             "video_probe" -> {
                 val mime = json.optString("mime")
                 val width = json.optInt("width")
@@ -1313,12 +1459,14 @@ class MultiPeerTransferManager(private val app: Context) {
                         return
                 } else if (items != 1) return
                 receiveOffer(p, Offered.FileOffer(sid,
-                    TransferPolicy.safeName(name)!!, size, hash, items))
+                    TransferPolicy.safeName(name)!!, size, hash, items),
+                    json.optString("nfc_session").ifBlank { null })
             }
             "link_offer" -> {
                 val url = json.optString("url")
                 if (!TransferPolicy.validLinkOffer(sid, url)) return
-                receiveOffer(p, Offered.LinkOffer(sid, url))
+                receiveOffer(p, Offered.LinkOffer(sid, url),
+                    json.optString("nfc_session").ifBlank { null })
             }
             "offer_seen" -> {
                 val batch = active ?: return
