@@ -22,6 +22,7 @@ import com.google.android.gms.nearby.connection.*
 import org.json.JSONObject
 import org.json.JSONArray
 import tw.airgesture.transferbeta.core.AirGrabBundle
+import tw.airgesture.transferbeta.core.NfcAutoAcceptPolicy
 import tw.airgesture.transferbeta.core.GrabContentPolicy
 import tw.airgesture.transferbeta.core.MediaFilePolicy
 import tw.airgesture.transferbeta.core.MediaKind
@@ -1363,9 +1364,9 @@ class MultiPeerTransferManager(private val app: Context) {
             is Offered.LinkOffer -> "網頁連結"
         }
         val permit = incomingNfcSession
-        val autoAccept = nfcSession != null && permit != null &&
-            permit.first == p.endpoint && permit.second == nfcSession &&
-            SystemClock.uptimeMillis() <= permit.third
+        val autoAccept = NfcAutoAcceptPolicy.permits(
+            permit?.first, permit?.second, permit?.third ?: 0L,
+            p.endpoint, nfcSession, SystemClock.uptimeMillis(), p.verified)
         if (autoAccept) incomingNfcSession = null
         if (!autoAccept) notifyIncomingOffer(name)
         sendControl(p, JSONObject().put("type", "offer_seen").put("sid", offer.sid))
