@@ -65,6 +65,14 @@ class AdaptivePowerPolicy(
         else -> Mode.ECO
     }
 
+    /**
+     * Cheap pixel motion is sampled during ECO (no MediaPipe run). Balanced
+     * and responsive profiles can wake from the first arriving hand; battery-
+     * first continues sampling only during deep idle.
+     */
+    fun shouldSampleIdleMotion(nowMs: Long): Boolean =
+        mode(nowMs) == Mode.ECO && (policy != 0 || isDeepIdle(nowMs))
+
     /** Original AirGestureController-style motion wake-up. Only runs MediaPipe
      * after cheap pixel motion was confirmed, and never fires an action itself. */
     fun isDeepIdle(nowMs: Long): Boolean =
@@ -72,7 +80,10 @@ class AdaptivePowerPolicy(
         nowMs >= idleSince && nowMs - idleSince >= 20_000L
 
     fun shouldInfer(nowMs: Long, significantMotion: Boolean = false): Boolean {
-        if (significantMotion && isDeepIdle(nowMs) &&
+        // A low-cost, bounded camera-motion hint can schedule ONE early
+        // classification in standby. The motion detector enforces its own
+        // cooldown and never directly issues actions.
+        if (significantMotion && shouldSampleIdleMotion(nowMs) &&
             (lastInference == Long.MIN_VALUE || nowMs < lastInference ||
                 nowMs - lastInference >= 240L)) {
             lastInference = nowMs
