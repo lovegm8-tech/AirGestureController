@@ -230,7 +230,18 @@ class GestureDecisionEngine(private val options: Options = Options()) {
         if (dx <= -options.leftSwipeDistance && -dx > abs(dy) * 1.45f) {
             return fire(Action.SWIPE_LEFT, nowMs)
         }
-        if (abs(dy) < options.swipeDistance || abs(dy) < abs(dx) * 1.10f) return null
+        // Upward hand motion often starts at the lowest camera edge, where
+        // the wrist/knuckles only become visible after motion has started.
+        // Require real tracked displacement, but allow a shorter remaining
+        // travel when the FIRST confirmed palm is already below 68% height.
+        // Keep horizontal swipes, downward swipes and fist/grab arbitration
+        // unchanged. Diagonal motion must still be predominantly vertical.
+        val lowStartUp = dy < 0f && originY >= .68f
+        val required = if (lowStartUp)
+            maxOf(.075f, options.swipeDistance * .68f)
+        else options.swipeDistance
+        val verticalRatio = if (lowStartUp) 1.35f else 1.10f
+        if (abs(dy) < required || abs(dy) < abs(dx) * verticalRatio) return null
         return fire(if (dy < 0f) Action.SWIPE_UP else Action.SWIPE_DOWN, nowMs)
     }
 
