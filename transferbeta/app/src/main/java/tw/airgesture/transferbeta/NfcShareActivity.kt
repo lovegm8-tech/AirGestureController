@@ -146,7 +146,7 @@ class NfcShareActivity : Activity(), NfcAdapter.ReaderCallback {
                     }
                 } ?: error("三星相簿未授權讀取原檔")
                 check(size > 0) { "分享原始檔是空的" }
-                val preparedFile = cacheFile
+                val preparedFile = requireNotNull(cacheFile)
                 cacheFile = null
                 runOnUiThread {
                     if (isFinishing || isDestroyed) preparedFile.delete()
