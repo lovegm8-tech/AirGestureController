@@ -394,9 +394,10 @@ class GlobalGestureService : LifecycleService() {
             }, 850)
             return START_NOT_STICKY
         }
-        if (gestureCameraEnabled &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) !=
-                PackageManager.PERMISSION_GRANTED) {
+        if ((gestureCameraEnabled &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) !=
+                    PackageManager.PERMISSION_GRANTED) ||
+            (!gestureCameraEnabled && !nearbyTransferEnabled)) {
             stopSelf()
             return START_NOT_STICKY
         }
@@ -477,10 +478,12 @@ class GlobalGestureService : LifecycleService() {
         // On Android 14+ a camera-type foreground service requires camera
         // runtime permission, even when no camera is currently bound.
         // Only request the camera FGS type in actual gesture mode.
-        val type = android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
+        val type = (if (nearbyTransferEnabled)
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0) or
             (if (gestureCameraEnabled)
                 android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA else 0)
-        startForeground(NOTIFICATION, builder.build(), type)
+        if (type != 0) startForeground(NOTIFICATION, builder.build(), type)
+        else mgr.notify(NOTIFICATION, builder.build())
     }
 
     private fun preferredCameraFps(): Range<Int>? {
