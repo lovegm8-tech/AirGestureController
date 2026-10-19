@@ -4,7 +4,7 @@ import androidx.camera.core.ImageProxy
 import tw.airgesture.transferbeta.core.IdleMotionDetector
 
 /**
- * Reads 192 small RGBA samples every 180ms in deep idle, without converting
+ * Reads 192 small RGBA samples every 180ms in screen-on ECO, without converting
  * a Bitmap or invoking MediaPipe. No camera frames are kept or uploaded.
  *
  * Only triggers a fresh AI verification; it can never trigger a touch action.
@@ -33,12 +33,16 @@ internal class IdleMotionSampler {
         val h = proxy.height
         val w = proxy.width
         var n = 0
-        // Each sample is from the central 80% of the image. The 1.5s
-        // mandatory AI scan remains active for gestures at the frame edges.
+        // Sample to 94% of image height instead of stopping at 83%.
+        // A raised palm often enters from the bottom of the front camera.
+        // These are inexpensive samples; the actual ML pose still must be
+        // identified before an action is accepted.
         for (row in 0 until 12) {
-            val y = h * (row * 4 + 6) / (12 * 4 + 12)
+            val y = (h * (.02f + (row + .5f) * .96f / 12f))
+                .toInt().coerceIn(0, h - 1)
             for (col in 0 until 16) {
-                val x = w * (col * 4 + 6) / (16 * 4 + 12)
+                val x = (w * (.05f + (col + .5f) * .90f / 16f))
+                    .toInt().coerceIn(0, w - 1)
                 val base = y * plane.rowStride + x * plane.pixelStride
                 if (base + 3 >= buf.limit()) return false
                 // RGBA_8888: red, green, blue have equivalent motion energy;
