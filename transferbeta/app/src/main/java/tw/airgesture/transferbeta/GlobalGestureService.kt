@@ -38,6 +38,8 @@ import tw.airgesture.transferbeta.core.CameraUnlockGate
 import tw.airgesture.transferbeta.core.VisualEvent
 import tw.airgesture.transferbeta.core.VisualPhase
 import tw.airgesture.transferbeta.core.HandFeedbackPolicy
+import tw.airgesture.transferbeta.core.HandDisplayGate
+import tw.airgesture.transferbeta.core.PalmPositionTracker
 import tw.airgesture.transferbeta.core.FloatingControlRouter
 import tw.airgesture.transferbeta.core.TiltedPalmAssist
 import tw.airgesture.transferbeta.core.FloatingSettings
@@ -110,8 +112,11 @@ class GlobalGestureService : LifecycleService() {
     private val power = AdaptivePowerPolicy()
     private val motionSampler = IdleMotionSampler()
     private val handFeedback = HandFeedbackPolicy()
+    private val handDisplayGate = HandDisplayGate()
+    private val palmTracker = PalmPositionTracker()
     private var unified = FloatingControlRouter()
-    // Gesture visual feedback is now event-driven, not a camera-frame trail.
+    // Only actual confirmed palm observations update the lightweight overlay.
+    private var palmMarkerShown = false
     private var cursorShown = false
     private val tiltedPalm = TiltedPalmAssist(enabled = true)
     private val cameraExecutor = Executors.newSingleThreadExecutor()
@@ -201,9 +206,13 @@ class GlobalGestureService : LifecycleService() {
         provider?.unbindAll()
         overlay.dismissHand()
         GlobalGrabAccessibilityService.setCursor(null)
+        GlobalGrabAccessibilityService.setPalm(null)
         overlay.dismissAction()
         cameraExecutor.execute {
             cursorShown = false
+            palmMarkerShown = false
+            palmTracker.clear()
+            handDisplayGate.reset()
             handFeedback.reset()
             unified.reset()
         }
@@ -231,6 +240,9 @@ class GlobalGestureService : LifecycleService() {
             GlobalGrabAccessibilityService.setPalm(null)
             cameraExecutor.execute {
                 cursorShown = false
+                palmMarkerShown = false
+                palmTracker.clear()
+                handDisplayGate.reset()
                 handFeedback.reset()
                 unified.reset()
             }
@@ -303,8 +315,11 @@ class GlobalGestureService : LifecycleService() {
         cameraExecutor.execute {
             unified = FloatingControlRouter(dwell, sensitivity)
             cursorShown = false
+            palmMarkerShown = false
+            palmTracker.clear()
+            handDisplayGate.reset()
         }
-        // Hide any old v1.0.3 palm marker after upgrading.
+        // A settings change must not leave stale position markers.
         GlobalGrabAccessibilityService.setPalm(null)
     }
 
@@ -527,13 +542,27 @@ class GlobalGestureService : LifecycleService() {
             val trustedScore = if (tilt.useLandmarkFallback) .65f else score
             lastPose = (if (pose.isBlank()) "未分類" else pose) +
                 " " + (trustedScore * 100f).toInt() + "%"
-            handFeedback.observe(handSeen, pose, now)?.let(overlay::showHandFeedback)
             val px = if (marks != null && marks.size > 17)
                 1f - (marks[0].x() + marks[5].x() + marks[9].x() +
                     marks[13].x() + marks[17].x()) / 5f else null
             val py = if (marks != null && marks.size > 17)
                 (marks[0].y() + marks[5].y() + marks[9].y() +
                     marks[13].y() + marks[17].y()) / 5f else null
+            // Visual-only two-frame validation. A one-frame ghost hand can
+            // no longer produce an erroneous "hand detected" badge or marker.
+            // Actual grab/swipe detection is NOT delayed by this UI gate.
+            val displayHand = handDisplayGate.observe(xy, px, py, now)
+            handFeedback.observe(displayHand,
+                if (displayHand) pose else "", now)?.let(overlay::showHandFeedback)
+            val palmSnapshot = palmTracker.observe(px, py,
+                displayHand && pose == "Open_Palm", now)
+            if (palmSnapshot != null) {
+                GlobalGrabAccessibilityService.setPalm(palmSnapshot)
+                palmMarkerShown = true
+            } else if (palmMarkerShown) {
+                GlobalGrabAccessibilityService.setPalm(null)
+                palmMarkerShown = false
+            }
             val index = if (pose == "Pointing_Up" && marks != null &&
                 marks.size > 8) marks[8] else null
             val output = unified.accept(pose, trustedScore, px, py,
@@ -647,6 +676,9 @@ class GlobalGestureService : LifecycleService() {
         overlay.dismissAction()
         GlobalGrabAccessibilityService.setCursor(null)
         GlobalGrabAccessibilityService.setPalm(null)
+        palmMarkerShown = false
+        palmTracker.clear()
+        handDisplayGate.reset()
         power.stop()
         provider?.unbindAll()
         try { unregisterReceiver(screen) } catch (_: Exception) {}
