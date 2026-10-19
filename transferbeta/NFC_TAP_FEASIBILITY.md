@@ -1,3 +1,30 @@
+# NFC touch-to-share integration — v1.0.16 test build
+
+The new code extends the earlier feasibility-only probe. Device testing on Galaxy S26 Ultra / S25 remains necessary.
+
+## How to try (once a signed APK is ready)
+
+1. Install the same signed **v1.0.16** build on both phones; keep original trusted Nearby pairing.
+2. Turn on NFC and Nearby transfer for both; start the existing transfer foreground service once on each, keep both phones unlocked and allow Nearby to connect first.
+3. On the S26 Ultra open a photo in Samsung Gallery, tap **Share**, then choose **「懸浮操作 · NFC 碰一碰」** (not the existing ordinary 「懸浮操作」 share target).
+4. Wait for the original source file to be staged byte-for-byte and the NFC reader page to say ready.
+5. Touch backs near the NFC antenna positions. The S25 (even with Samsung Gallery in front) runs a background HCE responder if the OS routes the proprietary AID. A successful contact returns a short-lived one-use nonce and the receiver's candidate ID.
+6. The S26 Ultra's *already authenticated* Nearby connection confirms that nonce with the specific recipient. Only the matched peer receives an offer. S25 auto-accepts **only** the one NFC-bound offer and saves the unchanged file after its SHA-256 verification.
+7. A webpage URL can use the same contact selection. Original regular Sharing and AirGrab gestures continue independently.
+
+## Hard technical boundaries
+
+- **Samsung Gallery must explicitly Share first.** Android offers no supported public API to read the currently displayed original image by merely tapping phones while Gallery remains foreground on the *sender*. Reader Mode works only with our app's NFC sending Activity in foreground.
+- NFC AID/HCE support, Samsung wallet routing, screen-unlock rules, and background delivery must be tested on both physical devices. Build/unit tests cannot establish phone-to-phone NFC success.
+- S25 can have the **App UI closed**, but the existing **transfer foreground service must still be active and connected**; cold-boot NFC cannot reliably start a camera/connected-device foreground service under current Android background limits. The HCE service rejects the request instead of falsely claiming transfer.
+- Single original file/photo/video/document or one URL is supported through the new NFC Sharesheet target. Multiple files still use original AirGrab share flow; no ZIP workaround and no NFC direct file data.
+- The *pre-existing* Nearby transport requires a verified, remembered peer; neither NFC location nor static ID substitutes for that cryptographic connection. The 128-bit NFC nonce is bound over the verified Nearby channel and consumed once.
+- The NFC sender deliberately bypasses the optional video transcoder to guarantee source bytes are unchanged. If the recipient cannot display a native codec, it still stores the original.
+- No tap-triggered file transfer occurs if NFC identity binding fails. No UI automation, OCR, inferred MediaStore picture, or silent screenshot fallback.
+- No APK was part of the initial feasibility phase; v1.0.16 is a separate explicit user-requested signed test build.
+
+---
+
 # NFC touch-to-send feasibility: Galaxy S26 Ultra / S25
 
 **State: exploratory code + automated unit tests only. No APK requested, built or delivered in this phase. No end-to-end on-device NFC or Samsung Gallery verification yet.**
