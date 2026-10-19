@@ -126,6 +126,62 @@ class FloatingControlRouterTest {
         assertTrue(results.all { it == null })
     }
 
+    private fun facingStep(
+        r: FloatingControlRouter,
+        pose: String,
+        time: Long,
+        facing: Boolean,
+        py: Float = .5f
+    ): FloatingControlRouter.Decision = r.accept(
+        pose, .90f, .50f, py, null, null,
+        time, receivingOffer = false, youtubeForeground = false,
+        rawCategory = pose, palmFacingForSwipe = facing
+    )
+
+    @Test fun backOfHandCanNeverArmSwipeEvenWithLargeMovement() {
+        val r = FloatingControlRouter()
+        assertNull(facingStep(r, "Open_Palm", 1000L, false, .85f).command)
+        assertNull(facingStep(r, "Open_Palm", 1150L, false, .57f).command)
+        assertNull(facingStep(r, "Open_Palm", 1300L, false, .25f).command)
+        // Turning the palm toward the camera starts a NEW origin here,
+        // so previous back-of-hand motion is not counted.
+        assertNull(facingStep(r, "Open_Palm", 1450L, true, .25f).command)
+        assertNull(facingStep(r, "Open_Palm", 1570L, true, .20f).command)
+    }
+
+    @Test fun validatedPalmStartsMotionButLaterWristRotationCanFinishSwipe() {
+        val r = FloatingControlRouter()
+        assertNull(facingStep(r, "Open_Palm", 1000L, true, .84f).command)
+        assertEquals(FloatingControlRouter.Command.SWIPE_UP,
+            facingStep(r, "Open_Palm", 1150L, false, .52f).command)
+        assertNull(facingStep(r, "Open_Palm", 1290L, false, .16f).command)
+    }
+
+    @Test fun backOfHandCannotRearmAfterPreviousSwipe() {
+        val r = FloatingControlRouter()
+        facingStep(r, "Open_Palm", 1000L, true, .8f)
+        assertEquals(FloatingControlRouter.Command.SWIPE_UP,
+            facingStep(r, "Open_Palm", 1140L, true, .57f).command)
+        for (i in 0..13) {
+            assertNull(facingStep(r, "Open_Palm", 2000L + i * 100L,
+                false, .57f).command)
+        }
+        // Only a fresh palm-facing-camera hold may rearm.
+        assertNull(facingStep(r, "Open_Palm", 3500L, true, .50f).command)
+        assertNull(facingStep(r, "Open_Palm", 4000L, true, .50f).command)
+        assertEquals(FloatingControlRouter.Command.SWIPE_DOWN,
+            facingStep(r, "Open_Palm", 4140L, true, .68f).command)
+    }
+
+    @Test fun palmBackOrientationNeverChangesGrabBehavior() {
+        val r = FloatingControlRouter()
+        facingStep(r, "Open_Palm", 1000L, false)
+        facingStep(r, "Open_Palm", 1100L, false)
+        assertNull(facingStep(r, "Closed_Fist", 1200L, false).command)
+        assertEquals(FloatingControlRouter.Command.SEND,
+            facingStep(r, "Closed_Fist", 1300L, false).command)
+    }
+
     @Test fun openPalmSwipeUpRoutesWithoutTriggeringFileGrab() {
         val r = FloatingControlRouter()
         val events = listOf(
