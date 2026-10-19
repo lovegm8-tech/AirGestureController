@@ -6,7 +6,7 @@ enum class HandHint { NONE, HAND_SEEN, OPEN_PALM, CLOSED_FIST }
 
 class HandFeedbackPolicy(
     private val heartbeatMs: Long = 750L,
-    private val lostGraceMs: Long = 1500L,
+    private val lostGraceMs: Long = 700L,
     private val weakClassificationGraceMs: Long = 320L
 ) {
     private var lastSeenAt: Long = Long.MIN_VALUE
