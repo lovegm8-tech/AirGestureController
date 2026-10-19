@@ -27,6 +27,9 @@ class AdaptivePowerPolicy(
     // Continuous hand tracking returns to normal ACTIVE cadence.
     private var lastHandSeenAt = Long.MIN_VALUE
     private var recognitionBurstUntil = Long.MIN_VALUE
+    // Brief extra frames after scene motion let a partially visible, rising
+    // hand finish entering the camera without another full 1.55s ECO delay.
+    private var motionProbeUntil = Long.MIN_VALUE
 
     fun start() {
         enabled = true
@@ -34,6 +37,7 @@ class AdaptivePowerPolicy(
         idleSince = Long.MIN_VALUE
         lastHandSeenAt = Long.MIN_VALUE
         recognitionBurstUntil = Long.MIN_VALUE
+        motionProbeUntil = Long.MIN_VALUE
     }
     fun stop() {
         enabled = false
@@ -42,6 +46,7 @@ class AdaptivePowerPolicy(
         activeUntil = Long.MIN_VALUE
         lastHandSeenAt = Long.MIN_VALUE
         recognitionBurstUntil = Long.MIN_VALUE
+        motionProbeUntil = Long.MIN_VALUE
     }
 
     /** Incoming transfer offers must remain instantly responsive. */
@@ -55,6 +60,7 @@ class AdaptivePowerPolicy(
             activeUntil = Long.MIN_VALUE
             lastHandSeenAt = Long.MIN_VALUE
             recognitionBurstUntil = Long.MIN_VALUE
+        motionProbeUntil = Long.MIN_VALUE
         }
     }
 
@@ -62,6 +68,7 @@ class AdaptivePowerPolicy(
         !enabled || !screenOn -> Mode.STOPPED
         receiverAwaiting -> Mode.ACTIVE
         activeUntil != Long.MIN_VALUE && nowMs <= activeUntil -> Mode.ACTIVE
+        motionProbeUntil != Long.MIN_VALUE && nowMs <= motionProbeUntil -> Mode.ACTIVE
         else -> Mode.ECO
     }
 
@@ -87,6 +94,9 @@ class AdaptivePowerPolicy(
             (lastInference == Long.MIN_VALUE || nowMs < lastInference ||
                 nowMs - lastInference >= 240L)) {
             lastInference = nowMs
+            // No landmarks at the exact wake frame is common for a hand
+            // emerging from the bottom. Grant only a 520 ms probe window.
+            motionProbeUntil = nowMs + 520L
             return true
         }
         val interval = when (mode(nowMs)) {
