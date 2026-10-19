@@ -164,7 +164,7 @@ internal class FloatingPalmOverlay(private val context: Context) {
             if (!shownX.isFinite() || !shownY.isFinite()) return
             val centerX = shownX - offsetX
             val centerY = shownY - offsetY
-            val radius = 34f * density
+            val radius = 22f * density
 
             if (snap.trail.size >= 2) {
                 trailPath.reset()
@@ -176,25 +176,25 @@ internal class FloatingPalmOverlay(private val context: Context) {
                         pt.y * screenH - offsetY)
                 }
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = 3f * density
+                paint.strokeWidth = 2.3f * density
                 paint.strokeCap = Paint.Cap.ROUND
                 paint.strokeJoin = Paint.Join.ROUND
                 paint.color = Color.argb(150, 90, 220, 255)
                 canvas.drawPath(trailPath, paint)
             }
             paint.style = Paint.Style.FILL
-            paint.color = Color.argb(50, 12, 44, 94)
+            paint.color = Color.argb(37, 12, 44, 94)
             canvas.drawCircle(centerX, centerY, radius + 8f * density, paint)
             paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 3f * density
+            paint.strokeWidth = 2.5f * density
             paint.color = Color.rgb(60, 218, 255)
             canvas.drawCircle(centerX, centerY, radius, paint)
             paint.strokeWidth = 1.1f * density
             paint.color = Color.argb(160, 160, 237, 255)
-            canvas.drawCircle(centerX, centerY, radius - 9f * density, paint)
+            canvas.drawCircle(centerX, centerY, radius - 7f * density, paint)
             paint.style = Paint.Style.FILL
             paint.color = Color.WHITE
-            canvas.drawCircle(centerX, centerY, 4.5f * density, paint)
+            canvas.drawCircle(centerX, centerY, 3.5f * density, paint)
         }
     }
 }
