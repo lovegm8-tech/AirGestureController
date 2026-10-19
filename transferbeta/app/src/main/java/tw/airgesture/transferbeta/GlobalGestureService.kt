@@ -40,6 +40,7 @@ import tw.airgesture.transferbeta.core.VisualPhase
 import tw.airgesture.transferbeta.core.HandFeedbackPolicy
 import tw.airgesture.transferbeta.core.HandDisplayGate
 import tw.airgesture.transferbeta.core.PalmPositionTracker
+import tw.airgesture.transferbeta.core.FrontPalmPolicy
 import tw.airgesture.transferbeta.core.FloatingControlRouter
 import tw.airgesture.transferbeta.core.TiltedPalmAssist
 import tw.airgesture.transferbeta.core.FloatingSettings
@@ -129,6 +130,7 @@ class GlobalGestureService : LifecycleService() {
     private var rgbaScratch = ByteArray(0)
     private var sourceBitmap: Bitmap? = null // reusable on the single camera worker
     private val landmarkScratch = FloatArray(42)
+    private val worldLandmarkScratch = FloatArray(63)
     private val rotationMatrix = Matrix()
     private var lastHint = 0L
     private var isScreenOn = false
@@ -538,12 +540,28 @@ class GlobalGestureService : LifecycleService() {
                 }
                 landmarkScratch
             } else null
+            val worldMarks = result.worldLandmarks().firstOrNull()
+            val xyz = if (worldMarks != null && worldMarks.size >= 21) {
+                for (i in 0 until 21) {
+                    worldLandmarkScratch[3 * i] = worldMarks[i].x()
+                    worldLandmarkScratch[3 * i + 1] = worldMarks[i].y()
+                    worldLandmarkScratch[3 * i + 2] = worldMarks[i].z()
+                }
+                worldLandmarkScratch
+            } else null
+            val side = result.handedness().firstOrNull()?.maxByOrNull { it.score() }
             val tilt = tiltedPalm.resolve(name, score, xy, now)
             val pose = if (tilt.useLandmarkFallback) "Open_Palm"
                 else if (score >= .58f) name ?: "" else ""
             val trustedScore = if (tilt.useLandmarkFallback) .65f else score
+            val palmFacing = pose == "Open_Palm" && FrontPalmPolicy.facesCamera(
+                xy, xyz, side?.categoryName(), side?.score() ?: 0f
+            )
             lastPose = (if (pose.isBlank()) "未分類" else pose) +
-                " " + (trustedScore * 100f).toInt() + "%"
+                " " + (trustedScore * 100f).toInt() + "%" +
+                if (pose == "Open_Palm") {
+                    if (palmFacing) " · 掌心朝前可起滑" else " · 未確認掌心，不起滑"
+                } else ""
             val px = if (marks != null && marks.size > 17)
                 1f - (marks[0].x() + marks[5].x() + marks[9].x() +
                     marks[13].x() + marks[17].x()) / 5f else null
@@ -575,7 +593,8 @@ class GlobalGestureService : LifecycleService() {
                 marks.size > 8) marks[8] else null
             val output = unified.accept(pose, trustedScore, px, py,
                 index?.let { 1f - it.x() }, index?.y(), now, receivingOffer,
-                GlobalGrabAccessibilityService.isYouTubeForeground(), name)
+                GlobalGrabAccessibilityService.isYouTubeForeground(), name,
+                palmFacing)
             when (val command = output.command) {
                 FloatingControlRouter.Command.SEND -> {
                     actionCount++
