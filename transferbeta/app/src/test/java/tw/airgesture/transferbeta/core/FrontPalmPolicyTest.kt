@@ -34,23 +34,31 @@ class FrontPalmPolicyTest {
     }
 
     @Test fun frontPalmAllowsSwipeStartForEitherReportedHand() {
-        assertTrue(FrontPalmPolicy.facesCamera(hand(.79f), world(), "Left", .94f))
+        assertTrue(FrontPalmPolicy.facesCamera(hand(.79f), world(), "Right", .94f))
         assertTrue(FrontPalmPolicy.facesCamera(mirror(hand(.79f)), world(),
-            "Right", .94f))
+            "Left", .94f))
     }
 
     @Test fun backOfHandCannotStartSwipe() {
-        assertFalse(FrontPalmPolicy.facesCamera(hand(.25f), world(), "Left", .94f))
+        assertFalse(FrontPalmPolicy.facesCamera(hand(.25f), world(), "Right", .94f))
         assertFalse(FrontPalmPolicy.facesCamera(mirror(hand(.25f)), world(),
-            "Right", .94f))
+            "Left", .94f))
     }
 
-    @Test fun cameraMirroringChangesBothLabelAndGeometryNotDecision() {
-        val original = hand(.79f)
-        assertTrue(FrontPalmPolicy.facesCamera(original, world(), "Left", .94f))
-        assertTrue(FrontPalmPolicy.facesCamera(mirror(original), world(),
-            "Right", .94f))
-        assertFalse(FrontPalmPolicy.facesCamera(mirror(original), world(),
+    @Test fun unmirroredCameraInputUsesPhysicalHandedness() {
+        // Regression: v1.0.14 reversed this and treated the back as palm.
+        val physicalRightFront = hand(.79f)
+        val physicalRightBack = hand(.25f)
+        assertTrue(FrontPalmPolicy.facesCamera(physicalRightFront, world(), "Right", .94f))
+        assertFalse(FrontPalmPolicy.facesCamera(physicalRightBack, world(), "Right", .94f))
+        // If the pixels are mirrored, the model's handedness flips along
+        // with the thumb side, but the palm/back decision is unchanged.
+        assertTrue(FrontPalmPolicy.facesCamera(mirror(physicalRightFront), world(),
+            "Left", .94f))
+        assertFalse(FrontPalmPolicy.facesCamera(mirror(physicalRightBack), world(),
+            "Left", .94f))
+        // An incorrect handedness/geometry combination must fail closed.
+        assertFalse(FrontPalmPolicy.facesCamera(physicalRightFront, world(),
             "Left", .94f))
     }
 
@@ -63,14 +71,14 @@ class FrontPalmPolicyTest {
             rotated[i * 2] = .5f - y
             rotated[i * 2 + 1] = .5f + x
         }
-        assertTrue(FrontPalmPolicy.facesCamera(rotated, world(), "Left", .95f))
+        assertTrue(FrontPalmPolicy.facesCamera(rotated, world(), "Right", .95f))
     }
 
     @Test fun edgeOnOrUnknownHandFailsClosed() {
-        assertFalse(FrontPalmPolicy.facesCamera(hand(.79f), world(true), "Left", .94f))
-        assertFalse(FrontPalmPolicy.facesCamera(hand(.79f), world(), "Left", .54f))
-        assertFalse(FrontPalmPolicy.facesCamera(hand(.79f), null, "Left", .99f))
-        assertFalse(FrontPalmPolicy.facesCamera(null, world(), "Left", .99f))
+        assertFalse(FrontPalmPolicy.facesCamera(hand(.79f), world(true), "Right", .94f))
+        assertFalse(FrontPalmPolicy.facesCamera(hand(.79f), world(), "Right", .54f))
+        assertFalse(FrontPalmPolicy.facesCamera(hand(.79f), null, "Right", .99f))
+        assertFalse(FrontPalmPolicy.facesCamera(null, world(), "Right", .99f))
         assertFalse(FrontPalmPolicy.facesCamera(hand(.79f), world(), "Unknown", .99f))
     }
 }
