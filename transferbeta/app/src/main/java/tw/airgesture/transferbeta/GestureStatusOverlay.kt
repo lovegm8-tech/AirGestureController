@@ -135,7 +135,8 @@ class GestureStatusOverlay(private val context: Context) {
             }
             val label = when (hint) {
                 HandHint.HAND_SEEN -> "◉ 已偵測到手"
-                HandHint.OPEN_PALM -> "✋ 張掌已辨識"
+                HandHint.OPEN_PALM -> "✋ 掌心朝前，可起滑"
+                HandHint.OPEN_PALM_NOT_READY -> "✋ 張掌已辨識，未確認掌心"
                 HandHint.CLOSED_FIST -> "✊ 握拳已辨識"
                 HandHint.NONE -> return@post
             }
