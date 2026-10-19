@@ -311,6 +311,7 @@ class GlobalGestureService : LifecycleService() {
         power.setPowerMode(FloatingSettings.power(this))
         // Keep v1.0.3 battery cadence: a one-shot cue never boosts AI FPS.
         actionCueEnabled = FloatingSettings.actionFeedback(this)
+        palmPositionEnabled = FloatingSettings.palmPositionEnabled(this)
         val dwell = FloatingSettings.dwellMs(this)
         val sensitivity = FloatingSettings.sensitivity(this)
         cameraExecutor.execute {
@@ -555,14 +556,20 @@ class GlobalGestureService : LifecycleService() {
             val displayHand = handDisplayGate.observe(xy, px, py, now)
             handFeedback.observe(displayHand,
                 if (displayHand) pose else "", now)?.let(overlay::showHandFeedback)
-            val palmSnapshot = palmTracker.observe(px, py,
-                displayHand && pose == "Open_Palm", now)
-            if (palmSnapshot != null) {
-                GlobalGrabAccessibilityService.setPalm(palmSnapshot)
-                palmMarkerShown = true
+            if (palmPositionEnabled) {
+                val palmSnapshot = palmTracker.observe(px, py,
+                    displayHand && pose == "Open_Palm", now)
+                if (palmSnapshot != null) {
+                    GlobalGrabAccessibilityService.setPalm(palmSnapshot)
+                    palmMarkerShown = true
+                } else if (palmMarkerShown) {
+                    GlobalGrabAccessibilityService.setPalm(null)
+                    palmMarkerShown = false
+                }
             } else if (palmMarkerShown) {
                 GlobalGrabAccessibilityService.setPalm(null)
                 palmMarkerShown = false
+                palmTracker.clear()
             }
             val index = if (pose == "Pointing_Up" && marks != null &&
                 marks.size > 8) marks[8] else null
