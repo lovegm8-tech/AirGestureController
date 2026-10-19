@@ -208,7 +208,10 @@ class TransferActivity : ComponentActivity() {
             homePromptVisible,
             advancedOpen
         )
-        if (!mayClose || !Settings.canDrawOverlays(this)) return
+        // Camera-free transfer is allowed to background without overlay
+        // permission; share intents still reach ShareReceiverActivity.
+        if (!mayClose || (FloatingSettings.gestureCamera(this) &&
+                !Settings.canDrawOverlays(this))) return
         queuedAutoHome = true
         main.postDelayed({
             queuedAutoHome = false
@@ -219,7 +222,8 @@ class TransferActivity : ComponentActivity() {
                     GlobalGestureService.transfer?.isConnected == true,
                     homePromptVisible,
                     advancedOpen
-                ) && Settings.canDrawOverlays(this)) {
+                ) && (!FloatingSettings.gestureCamera(this) ||
+                    Settings.canDrawOverlays(this))) {
                 moveTaskToBack(true)
             }
         }, 900)
