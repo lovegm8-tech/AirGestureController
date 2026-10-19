@@ -10,6 +10,18 @@ class HandFeedbackPolicyTest {
         assertEquals(HandHint.OPEN_PALM, p.observe(true, "Open_Palm", 1120))
         assertEquals(HandHint.CLOSED_FIST, p.observe(true, "Closed_Fist", 1240))
     }
+    @Test fun displayDifferentiatesBackOfHandFromSwipeReadyPalm() {
+        val p = HandFeedbackPolicy()
+        assertEquals(HandHint.OPEN_PALM_NOT_READY,
+            p.observe(true, "Open_Palm", 1000L, palmFacing = false))
+        assertEquals(HandHint.OPEN_PALM,
+            p.observe(true, "Open_Palm", 1120L, palmFacing = true))
+        assertEquals(HandHint.OPEN_PALM_NOT_READY,
+            p.observe(true, "Open_Palm", 1240L, palmFacing = false))
+        // No extra gesture-action decision is made by this visual status.
+        assertNull(p.observe(true, "", 1340L, palmFacing = false))
+    }
+
     @Test fun throttlesRepeatedResultsWithoutHidingExistingBadge() {
         val p = HandFeedbackPolicy()
         assertEquals(HandHint.OPEN_PALM, p.observe(true, "Open_Palm", 1000))
