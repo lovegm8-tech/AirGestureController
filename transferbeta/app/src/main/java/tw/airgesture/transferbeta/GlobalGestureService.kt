@@ -197,6 +197,31 @@ class GlobalGestureService : LifecycleService() {
         cameraResumeCheck = null
     }
 
+    /** Stop only the front camera and all gesture visuals. Preserve nearby
+     * peers, offers, transfers and the foreground service itself. */
+    private fun releaseGestureCamera() {
+        cameraGeneration++
+        cameraBindPending = false
+        cameraBound = false
+        cameraRetryCount = 0
+        provider?.unbindAll()
+        power.screenChanged(false)
+        motionSampler.reset()
+        overlay.dismissHand()
+        overlay.dismissAction()
+        GlobalGrabAccessibilityService.setCursor(null)
+        GlobalGrabAccessibilityService.setPalm(null)
+        cameraExecutor.execute {
+            cursorShown = false
+            palmMarkerShown = false
+            palmTracker.clear()
+            handDisplayGate.reset()
+            handFeedback.reset()
+            unified.reset()
+        }
+        lastPose = "前鏡頭手勢已關閉"
+    }
+
     /** Full camera release, not merely stopping ML inference. */
     private fun suspendCameraForScreenOff() {
         isScreenOn = false
@@ -412,7 +437,7 @@ class GlobalGestureService : LifecycleService() {
     private fun foregroundNotification() {
         val mgr = getSystemService(NotificationManager::class.java)
         mgr.createNotificationChannel(NotificationChannel(
-            CHANNEL, "懸浮操作／前鏡頭監測", NotificationManager.IMPORTANCE_LOW))
+            CHANNEL, "懸浮操作／背景待命", NotificationManager.IMPORTANCE_LOW))
         val stop = PendingIntent.getService(this, 32,
             Intent(this, GlobalGestureService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
@@ -423,18 +448,39 @@ class GlobalGestureService : LifecycleService() {
             Intent(this, TransferActivity::class.java)
                 .putExtra("airgrab_show_settings", true),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val n = Notification.Builder(this, CHANNEL)
-            .setSmallIcon(android.R.drawable.ic_menu_camera)
-            .setContentTitle("懸浮操作已啟用")
-            .setContentText("控制與傳檔共用鏡頭；待機自動降頻")
+        val title = when {
+            gestureCameraEnabled && nearbyTransferEnabled -> "懸浮操作 · 完整模式"
+            gestureCameraEnabled -> "懸浮操作 · 手勢模式"
+            nearbyTransferEnabled -> "懸浮操作 · 傳檔待命"
+            else -> "懸浮操作 · 功能已暫停"
+        }
+        val message = when {
+            gestureCameraEnabled && nearbyTransferEnabled ->
+                "手勢與傳檔已啟用；熄屏暫停搜尋"
+            gestureCameraEnabled ->
+                "前鏡頭手勢已啟用；附近搜尋已關閉"
+            nearbyTransferEnabled ->
+                "前鏡頭已關閉；亮屏時可收發檔案"
+            else -> "前鏡頭與附近搜尋已關閉"
+        }
+        val builder = Notification.Builder(this, CHANNEL)
+            .setSmallIcon(if (gestureCameraEnabled)
+                android.R.drawable.ic_menu_camera else android.R.drawable.ic_menu_share)
+            .setContentTitle(title)
+            .setContentText(message)
             .setOngoing(true)
             .setContentIntent(open)
-            .addAction(Notification.Action.Builder(
-                android.R.drawable.ic_menu_camera, "手動截圖備援", screenshot).build())
-            .addAction(Notification.Action.Builder(
-                android.R.drawable.ic_media_pause, "停止前鏡頭偵測", stop).build())
-            .build()
-        startForeground(NOTIFICATION, n)
+        if (gestureCameraEnabled) builder.addAction(Notification.Action.Builder(
+            android.R.drawable.ic_menu_camera, "手動截圖備援", screenshot).build())
+        builder.addAction(Notification.Action.Builder(
+            android.R.drawable.ic_media_pause, "停止全部服務", stop).build())
+        // On Android 14+ a camera-type foreground service requires camera
+        // runtime permission, even when no camera is currently bound.
+        // Only request the camera FGS type in actual gesture mode.
+        val type = android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
+            (if (gestureCameraEnabled)
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA else 0)
+        startForeground(NOTIFICATION, builder.build(), type)
     }
 
     private fun preferredCameraFps(): Range<Int>? {
