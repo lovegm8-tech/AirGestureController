@@ -369,10 +369,13 @@ class GlobalGestureService : LifecycleService() {
         connections.setDiscoveryEnabled(false)
         connections.start()
         power.start()
-        // A foreground start from the unlocked dashboard may bind after a
-        // short grace period. Starting while locked leaves the camera free.
+        // Foreground start from an ALREADY unlocked activity needs no long
+        // face-unlock grace period. The locked/unlocking path still waits and
+        // checks Keyguard before binding, preserving face authentication.
         power.screenChanged(false)
-        if (isScreenOn && !gameSuspended) scheduleUnlockCheck(700L)
+        if (isScreenOn && !gameSuspended) {
+            scheduleUnlockCheck(if (mayBindCamera()) 150L else 700L)
+        }
         return START_NOT_STICKY
     }
 
