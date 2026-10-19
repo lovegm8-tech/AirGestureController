@@ -6,7 +6,7 @@ import org.junit.Test
 class NfcTapProtocolTest {
     @Test fun readerSelectHandshakesWithOurCard() {
         val select = NfcTapProtocol.selectApdu()
-        assertEquals(13, select.size)
+        assertEquals(14, select.size)
         assertTrue(NfcTapProtocol.isSuccessfulProbe(NfcTapProtocol.respond(select)))
     }
 
