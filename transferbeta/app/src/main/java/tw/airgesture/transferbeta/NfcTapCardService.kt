@@ -9,16 +9,35 @@ import tw.airgesture.transferbeta.core.NfcTapProtocol
  * while this phone remains unlocked in Gallery. This does NOT transmit a photo.
  */
 class NfcTapCardService : HostApduService() {
+    private var selected = false
+
     override fun processCommandApdu(commandApdu: ByteArray?, extras: Bundle?): ByteArray {
+        // Preserve the previous diagnostic SELECT reply and follow it with a
+        // separate session APDU. The reader still must be in OUR app foreground.
+        if (NfcTapProtocol.isSessionCommand(commandApdu)) {
+            if (!selected || !GlobalGestureService.isActive ||
+                GlobalGestureService.transfer?.isConnected != true) {
+                return NfcTapProtocol.notReadyResponse()
+            }
+            val prefs = getSharedPreferences("device", MODE_PRIVATE)
+            val localId = prefs.getString("id", null) ?: return NfcTapProtocol.notReadyResponse()
+            return try {
+                NfcTapProtocol.sessionResponse(localId,
+                    NfcTapSessionStore.issue(applicationContext))
+            } catch (_: IllegalArgumentException) {
+                NfcTapProtocol.notReadyResponse()
+            }
+        }
         val reply = NfcTapProtocol.respond(commandApdu)
-        if (NfcTapProtocol.isSuccessfulProbe(reply)) {
+        selected = NfcTapProtocol.isSuccessfulProbe(reply)
+        if (selected) {
             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putLong(LAST_PROBE_TIME, System.currentTimeMillis()).apply()
         }
         return reply
     }
 
-    override fun onDeactivated(reason: Int) = Unit
+    override fun onDeactivated(reason: Int) { selected = false }
 
     companion object {
         private const val PREFS = "nfc_tap_diagnostic"
