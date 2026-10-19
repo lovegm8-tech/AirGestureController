@@ -48,6 +48,19 @@
         </activity>
         <activity android:name=".GestureTestActivity" android:exported="false" />
         <activity android:name=".NfcProbeActivity" android:exported="false" />
+        <!-- Separate explicit NFC share target. Existing AirGrab sharing stays unchanged. -->
+        <activity
+            android:name=".NfcShareActivity"
+            android:exported="true"
+            android:label="懸浮操作 · NFC 碰一碰"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar"
+            android:excludeFromRecents="true">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="*/*"/>
+            </intent-filter>
+        </activity>
         <service
             android:name=".NfcTapCardService"
             android:exported="true"
