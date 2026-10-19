@@ -268,8 +268,18 @@ class TransferActivity : ComponentActivity() {
     private fun permissionGranted(name: String) =
         ContextCompat.checkSelfPermission(this, name) == PackageManager.PERMISSION_GRANTED
 
-    private fun nearbyPermissions(): Array<String> =
-        permissions().filter { it != Manifest.permission.CAMERA }.toTypedArray()
+    private fun nearbyPermissions(): Array<String> {
+        // Always list the actual radio permissions, even while Nearby is OFF:
+        // otherwise turning it back on would incorrectly appear authorized.
+        val needed = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        if (Build.VERSION.SDK_INT >= 31) {
+            needed += Manifest.permission.BLUETOOTH_SCAN
+            needed += Manifest.permission.BLUETOOTH_ADVERTISE
+            needed += Manifest.permission.BLUETOOTH_CONNECT
+        }
+        if (Build.VERSION.SDK_INT >= 33) needed += Manifest.permission.NEARBY_WIFI_DEVICES
+        return needed.toTypedArray()
+    }
 
     private fun nearbyGranted() = nearbyPermissions().all { permissionGranted(it) }
 
@@ -695,12 +705,7 @@ class TransferActivity : ComponentActivity() {
                 "已啟用：進入遊戲自動釋放前鏡頭，離開後恢復"
                 else "已停用：玩遊戲時也會繼續辨識手勢", true)
         }
-        extraButton("附近裝置自動搜尋（開／關）") {
-            val newValue = !FloatingSettings.nearby(this)
-            FloatingSettings.saveBool(this, "nearby_enabled", newValue)
-            reloadLiveSettings()
-            flash(if(newValue) "已恢復搜尋附近裝置" else "已關閉附近搜尋以節省電力", true)
-        }
+        // Nearby is controlled by the independent homepage switch.
         extraButton("手動選擇照片或檔案發送") { picker.launch(arrayOf("*/*")) }
         val videoModeButton = Button(this).apply {
             fun showMode() {
