@@ -541,8 +541,8 @@ class TransferActivity : ComponentActivity() {
             """.trimIndent()
             AlertDialog.Builder(this).setTitle("懸浮操作 v" + BuildConfig.VERSION_NAME)
                 .setMessage(versionLog +
-                    "\\n\\n更新方式：不再自動檢查或下載 APK。需手動取得同簽章的新版本安裝更新。" +
-                    "\\n進度說明：此紀錄隨 APK 版本更新，不會連線查詢 GitHub。")
+                    "\n\n更新方式：不再自動檢查或下載 APK。需手動取得同簽章的新版本安裝更新。" +
+                    "\n進度說明：此紀錄隨 APK 版本更新，不會連線查詢 GitHub。")
                 .setPositiveButton("完成", null).show()
         }
         extraButton("玩遊戲時自動暫停隔空操作（開／關）") {
