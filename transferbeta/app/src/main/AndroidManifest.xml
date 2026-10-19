@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.NFC"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
@@ -18,6 +19,9 @@
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE"/>
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"/>
     <uses-feature android:name="android.hardware.camera.front" android:required="true"/>
+    <!-- NFC is an optional experiment: unsupported phones retain all gesture/transfer features. -->
+    <uses-feature android:name="android.hardware.nfc" android:required="false"/>
+    <uses-feature android:name="android.hardware.nfc.hce" android:required="false"/>
     <!-- Visibility of launchable apps is enough to query CATEGORY_GAME;
          no broad QUERY_ALL_PACKAGES or usage-access permission needed. -->
     <queries>
@@ -43,6 +47,18 @@
             </intent-filter>
         </activity>
         <activity android:name=".GestureTestActivity" android:exported="false" />
+        <activity android:name=".NfcProbeActivity" android:exported="false" />
+        <service
+            android:name=".NfcTapCardService"
+            android:exported="true"
+            android:permission="android.permission.BIND_NFC_SERVICE">
+            <intent-filter>
+                <action android:name="android.nfc.cardemulation.action.HOST_APDU_SERVICE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.nfc.cardemulation.host_apdu_service"
+                android:resource="@xml/nfc_tap_hce"/>
+        </service>
         <!-- Transparent separate Sharesheet task: only this receives external
              ACTION_SEND and ACTION_SEND_MULTIPLE. It never constructs or reveals the AirGrab dashboard. -->
         <activity
