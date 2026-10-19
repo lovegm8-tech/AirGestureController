@@ -30,6 +30,7 @@ import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.view.Gravity
 import android.widget.Button
+import android.widget.Switch
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import tw.airgesture.transferbeta.core.FloatingSettings
@@ -73,6 +74,10 @@ class TransferActivity : ComponentActivity() {
     private lateinit var status: TextView
     private lateinit var titleHint: TextView
     private lateinit var primaryAction: Button
+    private lateinit var gestureSwitch: Switch
+    private lateinit var transferSwitch: Switch
+    private lateinit var modeDescription: TextView
+    private var updatingModeControls = false
     private lateinit var advanced: LinearLayout
     private lateinit var setupGuide: LinearLayout
     private lateinit var setupTitle: TextView
@@ -125,6 +130,26 @@ class TransferActivity : ComponentActivity() {
     }
 
     private var shownPairCode: String? = null
+
+    /** Pure transfer mode must not require camera or accessibility access. */
+    private fun hasModeAccessibility() =
+        !FloatingSettings.gestureCamera(this) || hasAccessibilityPermission()
+
+    private fun hasModePermissions() =
+        (!FloatingSettings.gestureCamera(this) ||
+            permissionGranted(Manifest.permission.CAMERA)) &&
+        (!FloatingSettings.nearby(this) || nearbyGranted())
+
+    private fun modeLabel(): String {
+        val gesture = FloatingSettings.gestureCamera(this)
+        val transfer = FloatingSettings.nearby(this)
+        return when {
+            gesture && transfer -> "完整模式：手勢操作＋亮屏附近傳檔"
+            gesture -> "手勢模式：前鏡頭操作，附近搜尋已關閉"
+            transfer -> "純傳檔模式：前鏡頭關閉，亮屏時可收發檔案"
+            else -> "功能暫停：前鏡頭和附近搜尋都關閉"
+        }
+    }
 
     private fun hasAccessibilityPermission(): Boolean {
         val am = getSystemService(ACCESSIBILITY_SERVICE) as AccessibilityManager
@@ -201,11 +226,15 @@ class TransferActivity : ComponentActivity() {
     }
 
     private fun startGlobalMode() {
-        if (!hasPermissions()) {
-            permissionLauncher.launch(permissions())
+        if (!FloatingSettings.gestureCamera(this) && !FloatingSettings.nearby(this)) {
+            show("請先開啟前鏡頭手勢或附近裝置傳檔")
             return
         }
-        if (!hasAccessibilityPermission()) {
+        if (!hasModePermissions()) {
+            permissionLauncher.launch(permissions().filterNot { permissionGranted(it) }.toTypedArray())
+            return
+        }
+        if (!hasModeAccessibility()) {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             return
         }
@@ -246,13 +275,14 @@ class TransferActivity : ComponentActivity() {
 
     private fun requestNextPermission() {
         when {
-            !permissionGranted(Manifest.permission.CAMERA) ->
+            FloatingSettings.gestureCamera(this) &&
+                !permissionGranted(Manifest.permission.CAMERA) ->
                 permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA))
-            !nearbyGranted() ->
+            FloatingSettings.nearby(this) && !nearbyGranted() ->
                 permissionLauncher.launch(nearbyPermissions().filterNot { permissionGranted(it) }.toTypedArray())
-            !hasAccessibilityPermission() ->
+            !hasModeAccessibility() ->
                 startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            !Settings.canDrawOverlays(this) ->
+            FloatingSettings.gestureCamera(this) && !Settings.canDrawOverlays(this) ->
                 startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                     Uri.parse("package:" + packageName)))
             else -> startGlobalMode()
@@ -799,13 +829,17 @@ class TransferActivity : ComponentActivity() {
     }
 
     private fun permissions(): Array<String> {
-        val out = mutableListOf(Manifest.permission.CAMERA, Manifest.permission.ACCESS_FINE_LOCATION)
-        if (Build.VERSION.SDK_INT >= 31) {
-            out += Manifest.permission.BLUETOOTH_SCAN
-            out += Manifest.permission.BLUETOOTH_ADVERTISE
-            out += Manifest.permission.BLUETOOTH_CONNECT
+        val out = mutableListOf<String>()
+        if (FloatingSettings.gestureCamera(this)) out += Manifest.permission.CAMERA
+        if (FloatingSettings.nearby(this)) {
+            out += Manifest.permission.ACCESS_FINE_LOCATION
+            if (Build.VERSION.SDK_INT >= 31) {
+                out += Manifest.permission.BLUETOOTH_SCAN
+                out += Manifest.permission.BLUETOOTH_ADVERTISE
+                out += Manifest.permission.BLUETOOTH_CONNECT
+            }
+            if (Build.VERSION.SDK_INT >= 33) out += Manifest.permission.NEARBY_WIFI_DEVICES
         }
-        if (Build.VERSION.SDK_INT >= 33) out += Manifest.permission.NEARBY_WIFI_DEVICES
         return out.toTypedArray()
     }
     private fun hasPermissions() = permissions().all {
