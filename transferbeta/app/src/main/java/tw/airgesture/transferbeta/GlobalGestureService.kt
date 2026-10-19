@@ -142,6 +142,8 @@ class GlobalGestureService : LifecycleService() {
     private var cameraBound = false
     private var cameraResumeCheck: Runnable? = null
     private var cameraRetryCount = 0
+    @Volatile private var gestureCameraEnabled = true
+    @Volatile private var nearbyTransferEnabled = true
     @Volatile private var gameSuspended = false
     @Volatile private var receivingOffer = false
 
@@ -269,11 +271,11 @@ class GlobalGestureService : LifecycleService() {
             val state = currentUnlockState()
             if (unlockGate.confirmUnlocked(state.interactive,
                     state.keyguardLocked, state.deviceLocked)) {
-                // Allow face authentication to fully close its camera session.
-                // This is only reached after Keyguard is genuinely gone.
-                power.screenChanged(true)
-                connections.setDiscoveryEnabled(FloatingSettings.nearby(this@GlobalGestureService))
-                bindCamera()
+                // Nearby is independent from the camera: in transfer-only
+                // mode the screen unlock still starts advertising/discovery.
+                power.screenChanged(gestureCameraEnabled)
+                connections.setDiscoveryEnabled(nearbyTransferEnabled)
+                if (gestureCameraEnabled) bindCamera()
             } else if (++cameraRetryCount <= 25) {
                 // Infrequent checks handle devices that do not dispatch
                 // ACTION_USER_PRESENT. Stop polling after ~50s; a subsequent
@@ -311,6 +313,8 @@ class GlobalGestureService : LifecycleService() {
 
     private fun reloadFloatingSettings() {
         power.setPowerMode(FloatingSettings.power(this))
+        gestureCameraEnabled = FloatingSettings.gestureCamera(this)
+        nearbyTransferEnabled = FloatingSettings.nearby(this)
         // Keep v1.0.3 battery cadence: a one-shot cue never boosts AI FPS.
         actionCueEnabled = FloatingSettings.actionFeedback(this)
         palmPositionEnabled = FloatingSettings.palmPositionEnabled(this)
@@ -331,10 +335,16 @@ class GlobalGestureService : LifecycleService() {
         super.onStartCommand(intent, flags, startId)
         if(intent?.action == ACTION_SETTINGS_CHANGED) {
             if(isActive) {
+                val wasUsingCamera = gestureCameraEnabled
                 reloadFloatingSettings()
                 setGameSuspended(GlobalGrabAccessibilityService.gameForeground)
-                connections.setDiscoveryEnabled(!gameSuspended && isScreenOn &&
-                    mayBindCamera() && FloatingSettings.nearby(this))
+                // Completely unbind the sensor when the switch is turned off;
+                // do NOT touch authenticated Nearby connections.
+                if (wasUsingCamera && !gestureCameraEnabled) releaseGestureCamera()
+                if (isScreenOn && !gameSuspended) {
+                    scheduleUnlockCheck(if (mayBindCamera()) 150L else 700L)
+                } else connections.setDiscoveryEnabled(false)
+                foregroundNotification()
             }
             return START_NOT_STICKY
         }
@@ -359,8 +369,9 @@ class GlobalGestureService : LifecycleService() {
             }, 850)
             return START_NOT_STICKY
         }
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) !=
-            PackageManager.PERMISSION_GRANTED) {
+        if (gestureCameraEnabled &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) !=
+                PackageManager.PERMISSION_GRANTED) {
             stopSelf()
             return START_NOT_STICKY
         }
@@ -443,13 +454,13 @@ class GlobalGestureService : LifecycleService() {
 
     private fun bindCamera() {
         if (cameraBindPending || cameraBound || !isActive || !isScreenOn ||
-            gameSuspended || !mayBindCamera()) return
+            gameSuspended || !gestureCameraEnabled || !mayBindCamera()) return
         val generation = cameraGeneration
         cameraBindPending = true
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             if (cameraGeneration != generation || !isActive || !isScreenOn ||
-                gameSuspended || !mayBindCamera()) {
+                gameSuspended || !gestureCameraEnabled || !mayBindCamera()) {
                 if (cameraGeneration == generation) cameraBindPending = false
                 return@addListener
             }
@@ -507,7 +518,7 @@ class GlobalGestureService : LifecycleService() {
     }
 
     private fun infer(frame: ImageProxy) {
-        if (gameSuspended) return
+        if (gameSuspended || !gestureCameraEnabled) return
         framesSeen++
         val now = SystemClock.uptimeMillis()
         // Cheap motion sampling now runs in balanced standby too, so a hand
