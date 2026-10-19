@@ -21,8 +21,8 @@ class HandFeedbackPolicyTest {
         val p = HandFeedbackPolicy()
         p.observe(true, "Open_Palm", 1000)
         assertNull(p.observe(false, "", 1150))
-        assertNull(p.observe(false, "", 2400))
-        assertEquals(HandHint.NONE, p.observe(false, "", 2500))
+        assertNull(p.observe(false, "", 1550))
+        assertEquals(HandHint.NONE, p.observe(false, "", 1701))
         assertNull(p.observe(false, "", 2600))
     }
     @Test fun stopsWhenHandDisappearsAndCanDetectAgain() {
