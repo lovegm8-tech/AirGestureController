@@ -7,6 +7,7 @@ object FloatingSettings {
     fun range(c:Context)=pref(c).getInt("cursor_range",2).coerceIn(0,3)
     // Direction cue is on by default; independent of legacy palm trail preferences.
     fun actionFeedback(c:Context)=pref(c).getBoolean("action_feedback_enabled",true)
+    fun palmPositionEnabled(c:Context)=pref(c).getBoolean("palm_position_enabled",true)
     fun power(c:Context)=pref(c).getInt("power_mode",1).coerceIn(0,2)
     fun nearby(c:Context)=pref(c).getBoolean("nearby_enabled",true)
     fun pauseInGames(c:Context)=pref(c).getBoolean("pause_in_games",true)
