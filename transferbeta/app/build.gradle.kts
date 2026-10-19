@@ -13,8 +13,8 @@ android {
         applicationId = "tw.airgesture.transferbeta"
         minSdk = 29
         targetSdk = 35
-        versionCode = 27
-        versionName = "1.0.14"
+        versionCode = 28
+        versionName = "1.0.15"
     }
     buildTypes { release { isMinifyEnabled = false } }
     compileOptions {
