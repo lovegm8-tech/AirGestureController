@@ -291,15 +291,27 @@ class TransferActivity : ComponentActivity() {
 
     private fun refreshSetupGuide() {
         if (!::setupGuide.isInitialized) return
+        val gestures = FloatingSettings.gestureCamera(this)
+        val transfers = FloatingSettings.nearby(this)
         val cameraOk = permissionGranted(Manifest.permission.CAMERA)
         val nearbyOk = nearbyGranted()
         val accessOk = hasAccessibilityPermission()
         val overlayOk = Settings.canDrawOverlays(this)
         val notifyOk = Build.VERSION.SDK_INT < 33 ||
             permissionGranted(Manifest.permission.POST_NOTIFICATIONS)
-        val done = listOf(cameraOk, nearbyOk, accessOk, overlayOk).count { it }
+        val required = listOf(
+            !gestures || cameraOk,
+            !transfers || nearbyOk,
+            !gestures || accessOk,
+            !gestures || overlayOk
+        )
+        val done = required.count { it }
         setupGuide.visibility = if (done == 4) View.GONE else View.VISIBLE
         setupTitle.text = "初次使用設定 · $done／4 項完成"
+        cameraStep.visibility = if (gestures) View.VISIBLE else View.GONE
+        nearbyStep.visibility = if (transfers) View.VISIBLE else View.GONE
+        accessibilityStep.visibility = if (gestures) View.VISIBLE else View.GONE
+        overlayStep.visibility = if (gestures) View.VISIBLE else View.GONE
         cameraStep.text = (if(cameraOk) "✓ 已允許" else "① 點此開啟") +
             "｜相機：辨識手掌與手勢"
         nearbyStep.text = (if(nearbyOk) "✓ 已允許" else "② 點此開啟") +
@@ -309,7 +321,7 @@ class TransferActivity : ComponentActivity() {
         overlayStep.text = (if(overlayOk) "✓ 已允許" else "④ 點此開啟") +
             "｜懸浮顯示：手勢提示及接收狀態"
         notificationStep.text = (if(notifyOk) "✓ 已允許" else "建議開啟") +
-            "｜通知：背景傳檔及收到網址提醒（非必要）"
+            "｜通知：背景傳檔及收到網址提醒"
         cameraStep.isEnabled = !cameraOk
         nearbyStep.isEnabled = !nearbyOk
         accessibilityStep.isEnabled = !accessOk
