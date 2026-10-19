@@ -136,6 +136,54 @@ class FloatingControlRouterTest {
         assertEquals(1, events.count { it.command == FloatingControlRouter.Command.SWIPE_UP })
     }
 
+    @Test fun lowStartPalmUpSwipeNeedsShorterButRealVerticalTravel() {
+        val r = FloatingControlRouter()
+        assertNull(step(r, "Open_Palm", 1000L, py = .87f).command)
+        assertEquals(FloatingControlRouter.Command.SWIPE_UP,
+            step(r, "Open_Palm", 1120L, py = .77f).command)
+        // A single continuously held/moving hand must never double fire.
+        assertNull(step(r, "Open_Palm", 1240L, py = .60f).command)
+    }
+
+    @Test fun lowStartSmallJitterOrDiagonalIsNotAnUpSwipe() {
+        val jitter = FloatingControlRouter()
+        assertNull(step(jitter, "Open_Palm", 1000L, py = .86f).command)
+        assertNull(step(jitter, "Open_Palm", 1130L, py = .82f).command)
+        assertNull(step(jitter, "Open_Palm", 1260L, py = .79f).command)
+
+        val diagonal = FloatingControlRouter()
+        assertNull(step(diagonal, "Open_Palm", 1000L,
+            px = .40f, py = .86f).command)
+        assertNull(step(diagonal, "Open_Palm", 1140L,
+            px = .53f, py = .74f).command)
+    }
+
+    @Test fun middleHeightUpAndLowStartDownKeepNormalDistance() {
+        val middle = FloatingControlRouter()
+        assertNull(step(middle, "Open_Palm", 1000L, py = .60f).command)
+        assertNull(step(middle, "Open_Palm", 1130L, py = .51f).command)
+        assertEquals(FloatingControlRouter.Command.SWIPE_UP,
+            step(middle, "Open_Palm", 1250L, py = .44f).command)
+
+        val downward = FloatingControlRouter()
+        assertNull(step(downward, "Open_Palm", 1000L, py = .73f).command)
+        assertNull(step(downward, "Open_Palm", 1130L, py = .84f).command)
+        assertEquals(FloatingControlRouter.Command.SWIPE_DOWN,
+            step(downward, "Open_Palm", 1250L, py = .91f).command)
+    }
+
+    @Test fun lowStartCannotSwipeBeforeMinimumDurationOrWithoutPalm() {
+        val r = FloatingControlRouter()
+        assertNull(step(r, "Open_Palm", 1000L, py = .90f).command)
+        assertNull(step(r, "None", 1050L, py = .70f).command)
+        assertEquals(FloatingControlRouter.Command.SWIPE_UP,
+            step(r, "None", 1120L, py = .70f).command)
+
+        val noPalm = FloatingControlRouter()
+        assertNull(step(noPalm, "None", 1000L, py = .90f).command)
+        assertNull(step(noPalm, "None", 1120L, py = .70f).command)
+    }
+
     @Test fun openPalmLeftSwipeMovesFromRightEdgeWithoutGrabbing() {
         val router = FloatingControlRouter()
         val events = listOf(
