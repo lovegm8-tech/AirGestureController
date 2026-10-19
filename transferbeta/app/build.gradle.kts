@@ -13,14 +13,8 @@ android {
         applicationId = "tw.airgesture.transferbeta"
         minSdk = 29
         targetSdk = 35
-        versionCode = 23
-        versionName = "1.0.10"
-        // Android Firebase client identifiers are public, not server credentials.
-        // Unconfigured builds fall back to periodic GitHub polling.
-        resValue("string", "google_app_id", System.getenv("FIREBASE_ANDROID_APP_ID") ?: "")
-        resValue("string", "google_api_key", System.getenv("FIREBASE_ANDROID_API_KEY") ?: "")
-        resValue("string", "gcm_defaultSenderId", System.getenv("FIREBASE_SENDER_ID") ?: "")
-        resValue("string", "project_id", System.getenv("FIREBASE_PROJECT_ID") ?: "")
+        versionCode = 24
+        versionName = "1.0.11"
     }
     buildTypes { release { isMinifyEnabled = false } }
     compileOptions {
@@ -44,8 +38,8 @@ dependencies {
     implementation("androidx.media3:media3-transformer:1.8.1")
     implementation("androidx.media3:media3-effect:1.8.1")
     implementation("androidx.media3:media3-common:1.8.1")
+    // One upgrade-cycle only: cancels WorkManager jobs scheduled by the retired updater.
     implementation("androidx.work:work-runtime-ktx:2.10.5")
-    implementation("com.google.firebase:firebase-messaging:25.1.3")
     testImplementation("junit:junit:4.13.2")
 }
 val modelFile = layout.projectDirectory.file("src/main/assets/gesture_recognizer.task")
