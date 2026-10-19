@@ -136,13 +136,15 @@ class FloatingControlRouterTest {
         assertEquals(1, events.count { it.command == FloatingControlRouter.Command.SWIPE_UP })
     }
 
-    @Test fun lowStartPalmUpSwipeNeedsShorterButRealVerticalTravel() {
+    @Test fun lowStartUpSwipeRestoresVersionOnePointZeroTenDistance() {
         val r = FloatingControlRouter()
         assertNull(step(r, "Open_Palm", 1000L, py = .87f).command)
+        // v1.0.11 shortened upward travel; v1.0.12 restores v1.0.10.
+        assertNull(step(r, "Open_Palm", 1120L, py = .77f).command)
         assertEquals(FloatingControlRouter.Command.SWIPE_UP,
-            step(r, "Open_Palm", 1120L, py = .77f).command)
-        // A single continuously held/moving hand must never double fire.
-        assertNull(step(r, "Open_Palm", 1240L, py = .60f).command)
+            step(r, "Open_Palm", 1240L, py = .70f).command)
+        // Holding one continuous swipe must not double fire.
+        assertNull(step(r, "Open_Palm", 1350L, py = .60f).command)
     }
 
     @Test fun lowStartSmallJitterOrDiagonalIsNotAnUpSwipe() {
