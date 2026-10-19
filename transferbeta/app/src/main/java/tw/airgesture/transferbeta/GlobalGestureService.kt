@@ -117,6 +117,7 @@ class GlobalGestureService : LifecycleService() {
     private var unified = FloatingControlRouter()
     // Only actual confirmed palm observations update the lightweight overlay.
     private var palmMarkerShown = false
+    @Volatile private var palmPositionEnabled = true
     private var cursorShown = false
     private val tiltedPalm = TiltedPalmAssist(enabled = true)
     private val cameraExecutor = Executors.newSingleThreadExecutor()
