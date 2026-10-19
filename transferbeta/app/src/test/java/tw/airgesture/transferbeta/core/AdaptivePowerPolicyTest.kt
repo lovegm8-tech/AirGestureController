@@ -36,22 +36,36 @@ class AdaptivePowerPolicyTest {
         assertEquals(AdaptivePowerPolicy.Mode.ECO, p.mode(63_201L))
     }
 
-    @Test fun cheapSceneMotionWakesOnlyDeepIdleMlVerification() {
+    @Test fun cheapSceneMotionWakesBalancedStandbyWithBoundedVerification() {
         val p = AdaptivePowerPolicy()
         p.start(); p.screenChanged(true)
+        assertTrue(p.shouldSampleIdleMotion(0L))
         assertFalse(p.isDeepIdle(0L))
         assertTrue(p.shouldInfer(0L))
-        // First scene-change hint is not allowed to bypass normal idle schedule.
+        // A scene change first requests a single early AI verification,
+        // bounded to avoid duplicate inferences during successive frames.
         assertFalse(p.shouldInfer(100L, significantMotion = true))
-        assertFalse(p.isDeepIdle(19_999L))
+        assertTrue(p.shouldInfer(240L, significantMotion = true))
+        assertFalse(p.shouldInfer(380L, significantMotion = true))
+        assertTrue(p.shouldInfer(480L, significantMotion = true))
         assertTrue(p.isDeepIdle(20_000L))
-        assertTrue(p.shouldInfer(20_000L, significantMotion = true))
-        assertFalse(p.shouldInfer(20_100L, significantMotion = true))
-        assertTrue(p.shouldInfer(20_240L, significantMotion = true))
         p.observeHand(true, 20_240L)
+        assertFalse(p.shouldSampleIdleMotion(20_241L))
         assertFalse(p.isDeepIdle(21_000L))
         p.screenChanged(false)
+        assertFalse(p.shouldSampleIdleMotion(30_000L))
         assertFalse(p.shouldInfer(30_000L, significantMotion = true))
+    }
+
+    @Test fun batteryFirstKeepsPreviousDeepIdleMotionWakeBehavior() {
+        val p = AdaptivePowerPolicy()
+        p.setPowerMode(0)
+        p.start(); p.screenChanged(true)
+        assertTrue(p.shouldInfer(0L))
+        assertFalse(p.shouldSampleIdleMotion(500L))
+        assertFalse(p.shouldInfer(500L, significantMotion = true))
+        assertTrue(p.shouldSampleIdleMotion(20_000L))
+        assertTrue(p.shouldInfer(20_000L, significantMotion = true))
     }
 
     @Test fun powerModesTradeSpeedForEnergy() {
