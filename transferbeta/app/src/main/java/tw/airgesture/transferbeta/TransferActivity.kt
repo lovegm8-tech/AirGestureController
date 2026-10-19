@@ -331,13 +331,22 @@ class TransferActivity : ComponentActivity() {
 
     private fun refreshHome() {
         if (!::status.isInitialized || !::primaryAction.isInitialized) return
+        if (::gestureSwitch.isInitialized && ::transferSwitch.isInitialized) {
+            updatingModeControls = true
+            gestureSwitch.isChecked = FloatingSettings.gestureCamera(this)
+            transferSwitch.isChecked = FloatingSettings.nearby(this)
+            updatingModeControls = false
+            modeDescription.text = modeLabel() +
+                if (GlobalGestureService.isActive) " · 背景服務執行中" else " · 尚未啟動"
+        }
         refreshSetupGuide()
         val d = tw.airgesture.transferbeta.core.HomeScreenPolicy.decide(
-            hasPermissions(), hasAccessibilityPermission(),
+            hasModePermissions(), hasModeAccessibility(),
             GlobalGestureService.isActive,
             GlobalGestureService.transfer?.isConnected == true
         )
-        val overlayMissing = hasPermissions() && hasAccessibilityPermission() &&
+        val overlayMissing = FloatingSettings.gestureCamera(this) &&
+            hasModePermissions() && hasModeAccessibility() &&
             !Settings.canDrawOverlays(this)
         val label = if (overlayMissing) "開啟手勢與接收提示權限" else when (d.action) {
             tw.airgesture.transferbeta.core.HomeAction.GRANT_PERMISSION -> "開始設定 · 允許必要權限"
@@ -356,6 +365,17 @@ class TransferActivity : ComponentActivity() {
             tw.airgesture.transferbeta.core.HomeState.SEARCHING -> "隔空操作已啟用；傳檔正在搜尋附近手機"
             tw.airgesture.transferbeta.core.HomeState.READY -> "隔空操作已啟用 · 傳檔裝置已連線"
         }
+        if (GlobalGestureService.isActive) {
+            titleHint.text = when {
+                !FloatingSettings.gestureCamera(this) && FloatingSettings.nearby(this) ->
+                    "純傳檔待命 · 前鏡頭已關閉"
+                FloatingSettings.gestureCamera(this) && !FloatingSettings.nearby(this) ->
+                    "手勢操作已啟用 · 附近搜尋已關閉"
+                !FloatingSettings.gestureCamera(this) && !FloatingSettings.nearby(this) ->
+                    "已暫停前鏡頭及附近搜尋"
+                else -> titleHint.text
+            }
+        }
         titleHint.setTextColor(if (d.state ==
                 tw.airgesture.transferbeta.core.HomeState.READY) 0xff0e8053.toInt()
             else 0xff1f3550.toInt())
@@ -368,7 +388,7 @@ class TransferActivity : ComponentActivity() {
         super.onResume()
         refreshHome()
         if (homePrefs.getBoolean("auto_run", false) &&
-            hasPermissions() && hasAccessibilityPermission() && !GlobalGestureService.isActive) {
+            hasModePermissions() && hasModeAccessibility() && !GlobalGestureService.isActive) {
             startGlobalMode()
         }
         attachBackgroundSession()
