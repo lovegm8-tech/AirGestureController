@@ -57,6 +57,22 @@ class AdaptivePowerPolicyTest {
         assertFalse(p.shouldInfer(30_000L, significantMotion = true))
     }
 
+    @Test fun shortMotionProbeTracksHandEnteringFrameThenReturnsToEco() {
+        val p = AdaptivePowerPolicy()
+        p.start(); p.screenChanged(true)
+        assertTrue(p.shouldInfer(0L))
+        assertTrue(p.shouldInfer(300L, significantMotion = true))
+        assertEquals(AdaptivePowerPolicy.Mode.ACTIVE, p.mode(400L))
+        assertTrue(p.shouldInfer(465L))
+        assertTrue(p.shouldInfer(630L))
+        assertTrue(p.shouldInfer(795L))
+        // A non-hand motion hint is not a permanent ACTIVE state.
+        assertEquals(AdaptivePowerPolicy.Mode.ECO, p.mode(821L))
+        assertFalse(p.shouldInfer(821L))
+        p.screenChanged(false)
+        assertEquals(AdaptivePowerPolicy.Mode.STOPPED, p.mode(822L))
+    }
+
     @Test fun batteryFirstKeepsPreviousDeepIdleMotionWakeBehavior() {
         val p = AdaptivePowerPolicy()
         p.setPowerMode(0)
