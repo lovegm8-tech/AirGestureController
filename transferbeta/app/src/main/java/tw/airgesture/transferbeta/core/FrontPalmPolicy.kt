@@ -7,9 +7,11 @@ import kotlin.math.sqrt
 /**
  * Conservative palm-facing-camera test for ARMING A SWIPE ONLY.
  *
- * MediaPipe's handedness label assumes selfie-mirrored input. By comparing
- * that label against the orientation of the thumb relative to the little
- * finger IN THE SAME INPUT IMAGE, the decision is mirror invariant.
+ * MediaPipe Tasks handedness refers to the physical left/right hand
+ * in the UNMIRRORED CameraX analysis image used by this app. The legacy
+ * selfie-mirror assumption reverses palm/back (seen on S26 Ultra v1.0.14).
+ * Compare the reported hand against the thumb side IN THE SAME INPUT IMAGE;
+ * never use the horizontally flipped coordinates of the position overlay.
  *
  * 0=wrist, 2/3/4=thumb, 5=index MCP, 9=middle MCP, 17=pinky MCP.
  * The projected signed-side test is invariant to in-plane hand rotation.
@@ -34,11 +36,13 @@ object FrontPalmPolicy {
             worldXYZ == null || worldXYZ.size < 63 ||
             handednessScore < MIN_HANDEDNESS) return false
 
-        // The sign convention here is MediaPipe's *reported*, not physical,
-        // handedness: Left = thumb on image-right of pinky for a palm view.
+        // CameraX sends UNMIRRORED analysis pixels to MediaPipe Tasks:
+        // physical RIGHT palm toward lens => thumb on image-right;
+        // physical LEFT palm toward lens => thumb on image-left.
+        // v1.0.14 had these signs swapped, reporting the hand's back as palm.
         val expected = when (handedness) {
-            "Left" -> 1f
-            "Right" -> -1f
+            "Left" -> -1f
+            "Right" -> 1f
             else -> return false
         }
         if (!handednessScore.isFinite()) return false
