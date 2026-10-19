@@ -573,7 +573,8 @@ class GlobalGestureService : LifecycleService() {
             // Actual grab/swipe detection is NOT delayed by this UI gate.
             val displayHand = handDisplayGate.observe(xy, px, py, now)
             handFeedback.observe(displayHand,
-                if (displayHand) pose else "", now)?.let(overlay::showHandFeedback)
+                if (displayHand) pose else "", now, palmFacing)
+                ?.let(overlay::showHandFeedback)
             if (palmPositionEnabled) {
                 val palmSnapshot = palmTracker.observe(px, py,
                     displayHand && pose == "Open_Palm", now)
