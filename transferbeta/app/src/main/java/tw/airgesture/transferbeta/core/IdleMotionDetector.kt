@@ -12,7 +12,7 @@ import kotlin.math.abs
  */
 class IdleMotionDetector(
     private val minimumChangedCells: Int = 24,
-    private val minimumLowerChangedCells: Int = 8,
+    private val minimumLowerChangedCells: Int = 6,
     private val perCellThreshold: Int = 18,
     private val cooldownMs: Long = 1500L
 ) {
