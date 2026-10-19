@@ -66,7 +66,8 @@ class FloatingControlRouter(pointerDwellMs: Long = 2000L, sensitivity: Int = 1) 
         nowMs: Long,
         receivingOffer: Boolean,
         youtubeForeground: Boolean,
-        rawCategory: String? = category
+        rawCategory: String? = category,
+        palmFacingForSwipe: Boolean = true
     ): Decision {
         val shape = if (confidence >= .58f) category else null
         // Preserve unclassified-but-localized motion AFTER a genuine open palm.
@@ -185,7 +186,7 @@ class FloatingControlRouter(pointerDwellMs: Long = 2000L, sensitivity: Int = 1) 
                 GestureDecisionEngine.Shape.OTHER -> 1f
                 GestureDecisionEngine.Shape.NO_HAND -> 0f
                 else -> confidence
-            }, palmX
+            }, palmX, palmFacingForSwipe
         ), nowMs) else {
             swipes.reset()
             null
