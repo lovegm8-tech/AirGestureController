@@ -12,6 +12,7 @@ import kotlin.math.abs
  */
 class IdleMotionDetector(
     private val minimumChangedCells: Int = 24,
+    private val minimumLowerChangedCells: Int = 8,
     private val perCellThreshold: Int = 18,
     private val cooldownMs: Long = 1500L
 ) {
@@ -39,11 +40,22 @@ class IdleMotionDetector(
         for (i in samples.indices) uniformShift += samples[i] - previous[i]
         val mean = uniformShift.toFloat() / samples.size
         var changed = 0
+        var changedLower = 0
+        // The bottom four of twelve camera rows matter most when the hand
+        // begins an upward sweep below the selfie-camera center.
+        val lowerStart = samples.size * 2 / 3
         for (i in samples.indices) {
-            if (abs(samples[i] - previous[i] - mean) >= perCellThreshold) changed++
+            if (abs(samples[i] - previous[i] - mean) >= perCellThreshold) {
+                changed++
+                if (i >= lowerStart) changedLower++
+            }
         }
         baseline = samples.copyOf()
-        if (changed < minimumChangedCells) return false
+        // A partially visible entering hand may affect few cells, especially
+        // below frame center. This is only a hint to RUN the recognizer, never
+        // a reason to fire any touch action.
+        if (changed < minimumChangedCells &&
+            changedLower < minimumLowerChangedCells) return false
         if (lastTriggerMs != Long.MIN_VALUE && nowMs - lastTriggerMs < cooldownMs)
             return false
         lastTriggerMs = nowMs
