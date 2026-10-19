@@ -532,6 +532,13 @@ class TransferActivity : ComponentActivity() {
             flash(if (newValue) "已開啟操作確認動畫：成功送出手勢時短暫提示方向"
                 else "已關閉操作確認動畫（手勢仍可正常使用）", true)
         }
+        extraButton("張掌手掌位置圓圈／軌跡（開／關，預設開啟）") {
+            val value = !FloatingSettings.palmPositionEnabled(this)
+            FloatingSettings.saveBool(this, "palm_position_enabled", value)
+            reloadLiveSettings()
+            flash(if (value) "已啟用張掌位置圓圈及移動軌跡"
+                else "已關閉張掌圓圈與軌跡，手勢操作維持不變", true)
+        }
         extraButton("查看版本更新紀錄／更新進度") {
             val versionLog = """
                 v1.0.12｜上滑判定恢復 v1.0.10；張掌顯示手掌位置圓圈與軌跡；減少幽靈手提示、加快提示消失\n                v1.0.11｜縮短已解鎖狀態下的鏡頭啟動等待、改善首次抬手辨識與下緣起手上滑；左滑避開三星返回；移除自動更新
