@@ -96,7 +96,7 @@ class AdaptivePowerPolicy(
             lastInference = nowMs
             // No landmarks at the exact wake frame is common for a hand
             // emerging from the bottom. Grant only a 520 ms probe window.
-            motionProbeUntil = nowMs + 520L
+            if (policy != 0) motionProbeUntil = nowMs + 520L
             return true
         }
         val interval = when (mode(nowMs)) {
