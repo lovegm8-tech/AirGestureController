@@ -174,12 +174,12 @@ object ShareAutomationPolicy {
         nodes: List<ActionNode>,
         origin: String?
     ): Int? {
-        if (!isTrustedResolver(pkg) ||
-            (origin != "com.sec.android.gallery3d" &&
-             origin != "com.google.android.apps.photos" &&
-             origin != "com.sec.android.app.myfiles" &&
-             origin != "com.google.android.youtube" &&
-             origin != "com.android.chrome")) return null
+        // Also handle a Samsung Gallery-owned popup, but never arbitrary
+        // third-party windows: this is called only after our app tile clicked.
+        val samsungGalleryPopup = pkg == "com.sec.android.gallery3d" &&
+            origin == "com.sec.android.gallery3d"
+        if ((!isTrustedResolver(pkg) && !samsungGalleryPopup) ||
+            plan(origin) == null) return null
         fun textOf(n: ActionNode) = labels(n).map {
             it.trim().lowercase().replace(Regex("\\s+"), " ")
         }.toSet()
