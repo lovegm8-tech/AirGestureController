@@ -77,6 +77,33 @@
                 android:name="android.nfc.cardemulation.host_apdu_service"
                 android:resource="@xml/nfc_tap_hce"/>
         </service>
+        <!-- Independent iPhone Core NFC (reader) ↔ Android HCE (card).
+             User must explicitly arm via IosBridgeActivity; NEVER uses Nearby. -->
+        <activity android:name=".crossplatform.IosBridgeActivity"
+            android:exported="true"
+            android:label="懸浮操作 · iPhone NFC / Wi-Fi"
+            android:excludeFromRecents="true">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="*/*"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="*/*"/>
+            </intent-filter>
+        </activity>
+        <service android:name=".crossplatform.IosBridgeHceService"
+            android:exported="true"
+            android:permission="android.permission.BIND_NFC_SERVICE">
+            <intent-filter>
+                <action android:name="android.nfc.cardemulation.action.HOST_APDU_SERVICE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.nfc.cardemulation.host_apdu_service"
+                android:resource="@xml/ios_bridge_hce"/>
+        </service>
         <!-- Transparent separate Sharesheet task: only this receives external
              ACTION_SEND and ACTION_SEND_MULTIPLE. It never constructs or reveals the AirGrab dashboard. -->
         <activity
