@@ -9,6 +9,7 @@ import android.provider.OpenableColumns
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.view.View
 import tw.airgesture.transferbeta.core.GrabContentPolicy
 import tw.airgesture.transferbeta.core.ShareEntryPolicy
 import tw.airgesture.transferbeta.core.SharedTextPolicy
@@ -25,6 +26,8 @@ import java.util.concurrent.Executors
 class IosBridgeActivity : Activity() {
     private val io = Executors.newSingleThreadExecutor()
     private lateinit var status: TextView
+    private lateinit var openLinkButton: Button
+    private var receivedUrl: String? = null
     private var armed = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -50,6 +53,19 @@ class IosBridgeActivity : Activity() {
             setPadding(0, 24, 0, 24)
         }
         container.addView(status)
+        openLinkButton = Button(this).apply {
+            text = "開啟 iPhone 傳來的網址"
+            visibility = View.GONE
+            setOnClickListener {
+                val url = GrabContentPolicy.safeWebUrl(receivedUrl) ?: return@setOnClickListener
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                } catch (_: Exception) {
+                    show("網址已收到，但手機找不到可開啟此網址的應用程式：" + url)
+                }
+            }
+        }
+        container.addView(openLinkButton)
         container.addView(Button(this).apply {
             text = "取消 iPhone NFC 待命"
             setOnClickListener { finish() }
@@ -61,7 +77,18 @@ class IosBridgeActivity : Activity() {
         }
     }
     private fun show(message: String) {
-        runOnUiThread { if (!isFinishing && !isDestroyed) status.text = message }
+        runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            status.text = message
+            if (message.startsWith("已接收 iPhone 網址：")) {
+                val url = GrabContentPolicy.safeWebUrl(
+                    message.removePrefix("已接收 iPhone 網址："))
+                if (url != null) {
+                    receivedUrl = url
+                    openLinkButton.visibility = View.VISIBLE
+                }
+            }
+        }
     }
     private fun arm(payload: IosBridgePayload) {
         if (isFinishing || isDestroyed) {
