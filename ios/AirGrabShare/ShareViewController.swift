@@ -47,7 +47,7 @@ final class ShareViewController: UIViewController {
         let lock = NSLock()
         var names = [String]()
 
-        for provider in providers {
+        for provider in providers.prefix(32) {
             let types = provider.registeredTypeIdentifiers
             // Prefer an actual media/file representation; URL-only providers must remain URLs.
             let visualType = types.first { identifier in
@@ -68,7 +68,12 @@ final class ShareViewController: UIViewController {
                     guard let input else { return }
                     let ext = input.pathExtension.isEmpty
                         ? (UTType(type)?.preferredFilenameExtension ?? "bin") : input.pathExtension
-                    let name = UUID().uuidString + "." + ext
+                    let suggested = provider.suggestedName ?? input.lastPathComponent
+                    let raw = suggested.lowercased().hasSuffix("." + ext.lowercased())
+                        ? suggested : suggested + "." + ext
+                    let safe = raw.replacingOccurrences(of: "/", with: "_")
+                        .replacingOccurrences(of: "\\", with: "_")
+                    let name = UUID().uuidString + "-" + String(safe.prefix(120))
                     let dest = folder.appendingPathComponent(name)
                     if (try? FileManager.default.copyItem(at: input, to: dest)) != nil {
                         lock.lock(); names.append(name); lock.unlock()
@@ -100,6 +105,7 @@ final class ShareViewController: UIViewController {
             if let defaults = UserDefaults(suiteName: self.group) {
                 var old = defaults.stringArray(forKey: self.pendingKey) ?? []
                 old.append(contentsOf: names)
+                if old.count > 32 { old = Array(old.suffix(32)) }
                 defaults.set(Array(Set(old)), forKey: self.pendingKey)
             }
             self.statusLabel.text = names.isEmpty ? "來源 App 沒有提供可分享的檔案或連結"

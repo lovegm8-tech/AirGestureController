@@ -90,9 +90,16 @@ struct ContentView: View {
 
                 Section("已驗證的接收檔案") {
                     ForEach(model.received, id: \.path) { file in
-                        ShareLink(item: file) {
-                            Label(file.lastPathComponent, systemImage: "square.and.arrow.up")
-                                .lineLimit(1)
+                        VStack(alignment: .leading, spacing: 5) {
+                            ShareLink(item: file) {
+                                Label(file.lastPathComponent, systemImage: "square.and.arrow.up")
+                                    .lineLimit(1)
+                            }
+                            if ["heic", "heif", "jpg", "jpeg", "png", "gif", "tiff",
+                                "mp4", "mov", "m4v"].contains(file.pathExtension.lowercased()) {
+                                Button("另存至照片 App") { model.saveToPhotos(file) }
+                                    .font(.caption)
+                            }
                         }
                     }
                 }

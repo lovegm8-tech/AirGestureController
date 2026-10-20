@@ -3,6 +3,7 @@ import SwiftUI
 import CryptoKit
 import Security
 import Combine
+import Photos
 
 struct OutgoingItem: Identifiable {
     let id: UUID
@@ -104,6 +105,7 @@ final class TransferModel: ObservableObject {
     private var reader: BridgeNFCReader?
     private var pending: BridgeNFCHandshake?
     private var requestSend = true
+    private var sharedURLSource: URL?
 
     init() { reloadShared(); reloadReceived() }
 
@@ -141,9 +143,26 @@ final class TransferModel: ObservableObject {
     }
 
     func reloadShared() {
+        // Share Extension URLs are true website links, not downloadable video files.
+        let pending = SharedInbox.pending()
+        let urlCandidates = pending.filter {
+            $0.lastPathComponent.hasSuffix("-link.txt") ||
+                $0.lastPathComponent.hasSuffix("-text.txt")
+        }
+        if let urlSource = urlCandidates.first(where: {
+            guard let content = try? String(contentsOf: $0, encoding: .utf8) else {
+                return false
+            }
+            return validURL(content) != nil
+        }), let content = try? String(contentsOf: urlSource, encoding: .utf8) {
+            sharedURLSource = urlSource
+            typedLink = content.trimmingCharacters(in: .whitespacesAndNewlines)
+            sendingURL = true
+        }
         // Do not drop existing picker selections when importing share-extension items.
         outgoing.removeAll { $0.fromShare }
-        outgoing.append(contentsOf: SharedInbox.pending().prefix(max(0, 32 - outgoing.count))
+        outgoing.append(contentsOf: pending.filter { !urlCandidates.contains($0) }
+            .prefix(max(0, 32 - outgoing.count))
             .map { OutgoingItem(file: $0, name: displayName($0), fromShare: true) })
     }
 
@@ -271,6 +290,12 @@ final class TransferModel: ObservableObject {
         _ = try await socket.readJSON(expected: "accept")
         try await socket.sendJSON(["type": "complete"])
         _ = try await socket.readJSON(expected: "complete_ok")
+        if let sharedURLSource,
+           (try? String(contentsOf: sharedURLSource, encoding: .utf8))?
+                .trimmingCharacters(in: .whitespacesAndNewlines) == typedLink {
+            SharedInbox.complete(sharedURLSource)
+            self.sharedURLSource = nil
+        }
         status = "網址已傳送至 Android，等待對方選擇是否開啟"
     }
 
@@ -475,4 +500,31 @@ final class TransferModel: ObservableObject {
             throw error
         }
     }
+    func saveToPhotos(_ file: URL) {
+        let ext = file.pathExtension.lowercased()
+        let mediaType: PHAssetResourceType
+        if ["mp4", "mov", "m4v"].contains(ext) { mediaType = .video }
+        else if ["heic", "heif", "jpg", "jpeg", "png", "gif", "tiff"].contains(ext) {
+            mediaType = .photo
+        } else {
+            status = "此格式請使用分享按鈕儲存到「檔案」"
+            return
+        }
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { [weak self] access in
+            guard access == .authorized || access == .limited else {
+                Task { @MainActor in self?.status = "尚未取得照片新增權限" }
+                return
+            }
+            PHPhotoLibrary.shared().performChanges {
+                let asset = PHAssetCreationRequest.forAsset()
+                asset.addResource(with: mediaType, fileURL: file, options: nil)
+            } completionHandler: { success, error in
+                Task { @MainActor in
+                    self?.status = success ? "已將原始媒體新增到照片 App" :
+                        "儲存到照片 App 失敗：" + (error?.localizedDescription ?? "不支援的檔案")
+                }
+            }
+        }
+    }
+
 }
