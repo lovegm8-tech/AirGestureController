@@ -1,5 +1,8 @@
-name: Floating Control 1.0.17 Signed Test APK
-# Fix Samsung's secondary dual-share-target chooser: hand-grab selects ordinary AirGrab automatically, NFC remains an explicit manual share target.
+
+name: Floating Control Signed Test APK
+
+# Editing this file and committing on the integration branch triggers one APK build.
+# Later builds can be started manually in GitHub Actions without changing YAML.
 on:
   push:
     branches:
@@ -7,8 +10,10 @@ on:
     paths:
       - '.github/workflows/floating-control-release.yml'
   workflow_dispatch:
+
 permissions:
   contents: read
+
 jobs:
   signed-release:
     if: github.ref == 'refs/heads/experiment/floating-control-integration' && github.event.repository.full_name == 'lovegm8-tech/AirGestureController'
@@ -29,8 +34,21 @@ jobs:
       - name: Install Android SDK
         run: |
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
-      - name: Verify Android swipe regression tests and assemble 1.0.17 APK
+      - name: Run tests and assemble release APK
         run: gradle :app:testDebugUnitTest :app:assembleRelease --no-daemon
+      - name: Read app version automatically
+        id: app_version
+        shell: bash
+        run: |
+          set -euo pipefail
+          CODE=$(sed -nE 's/^[[:space:]]*versionCode[[:space:]]*=[[:space:]]*([0-9]+).*$/\1/p' app/build.gradle.kts | head -n 1)
+          NAME=$(sed -nE 's/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"([^"]+)".*$/\1/p' app/build.gradle.kts | head -n 1)
+          if [[ -z "$CODE" || -z "$NAME" ]]; then
+            echo 'Could not read versionCode/versionName from app/build.gradle.kts' >&2
+            exit 1
+          fi
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
       - name: Sign release APK with repository secret
         shell: bash
         env:
@@ -81,15 +99,23 @@ jobs:
           finally:
               keyfile.unlink(missing_ok=True)
           PY
-      - name: Verify upgrade package and permanent signature
+      - name: Verify version, upgrade package, and permanent signature
+        shell: bash
+        env:
+          EXPECTED_CODE: ${{ steps.app_version.outputs.code }}
+          EXPECTED_NAME: ${{ steps.app_version.outputs.name }}
         run: |
+          set -euo pipefail
           APK=app/build/outputs/apk/release/app-release.apk
           test -s "$APK"
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | head -n1 | grep -F "package: name='tw.airgesture.transferbeta' versionCode='30' versionName='1.0.17'"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" > "$RUNNER_TEMP/badging.txt"
+          PACKAGE_LINE=$(sed -n '1p' "$RUNNER_TEMP/badging.txt")
+          echo "$PACKAGE_LINE"
+          [[ "$PACKAGE_LINE" == *"package: name='tw.airgesture.transferbeta' versionCode='$EXPECTED_CODE' versionName='$EXPECTED_NAME'"* ]]
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" > "$RUNNER_TEMP/cert.txt"
           grep -qiF '05e77197d2ad73ac4a255e4c40b868a5c26c539b9aea3c1abd53100ff484f19e' "$RUNNER_TEMP/cert.txt"
       - uses: actions/upload-artifact@v4
         with:
-          name: FloatingControl-v1.0.17-test-signed
+          name: FloatingControl-v${{ steps.app_version.outputs.name }}-test-signed
           path: transferbeta/app/build/outputs/apk/release/app-release.apk
           retention-days: 30
