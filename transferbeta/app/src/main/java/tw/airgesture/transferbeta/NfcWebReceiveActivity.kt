@@ -41,7 +41,7 @@ class NfcWebReceiveActivity : Activity(), NfcAdapter.ReaderCallback {
         override fun run() {
             if (!resumed || isFinishing) return
             val manager = GlobalGestureService.transfer
-            transferStatus.text = when {
+            val nextStatus = when {
                 !GlobalGestureService.isActive ->
                     "懸浮操作背景服務未啟動，請返回首頁啟用"
                 manager?.isConnected != true ->
@@ -51,7 +51,12 @@ class NfcWebReceiveActivity : Activity(), NfcAdapter.ReaderCallback {
                     (if (requestPending) "傳送進度：" + manager.status
                      else "接收待命，可以碰觸")
             }
-            main.postDelayed(this, 500L)
+            // Avoid waking and redrawing the foreground UI twice a second.
+            // NFC is managed by Android ReaderMode, not this status timer.
+            if (transferStatus.text.toString() != nextStatus) {
+                transferStatus.text = nextStatus
+            }
+            main.postDelayed(this, 2000L)
         }
     }
 
