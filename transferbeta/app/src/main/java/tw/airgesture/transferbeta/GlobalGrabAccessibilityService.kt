@@ -289,12 +289,26 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
 
     private fun completeBrowserCapture() {
         val capture = browserCapture ?: return
+        // Chrome's official current-page Share is preferred. Reading a
+        // verified full URL is a safe last resort; never open the unrelated
+        // three-dot menu or guess a Share control when the card isn't found.
+        val fallback = if (capture.origin == "com.android.chrome")
+            rootForBrowserCapture(capture)?.let {
+                GrabContentPolicy.decide(capture.origin, readable(it),
+                    allowFocusedEditor = true)
+            } else null
         browserCapture = null
         nextAttempt?.let { main.removeCallbacks(it) }
         nextAttempt = null
-        // Only close an address editor that AirGrab itself opened. Never press
-        // Back from an arbitrary browser screen or guess a destination URL.
+        // Close only the address editor opened by this gesture.
         performGlobalAction(GLOBAL_ACTION_BACK)
+        if (capture.origin == "com.android.chrome") {
+            if (fallback is GrabChoice.Link)
+                GlobalGrabBridge.result(GrabResult.Link(fallback.url))
+            else GlobalGrabBridge.result(GrabResult.Unavailable(
+                "找不到 Chrome 當前網頁卡片的分享按鈕，也沒有取得完整網址；請保持網頁開啟後再試"))
+            return
+        }
         main.postDelayed({
             val root = rootInActiveWindow
             if (root?.packageName?.toString() == capture.origin) beginShare(capture.origin, root)
@@ -313,19 +327,35 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         pkg: String,
         tree: Pair<List<ActionNode>, List<AccessibilityNodeInfo>>
     ): Int? {
-        if (pkg != "com.android.chrome" &&
-            pkg != "com.google.android.googlequicksearchbox") return null
-        val width = resources.displayMetrics.widthPixels
-        val height = resources.displayMetrics.heightPixels
-        val topLimit = (height * 0.45f).toInt()
-        val leftLimit = (width * 0.45f).toInt()
+        if (pkg != "com.android.chrome") return null
+        // The current-page Share icon must be in the SAME row as Chrome's
+        // uniquely recognized Copy/Edit controls. Just finding the word
+        // "分享" somewhere near the top would risk clicking page content.
+        val point = chromeShareCardPoint(pkg, tree) ?: return null
+        val width = resources.displayMetrics.widthPixels.toFloat()
+        val height = resources.displayMetrics.heightPixels.toFloat()
         val restricted = tree.first.mapIndexed { index, node ->
             val rect = Rect().also { tree.second[index].getBoundsInScreen(it) }
-            val onCurrentPageCard = rect.width() > 0 && rect.height() > 0 &&
-                rect.top >= 0 && rect.top <= topLimit && rect.centerX() >= leftLimit
-            if (onCurrentPageCard) node else node.copy(visible = false)
+            val nearCardShare = rect.width() > 0 && rect.height() > 0 &&
+                kotlin.math.abs(rect.exactCenterX() - point.x) < width * .052f &&
+                kotlin.math.abs(rect.exactCenterY() - point.y) < height * .023f
+            if (nearCardShare) node else node.copy(visible = false)
         }
         return ShareAutomationPolicy.addressCardShare(pkg, restricted)
+    }
+
+    private fun googleAppToolbarShareIndex(
+        tree: Pair<List<ActionNode>, List<AccessibilityNodeInfo>>
+    ): Int? {
+        val controls = tree.first.mapIndexed { i, node ->
+            val rect = Rect().also { tree.second[i].getBoundsInScreen(it) }
+            ScreenAction(node, rect.exactCenterX(), rect.exactCenterY(),
+                rect.width().toFloat(), rect.height().toFloat())
+        }
+        return ShareAutomationPolicy.googleAppToolbarShare(
+            "com.google.android.googlequicksearchbox",
+            resources.displayMetrics.widthPixels.toFloat(),
+            resources.displayMetrics.heightPixels.toFloat(), controls)
     }
 
     /**
@@ -395,24 +425,27 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         val capture = browserCapture ?: return
         val root = rootForBrowserCapture(capture)
         if (root != null && root.packageName?.toString() == capture.origin) {
-            val result = GrabContentPolicy.decide(
-                capture.origin, readable(root), allowFocusedEditor = true)
-            if (result is GrabChoice.Link) {
-                clearPending()
-                performGlobalAction(GLOBAL_ACTION_BACK)
-                GlobalGrabBridge.result(GrabResult.Link(result.url))
-                return
-            }
-            // The screenshot-confirmed Chrome/Google current-page row exposes
-            // Share beside Copy/Edit without exposing an untruncated URL.
             val tree = collect(root)
-            if (addressCardShareIndex(capture.origin, tree) != null ||
+            // Chrome: the user's confirmed path is address bar -> current
+            // page's Share icon (left of Copy/Edit), NOT the overflow menu.
+            // This route wins even when the address editor holds a valid URL.
+            if (capture.origin == "com.android.chrome" &&
                 chromeShareCardPoint(capture.origin, tree) != null) {
                 nextAttempt?.let { main.removeCallbacks(it) }
                 nextAttempt = null
                 beginShare(capture.origin, root, fromAddressCard = true)
                 browserCapture = null
                 return
+            }
+            if (capture.origin != "com.android.chrome") {
+                val result = GrabContentPolicy.decide(
+                    capture.origin, readable(root), allowFocusedEditor = true)
+                if (result is GrabChoice.Link) {
+                    clearPending()
+                    performGlobalAction(GLOBAL_ACTION_BACK)
+                    GlobalGrabBridge.result(GrabResult.Link(result.url))
+                    return
+                }
             }
         }
         if (SystemClock.uptimeMillis() >= capture.expiry) completeBrowserCapture()
@@ -429,6 +462,42 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
             return
         }
         val tree = collect(root)
+        // Google App: the real webpage's Share button is in the app's upper
+        // toolbar (screenshot confirmed). NEVER read/search for a URL first,
+        // and never click a site's own Share button farther down the page.
+        if (pkg == "com.google.android.googlequicksearchbox") {
+            beginShare(pkg, root)
+            return
+        }
+        if (pkg == "com.android.chrome") {
+            // Chrome: address pill -> current-page card -> Share. Do not
+            // attempt the three-dot menu if an address control is missing.
+            val width = resources.displayMetrics.widthPixels
+            val height = resources.displayMetrics.heightPixels
+            val addresses = tree.first.withIndex().filter { (i, node) ->
+                val bounds = Rect().also { tree.second[i].getBoundsInScreen(it) }
+                node.visible && node.clickable && !node.password &&
+                    (GrabContentPolicy.isAddressId(node.id) ||
+                     node.ids.any(GrabContentPolicy::isAddressId)) &&
+                    bounds.width() > width * .13f &&
+                    bounds.centerX() in ((width * .11f).toInt())..
+                        ((width * .72f).toInt()) &&
+                    bounds.centerY() in 0..((height * .17f).toInt())
+            }
+            val index = addresses.singleOrNull()?.index
+            if (index == null || !tree.second[index].performAction(
+                    AccessibilityNodeInfo.ACTION_CLICK)) {
+                GlobalGrabBridge.result(GrabResult.Unavailable(
+                    "Chrome 找不到唯一的頂部網址列，未點擊其他按鈕；請保持網頁開啟後重試"))
+                return
+            }
+            val now = SystemClock.uptimeMillis()
+            browserCapture = BrowserCapture(pkg, now + 3800L)
+            GlobalGrabBridge.result(GrabResult.ShareStarted(
+                "已開啟 Chrome 網址列，正在找當前網頁卡片右側的分享圖示…"))
+            schedulePendingCheck()
+            return
+        }
         val plainText = readable(root)
         when (val decision = GrabContentPolicy.decide(pkg, plainText)) {
             is GrabChoice.Link -> {
@@ -437,9 +506,7 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
             }
             else -> Unit
         }
-        // Prefer the address editor for Chrome and Google: the current-page
-        // card has the specific Share icon confirmed on both devices. The
-        // browser's usual Share/overflow menu remains the fallback below.
+        // Other browsers retain their existing behavior.
         if (GrabContentPolicy.isBrowser(pkg)) {
             // Chromium/Samsung often show only the host in the address pill.
             // Clicking the known address control exposes a complete URL in its
@@ -473,16 +540,28 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
                 "此 App 目前無已驗證的分享規則；請用分享選單或手動選取原檔。"))
             return
         }
-        val direct = if (fromAddressCard) addressCardShareIndex(pkg, tree)
-            else ShareAutomationPolicy.match(plan.steps.first(), tree.first)
-        val menu = if (!fromAddressCard && direct == null && GrabContentPolicy.isBrowser(pkg))
+        val direct = when {
+            fromAddressCard -> addressCardShareIndex(pkg, tree)
+            pkg == "com.google.android.googlequicksearchbox" ->
+                googleAppToolbarShareIndex(tree)
+            pkg == "com.android.chrome" -> null // only current-page card is trusted
+            else -> ShareAutomationPolicy.match(plan.steps.first(), tree.first)
+        }
+        val menu = if (!fromAddressCard && direct == null &&
+            GrabContentPolicy.isBrowser(pkg) &&
+            pkg != "com.google.android.googlequicksearchbox" &&
+            pkg != "com.android.chrome")
             ShareAutomationPolicy.browserOverflow(tree.first) else null
         val index = direct ?: menu
         val chromeUnlabeledShare = if (fromAddressCard && index == null)
             chromeShareCardPoint(pkg, tree) else null
         if (index == null && chromeUnlabeledShare == null) {
             GlobalGrabBridge.result(GrabResult.Unavailable(
-                if (GrabContentPolicy.isBrowser(pkg))
+                if (pkg == "com.google.android.googlequicksearchbox")
+                    "Google App 找不到上方工具列的分享圖示；為避免誤點網頁內容，已停止抓取"
+                else if (pkg == "com.android.chrome")
+                    "Chrome 當前網頁卡片沒有可確認的分享圖示；請先開啟網頁後重試"
+                else if (GrabContentPolicy.isBrowser(pkg))
                     "瀏覽器目前沒有可讀取的完整網址，也找不到可信任的分享選項；請在網址列開啟完整網址後重試"
                 else "在目前畫面找不到唯一的「分享」入口；未執行自動點擊。"))
             return
