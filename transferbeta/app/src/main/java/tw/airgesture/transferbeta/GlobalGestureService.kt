@@ -413,11 +413,14 @@ class GlobalGestureService : LifecycleService() {
         GlobalGrabBridge.onGrabResult = { result ->
             main.post {
                 when (result) {
-                    is GrabResult.Link -> connections.offerLink(result.url)
+                    is GrabResult.Link -> connections.offerLinkFromSource(result.url)
                     is GrabResult.ScreenSnapshot -> connections.offerFile(result.file,
                         "screen-capture-" + System.currentTimeMillis() + ".png")
                     is GrabResult.ShareStarted -> connections.reportShareStarted(result.detail)
-                    is GrabResult.Unavailable -> connections.reportCaptureFailure(result.reason)
+                    is GrabResult.Unavailable -> {
+                        connections.cancelNfcBrowserCapture()
+                        connections.reportCaptureFailure(result.reason)
+                    }
                 }
             }
         }
