@@ -3,35 +3,17 @@ package tw.airgesture.transferbeta
 import android.nfc.cardemulation.HostApduService
 import android.os.Bundle
 import tw.airgesture.transferbeta.core.NfcTapProtocol
-import tw.airgesture.transferbeta.core.NfcWebSharePolicy
 
 /**
- * Responds to a trusted peer's NFC tap while this phone is displaying
- * a supported browser. NFC conveys a one-time nonce; the existing verified
- * Nearby channel carries only an authorized current-page URL.
+ * HCE identity challenge for explicit user-selected NFC shares.
+ * NFC itself never sends media; a single-use nonce binds the
+ * already-verified Nearby destination after a physical tap.
  */
 class NfcTapCardService : HostApduService() {
     private var selected = false
 
     override fun processCommandApdu(commandApdu: ByteArray?, extras: Bundle?): ByteArray {
-        // Preserve the manual Sharesheet NFC flow and diagnostic SELECT while
-        // allowing background HCE for the separate authenticated web tap.
-        if (NfcTapProtocol.isBrowserSessionCommand(commandApdu)) {
-            if (!selected || !GlobalGestureService.isActive ||
-                GlobalGestureService.transfer?.isConnected != true ||
-                !NfcWebSharePolicy.allowsForeground(
-                    GlobalGrabAccessibilityService.foregroundPackage)) {
-                return NfcTapProtocol.notReadyResponse()
-            }
-            val localId = getSharedPreferences("device", MODE_PRIVATE)
-                .getString("id", null) ?: return NfcTapProtocol.notReadyResponse()
-            return try {
-                NfcTapProtocol.sessionResponse(localId,
-                    NfcTapSessionStore.issue(applicationContext))
-            } catch (_: IllegalArgumentException) {
-                NfcTapProtocol.notReadyResponse()
-            }
-        }
+        // Only explicit NFC Sharesheet sessions may request an identity token.
         if (NfcTapProtocol.isSessionCommand(commandApdu)) {
             if (!selected || !GlobalGestureService.isActive ||
                 GlobalGestureService.transfer?.isConnected != true) {
