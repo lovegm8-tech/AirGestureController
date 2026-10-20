@@ -33,8 +33,68 @@ data class ActionNode(
     val ids: List<String> = emptyList()
 )
 
+/** Screen geometry is attached only to accessible, clickable controls. */
+data class ScreenAction(
+    val node: ActionNode,
+    val x: Float,
+    val y: Float,
+    val width: Float,
+    val height: Float
+)
+
 object ShareAutomationPolicy {
     private val shareWords = listOf("分享", "share")
+
+    /**
+     * Google App's in-app browser has its OWN top toolbar with Close, Share,
+     * Bookmark and More. The site may also have a Share icon further down.
+     * Only an exact, compact toolbar icon near the top may launch AirGrab.
+     * A visible Close/Bookmark/More peer in the same toolbar is required.
+     */
+    fun googleAppToolbarShare(
+        pkg: String?,
+        screenWidth: Float,
+        screenHeight: Float,
+        controls: List<ScreenAction>
+    ): Int? {
+        if (pkg != "com.google.android.googlequicksearchbox" ||
+            screenWidth <= 0f || screenHeight <= 0f) return null
+        fun terms(n: ActionNode) =
+            (listOfNotNull(n.label, n.hint) + n.texts)
+                .map { it.trim().lowercase() }
+        val toolbar = controls.withIndex().filter { (_, item) ->
+            val n = item.node
+            n.visible && n.clickable && !n.password &&
+                item.width > 0f && item.width < screenWidth * .18f &&
+                item.height > 0f && item.height < screenHeight * .095f &&
+                item.y in (screenHeight * .03f)..(screenHeight * .15f)
+        }
+        val hasPeer = toolbar.any { (_, item) ->
+            val label = terms(item.node)
+            (item.x < screenWidth * .32f && label.any {
+                it in setOf("關閉", "关闭", "close", "close tab", "close page")
+            }) || (item.x > screenWidth * .69f && label.any {
+                it in setOf("收藏", "書籤", "书签", "bookmark", "more options",
+                    "更多選項", "更多", "more")
+            })
+        }
+        if (!hasPeer) return null
+        val hits = toolbar.filter { (_, item) ->
+            if (item.x !in (screenWidth * .56f)..(screenWidth * .81f)) return@filter false
+            val names = terms(item.node)
+            val isShare = names.any { it in setOf(
+                "分享", "share", "分享連結", "分享網址", "share link", "share page"
+            ) }
+            val ids = (listOfNotNull(item.node.id) + item.node.ids).map {
+                it.lowercase()
+            }
+            isShare || ids.any { id ->
+                id.endsWith(":id/share") || id.endsWith(":id/share_button") ||
+                    id.endsWith(":id/action_share")
+            }
+        }
+        return hits.singleOrNull()?.index
+    }
     // Chrome's menu uses "Share…" while Google in-app pages often use "Share link".
     // Restrict these variants to known browser packages, not image/file shares.
     private val browserShareWords = listOf(
