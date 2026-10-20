@@ -3,21 +3,24 @@ package tw.airgesture.transferbeta
 import android.nfc.cardemulation.HostApduService
 import android.os.Bundle
 import tw.airgesture.transferbeta.core.NfcTapProtocol
+import tw.airgesture.transferbeta.core.NfcWebSharePolicy
 
 /**
- * NFC HCE probe: another phone using foreground ReaderMode may SELECT our AID
- * while this phone remains unlocked in Gallery. This does NOT transmit a photo.
+ * Responds to a trusted peer's NFC tap while this phone is displaying
+ * a supported browser. NFC conveys a one-time nonce; the existing verified
+ * Nearby channel carries only an authorized current-page URL.
  */
 class NfcTapCardService : HostApduService() {
     private var selected = false
 
     override fun processCommandApdu(commandApdu: ByteArray?, extras: Bundle?): ByteArray {
-        // Preserve the previous diagnostic SELECT reply and follow it with a
-        // separate session APDU. The reader still must be in OUR app foreground.
+        // Preserve the manual Sharesheet NFC flow and diagnostic SELECT while
+        // allowing background HCE for the separate authenticated web tap.
         if (NfcTapProtocol.isBrowserSessionCommand(commandApdu)) {
             if (!selected || !GlobalGestureService.isActive ||
                 GlobalGestureService.transfer?.isConnected != true ||
-                GlobalGrabAccessibilityService.foregroundPackage != "com.android.chrome") {
+                !NfcWebSharePolicy.allowsForeground(
+                    GlobalGrabAccessibilityService.foregroundPackage)) {
                 return NfcTapProtocol.notReadyResponse()
             }
             val localId = getSharedPreferences("device", MODE_PRIVATE)
