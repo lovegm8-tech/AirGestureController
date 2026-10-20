@@ -48,6 +48,22 @@
         </activity>
         <activity android:name=".GestureTestActivity" android:exported="false" />
         <activity android:name=".NfcProbeActivity" android:exported="false" />
+        <!-- System NFC tech dispatch works without our Activity already in
+             foreground. Receiver may be at the home screen or another app. -->
+        <activity
+            android:name=".NfcBrowserTapActivity"
+            android:exported="true"
+            android:noHistory="true"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.nfc.action.TECH_DISCOVERED"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.nfc.action.TECH_DISCOVERED"
+                android:resource="@xml/nfc_browser_tech"/>
+        </activity>
         <!-- Separate explicit NFC share target. Existing AirGrab sharing stays unchanged. -->
         <activity
             android:name=".NfcShareActivity"
