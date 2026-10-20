@@ -23,7 +23,6 @@ import org.json.JSONObject
 import org.json.JSONArray
 import tw.airgesture.transferbeta.core.AirGrabBundle
 import tw.airgesture.transferbeta.core.NfcAutoAcceptPolicy
-import tw.airgesture.transferbeta.core.NfcWebSharePolicy
 import tw.airgesture.transferbeta.core.GrabContentPolicy
 import tw.airgesture.transferbeta.core.MediaFilePolicy
 import tw.airgesture.transferbeta.core.MediaKind
@@ -135,11 +134,6 @@ class MultiPeerTransferManager(private val app: Context) {
     private var boundNfcTarget: Pair<String, String>? = null // peer id, one-use sid
     private var incomingNfcSession: Triple<String, String, Long>? = null
 
-    // Only a NFC-verified peer is authorized to fetch the current Chrome URL.
-    // Keep intent in RAM; expiry prevents a later unrelated share being routed.
-    private data class PendingBrowserTap(
-        val peerId: String, val sid: String, val expires: Long)
-    private var pendingBrowserTap: PendingBrowserTap? = null
     private var active: Outgoing? = null
     private var offered: Offered? = null
     private var offeredBy: String? = null
@@ -240,85 +234,6 @@ class MultiPeerTransferManager(private val app: Context) {
         }
     }
 
-    /**
-     * Reader-side NFC tap: request the link from the Chrome phone (the HCE
-     * card), using its one-use nonce over an already authenticated Nearby
-     * channel. Receiver auto-accept is restricted to this one endpoint/SID.
-     */
-    fun requestNfcBrowserLink(peerId: String, nonce: String) {
-        main.post {
-            val p = peers.values.firstOrNull { it.verified && it.hint == peerId }
-            if (!started || busy || p == null ||
-                !nonce.matches(Regex("[0-9a-f]{32}"))) {
-                reportCaptureFailure("NFC 已接觸，但尚未連接該信任裝置，或正在傳送中")
-                return@post
-            }
-            val sid = UUID.randomUUID().toString()
-            incomingNfcSession = Triple(
-                p.endpoint, sid, SystemClock.uptimeMillis() + 30_000L)
-            sendControl(p, JSONObject().put("type", "nfc_browser_pull")
-                .put("sid", sid).put("nonce", nonce))
-            reportShareStarted("NFC 碰觸成功，正在要求對方分享目前網頁…")
-            main.postDelayed({
-                if (incomingNfcSession?.second == sid) {
-                    incomingNfcSession = null
-                    reportCaptureFailure("等待網頁網址逾時；請確認對方仍停留在支援的瀏覽器網頁")
-                }
-            }, 30_000L)
-        }
-    }
-
-    /** Called ONLY after the source phone verified a physical NFC nonce. */
-    private fun onNfcBrowserPull(p: Peer, sid: String, nonce: String) {
-        if (!p.verified || !started || busy || pendingBrowserTap != null ||
-            sid.length !in 12..100 ||
-            !NfcWebSharePolicy.allowsForeground(
-                GlobalGrabAccessibilityService.foregroundPackage) ||
-            !NfcTapSessionStore.consume(app, nonce)) {
-            reportCaptureFailure("NFC 網頁分享不可用；請開著支援的瀏覽器並保持配對連線")
-            return
-        }
-        val expiry = SystemClock.uptimeMillis() + 18_000L
-        pendingBrowserTap = PendingBrowserTap(p.hint, sid, expiry)
-        boundNfcTarget = p.hint to sid
-        reportShareStarted("NFC 已確認接收者，正在讀取" +
-            NfcWebSharePolicy.browserName(
-                GlobalGrabAccessibilityService.foregroundPackage) + "目前網頁…")
-        // Existing scoped accessibility automation uses the verified share
-        // entry for each browser; never guesses a URL from unrelated content.
-        GlobalGrabBridge.onGrabGesture()
-        main.postDelayed({
-            if (pendingBrowserTap?.sid == sid) {
-                pendingBrowserTap = null
-                boundNfcTarget = null
-                reportCaptureFailure("瀏覽器無法提供目前網址；已取消 NFC 碰觸分享")
-            }
-        }, 18_000L)
-    }
-
-    /** Does not affect regular AirGrab when no verified NFC request exists. */
-    fun offerLinkFromSource(raw: String) {
-        val pending = pendingBrowserTap
-        if (pending == null) {
-            offerLink(raw)
-            return
-        }
-        pendingBrowserTap = null
-        if (SystemClock.uptimeMillis() > pending.expires) {
-            boundNfcTarget = null
-            reportCaptureFailure("NFC 網址已逾時，沒有傳送")
-            return
-        }
-        offerNfcLink(raw, pending.peerId, pending.sid)
-    }
-
-    fun cancelNfcBrowserCapture() {
-        if (pendingBrowserTap != null) {
-            pendingBrowserTap = null
-            boundNfcTarget = null
-        }
-    }
-
     fun setDiscoveryEnabled(enabled: Boolean) {
         if (discoveryEnabled == enabled) return
         discoveryEnabled = enabled
@@ -348,7 +263,6 @@ class MultiPeerTransferManager(private val app: Context) {
         pendingNfcBind?.callback?.invoke(false, "", "背景傳檔服務已停止")
         pendingNfcBind = null
         incomingNfcSession = null
-        pendingBrowserTap = null
         boundNfcTarget = null
         epoch++
         scanEpoch++
@@ -1479,9 +1393,6 @@ class MultiPeerTransferManager(private val app: Context) {
     private fun handleControl(p: Peer, json: JSONObject) {
         val sid = json.optString("sid")
         when (json.optString("type")) {
-            "nfc_browser_pull" -> {
-                onNfcBrowserPull(p, sid, json.optString("nonce"))
-            }
             "nfc_bind_request" -> {
                 val nonce = json.optString("nonce")
                 if (sid.length !in 12..100 || !p.verified) return
