@@ -44,6 +44,13 @@ object NfcTapProtocol {
             !response.copyOfRange(response.size - 2, response.size).contentEquals(ok)) return null
         return NfcTapSessionCodec.decode(response.copyOf(response.size - 2))
     }
+    // A separate command for *passive browser sending*. This is not the
+    // user-invoked NFC Sharesheet mode (GET_SESSION).
+    private val browserSessionCommand = byteArrayOf(0x80.toByte(), 0x11, 0, 0, 0)
+    fun getBrowserSessionCommand(): ByteArray = browserSessionCommand.copyOf()
+    fun isBrowserSessionCommand(apdu: ByteArray?): Boolean =
+        apdu != null && apdu.contentEquals(browserSessionCommand)
+
     fun notReadyResponse(): ByteArray = byteArrayOf(0x69, 0x85.toByte())
 
     fun isSuccessfulProbe(response: ByteArray?): Boolean =
