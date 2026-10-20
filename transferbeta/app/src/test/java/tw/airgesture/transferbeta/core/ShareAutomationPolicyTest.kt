@@ -4,6 +4,40 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ShareAutomationPolicyTest {
+    @Test fun samsungTwoModeSubmenuSelectsOnlyOrdinaryAirGrab() {
+        // Real v1.0.16 regression: choosing our app icon exposes a second
+        // sheet with ordinary and NFC activities from the same package.
+        val options = listOf(
+            ActionNode(null, "懸浮操作", clickable = true),
+            ActionNode(null, "懸浮操作 · NFC 碰一碰", clickable = true)
+        )
+        assertEquals(0, ShareAutomationPolicy.onlyRegularAirGrabSubtarget(
+            "com.samsung.android.app.sharelive", options, "com.sec.android.gallery3d"))
+        assertEquals(0, ShareAutomationPolicy.onlyRegularAirGrabSubtarget(
+            "android", options, "com.sec.android.gallery3d"))
+        assertNull(ShareAutomationPolicy.onlyRegularAirGrabSubtarget(
+            "com.malicious.app", options, "com.sec.android.gallery3d"))
+        assertNull(ShareAutomationPolicy.onlyRegularAirGrabSubtarget(
+            "android", options, "unknown.app"))
+    }
+
+    @Test fun samsungSubmenuRefusesAmbiguousOrMissingLabels() {
+        val ordinary = ActionNode(null, "懸浮操作", clickable = true)
+        val nfc = ActionNode(null, "懸浮操作 · NFC 碰一碰", clickable = true)
+        assertNull(ShareAutomationPolicy.onlyRegularAirGrabSubtarget("android",
+            listOf(ordinary, ordinary, nfc), "com.sec.android.gallery3d"))
+        assertNull(ShareAutomationPolicy.onlyRegularAirGrabSubtarget("android",
+            listOf(ordinary), "com.sec.android.gallery3d"))
+        assertNull(ShareAutomationPolicy.onlyRegularAirGrabSubtarget("android",
+            listOf(ordinary, nfc.copy(clickable = false)), "com.sec.android.gallery3d"))
+        assertNull(ShareAutomationPolicy.onlyRegularAirGrabSubtarget("android",
+            listOf(ordinary, nfc.copy(visible = false)), "com.sec.android.gallery3d"))
+        assertNull(ShareAutomationPolicy.onlyRegularAirGrabSubtarget("android",
+            listOf(ActionNode(null, "懸浮操作", clickable = true,
+                texts = listOf("懸浮操作 · NFC 碰一碰")), nfc),
+            "com.sec.android.gallery3d"))
+    }
+
     @Test fun chooserCanMatchChildLabelWhenClickableContainerHasNoText() {
         val nodes = listOf(ActionNode(
             id = "android:id/resolver_target", label = null, clickable = true,
