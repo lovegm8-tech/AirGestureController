@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-    <key>CFBundleDisplayName</key><string>隔空抓取</string>
-    <key>NSCameraUsageDescription</key><string>掃描 Android 手機上的配對 QR Code。</string>
-    <key>NSLocalNetworkUsageDescription</key><string>用區域網路直接傳送和接收您選擇的檔案。</string>
+    <key>CFBundleDisplayName</key><string>懸浮操作</string>
+    <key>NFCReaderUsageDescription</key><string>透過 NFC 碰觸 Android 手機，確認配對身分並啟動加密區域網路傳輸。</string>
+    <key>com.apple.developer.nfc.readersession.iso7816.select-identifiers</key>
+    <array><string>F041495247524149</string></array>
+    <key>NSLocalNetworkUsageDescription</key><string>與同一 Wi-Fi 或手機熱點上的 Android 手機直接雙向傳送原始照片、影片、檔案與網址。</string>
+    <key>NSPhotoLibraryAddUsageDescription</key><string>將驗證成功且經您選擇的接收照片或影片儲存至照片 App。</string>
     <key>UIFileSharingEnabled</key><true/>
     <key>LSSupportsOpeningDocumentsInPlace</key><true/>
     <key>UILaunchScreen</key><dict/>

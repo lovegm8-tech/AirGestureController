@@ -1,158 +1,122 @@
 import SwiftUI
 import UniformTypeIdentifiers
-import AVFoundation
 
+/// iOS does not have Android's all-app front-camera gesture overlay.
+/// It uses explicit Share Sheet / Files input and a foreground Core NFC tap.
 struct ContentView: View {
     @StateObject private var model = TransferModel()
-    @State private var pairingText = ""
-    @State private var showScanner = false
-    @State private var importFile = false
+    @State private var showImporter = false
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("與 S26 Ultra 配對") {
-                    if let pairing = model.pairing {
-                        Text("Android 位址：" + pairing.host)
-                            .font(.subheadline)
+                Section {
+                    Text("先讓兩支手機連上同一個 Wi-Fi 或手機熱點，再在 Android「懸浮操作」開啟 iPhone NFC 傳送／接收頁面。iPhone 需保持此畫面在前景。")
+                        .font(.subheadline)
+                } header: {
+                    Label("連線方式", systemImage: "wifi")
+                }
+
+                Section("傳送至 Android") {
+                    Toggle("傳送網頁網址", isOn: $model.sendingURL)
+                    if model.sendingURL {
+                        TextField("https://example.com", text: $model.typedLink)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .keyboardType(.URL)
                     } else {
-                        Text("先在 S26 Ultra 開啟「隔空抓取：配對 iPhone 14」")
-                            .font(.subheadline)
+                        Button("從「檔案」選擇 1～32 個原始檔") { showImporter = true }
+                        Button("更新照片／Safari／其他 App 的分享內容") {
+                            model.reloadShared()
+                        }
+                        ForEach(model.outgoing) { file in
+                            Label(file.displayName, systemImage: "doc")
+                                .font(.subheadline)
+                                .lineLimit(1)
+                        }
+                        if !model.outgoing.isEmpty {
+                            Button("清除清單", role: .destructive) { model.clearOutgoing() }
+                        }
+                        Text("相簿或其他 App 內請使用系統「分享 → 懸浮操作」，回到這裡再按傳送。來源 App 只給網址時，僅傳網址。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    Button("掃描 Android 的配對 QR Code") { showScanner = true }
-                    TextField("或貼上 airgrab://pair 連結", text: $pairingText)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    Button("使用配對連結") {
-                        model.pair(link: pairingText)
-                        pairingText = ""
-                    }.disabled(pairingText.isEmpty)
+                    Button {
+                        model.startNFC(send: true)
+                    } label: {
+                        Label("NFC 碰一碰傳送給 Android", systemImage: "iphone.gen3.radiowaves.left.and.right")
+                    }
+                    .disabled(model.busy)
                 }
+
                 Section("從 Android 接收") {
-                    Button("搜尋待接收的照片、檔案與網址") { model.refreshOffers() }
-                        .disabled(model.busy || model.pairing == nil)
-                    ForEach(model.offers) { offer in
-                        Button {
-                            model.download(offer)
-                        } label: {
-                            VStack(alignment: .leading) {
-                                Text(offer.name)
-                                Text(ByteCountFormatter.string(fromByteCount: offer.size, countStyle: .file))
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        }.disabled(model.busy)
+                    Text("Android 選擇照片、影片、檔案或網址，按「分享 → 懸浮操作 · iPhone NFC / Wi-Fi」並待命。")
+                        .font(.subheadline)
+                    Button {
+                        model.startNFC(send: false)
+                    } label: {
+                        Label("NFC 碰一碰接收", systemImage: "arrow.down.circle")
+                    }
+                    .disabled(model.busy)
+                }
+
+                if model.awaitingTrust {
+                    Section("NFC 裝置身分確認") {
+                        Text(model.recognizedIdentity
+                             ? "已信任的 Android 裝置"
+                             : "偵測到新的 Android 裝置金鑰，請確認來源手機無誤；陌生裝置不可直接信任。")
+                            .font(.subheadline)
+                        Text(model.pendingFingerprint)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                        Button("信任這台 Android 並繼續傳輸") {
+                            model.approveIdentity()
+                        }
+                        Button("取消配對", role: .destructive) {
+                            model.denyIdentity()
+                        }
                     }
                 }
-                Section("發送到 Android") {
-                    Button("從「檔案」挑選原始檔") { importFile = true }
-                        .disabled(model.busy || model.pairing == nil)
-                    Button("更新其他 App 分享的待送項目") { model.reloadLocal() }
-                    ForEach(model.inbox, id: \.path) { file in
-                        Button("傳送：" + file.lastPathComponent) {
-                            model.upload(file, fromShare: true)
-                        }.disabled(model.busy || model.pairing == nil)
+
+                if let link = model.receivedLink {
+                    Section("收到的網頁網址") {
+                        Text(link.absoluteString)
+                            .font(.caption).textSelection(.enabled)
+                        Link(destination: link) {
+                            Label("自行開啟網址", systemImage: "safari")
+                        }
                     }
-                    Text("iPhone 相簿、Chrome、YouTube、Facebook：使用分享選單選「隔空抓取」，再回到此 App 按傳送。來源若只提供連結，傳送的就是連結。")
-                        .font(.caption)
                 }
-                Section("已接收的檔案") {
+
+                Section("已驗證的接收檔案") {
                     ForEach(model.received, id: \.path) { file in
                         ShareLink(item: file) {
                             Label(file.lastPathComponent, systemImage: "square.and.arrow.up")
-                        }
-                        if let url = model.receivedWebLink(from: file) {
-                            Link("開啟收到的網址", destination: url)
+                                .lineLimit(1)
                         }
                     }
                 }
-                Section("狀態") {
-                    Text(model.status).font(.footnote)
+
+                Section("傳輸狀態") {
+                    Text(model.status).font(.subheadline)
                     if model.busy { ProgressView(value: model.progress) }
-                }
-                Section {
-                    Text("區域網路直接傳輸，不重新壓縮；接收後會驗證 SHA-256。必須保持此 App 前景與同一 Wi-Fi／熱點。初版尚未提供中斷續傳。")
-                        .font(.caption)
+                    Text("原始檔逐檔 SHA-256 驗證，AES-256-GCM 加密。單批最多 32 個檔案。無中斷續傳；需同一區域網路或手機熱點。")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle("隔空抓取")
-            .sheet(isPresented: $showScanner) {
-                NavigationStack {
-                    PairingScanner { code in
-                        model.pair(link: code)
-                        showScanner = false
-                    }
-                    .navigationTitle("掃描配對碼")
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("關閉") { showScanner = false }
-                        }
-                    }
+            .navigationTitle("懸浮操作")
+            .fileImporter(isPresented: $showImporter,
+                          allowedContentTypes: [.item],
+                          allowsMultipleSelection: true) { result in
+                switch result {
+                case .success(let files): model.addFiles(files)
+                case .failure(let error): model.status = error.localizedDescription
                 }
             }
-            .fileImporter(isPresented: $importFile, allowedContentTypes: [.item]) { result in
-                if case .success(let file) = result { model.upload(file) }
-                if case .failure(let error) = result { model.status = error.localizedDescription }
+            .onAppear {
+                model.reloadShared()
+                model.reloadReceived()
             }
-            .onAppear { model.reloadLocal() }
         }
-    }
-}
-
-struct PairingScanner: UIViewControllerRepresentable {
-    let onCode: (String) -> Void
-
-    func makeUIViewController(context: Context) -> ScannerViewController {
-        let controller = ScannerViewController()
-        controller.onCode = onCode
-        return controller
-    }
-
-    func updateUIViewController(_ uiViewController: ScannerViewController, context: Context) {}
-}
-
-final class ScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
-    var onCode: ((String) -> Void)?
-    private let session = AVCaptureSession()
-    private var didFind = false
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        view.backgroundColor = .black
-        AVCaptureDevice.requestAccess(for: .video) { [weak self] allowed in
-            guard allowed else { return }
-            DispatchQueue.main.async { self?.configure() }
-        }
-    }
-
-    private func configure() {
-        guard let camera = AVCaptureDevice.default(for: .video),
-              let input = try? AVCaptureDeviceInput(device: camera),
-              session.canAddInput(input) else { return }
-        session.addInput(input)
-        let output = AVCaptureMetadataOutput()
-        guard session.canAddOutput(output) else { return }
-        session.addOutput(output)
-        output.setMetadataObjectsDelegate(self, queue: DispatchQueue.main)
-        output.metadataObjectTypes = [.qr]
-        let preview = AVCaptureVideoPreviewLayer(session: session)
-        preview.videoGravity = .resizeAspectFill
-        preview.frame = view.bounds
-        view.layer.addSublayer(preview)
-        DispatchQueue.global(qos: .userInitiated).async { self.session.startRunning() }
-    }
-
-    func metadataOutput(_ output: AVCaptureMetadataOutput,
-                        didOutput objects: [AVMetadataObject],
-                        from connection: AVCaptureConnection) {
-        guard !didFind, let result = objects.first as? AVMetadataMachineReadableCodeObject,
-              let value = result.stringValue, value.hasPrefix("airgrab://pair?") else { return }
-        didFind = true
-        session.stopRunning()
-        onCode?(value)
-    }
-
-    override func viewWillDisappear(_ animated: Bool) {
-        super.viewWillDisappear(animated)
-        DispatchQueue.global(qos: .utility).async { self.session.stopRunning() }
     }
 }
