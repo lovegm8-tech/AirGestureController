@@ -109,6 +109,7 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
         var lastAction: Long,
         var hubMoreClicked: Boolean = false,
         var targetClicked: Boolean = false,
+        var secondaryShareTargetClicked: Boolean = false,
         var youtubeShareScrolls: Int = 0,
         var tiktokShareScrolls: Int = 0,
         var galleryImageChoiceClicked: Boolean = false
@@ -783,6 +784,23 @@ class GlobalGrabAccessibilityService : AccessibilityService() {
                         "已展開 Chrome 的完整分享清單；正在尋找 AirGrab"))
                     return
                 }
+            }
+        }
+        // One UI 8/Android 16 sometimes shows a SECOND chooser after the
+        // combined app icon is clicked: "懸浮操作" vs "懸浮操作 · NFC 碰一碰".
+        // Handle this only after a deliberate normal grab clicked our
+        // app icon, and only for two uniquely labeled trusted options.
+        // Never divert a hand grab into NFC mode.
+        if (flow.targetClicked && !flow.secondaryShareTargetClicked) {
+            val ordinary = ShareAutomationPolicy.onlyRegularAirGrabSubtarget(
+                pkg, nodes, flow.origin)
+            if (ordinary != null &&
+                clickable[ordinary].performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                flow.secondaryShareTargetClicked = true
+                flow.lastAction = now
+                GlobalGrabBridge.result(GrabResult.ShareStarted(
+                    "已自動選擇一般懸浮操作；正在等待原始檔交付"))
+                return
             }
         }
         // A chooser click alone is not proof of delivered content. Keep
