@@ -78,7 +78,7 @@ class ShareReceiverActivity : Activity() {
         val safeLink = SharedTextPolicy.onlyWebLink(sharedText)
         if (incoming.type?.startsWith("text/") == true && safeLink != null) {
             GlobalGrabBridge.accessibility?.get()?.externalShareDelivered()
-            transfer.offerLink(safeLink)
+            transfer.offerLinkFromSource(safeLink)
             finish()
             return
         }
@@ -149,7 +149,7 @@ class ShareReceiverActivity : Activity() {
         } else {
             if (safeLink != null) {
                 GlobalGrabBridge.accessibility?.get()?.externalShareDelivered()
-                transfer.offerLink(safeLink)
+                transfer.offerLinkFromSource(safeLink)
                 finish()
             } else notifyAndFinish("分享來源沒有提供唯一有效網址或原始檔；請檢查分享入口")
         }
