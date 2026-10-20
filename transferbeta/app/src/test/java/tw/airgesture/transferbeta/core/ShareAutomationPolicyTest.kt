@@ -15,6 +15,10 @@ class ShareAutomationPolicyTest {
             "com.samsung.android.app.sharelive", options, "com.sec.android.gallery3d"))
         assertEquals(0, ShareAutomationPolicy.onlyRegularAirGrabSubtarget(
             "android", options, "com.sec.android.gallery3d"))
+        assertEquals(0, ShareAutomationPolicy.onlyRegularAirGrabSubtarget(
+            "com.sec.android.gallery3d", options, "com.sec.android.gallery3d"))
+        assertEquals(0, ShareAutomationPolicy.onlyRegularAirGrabSubtarget(
+            "com.samsung.android.app.sharelive", options, "com.zhiliaoapp.musically"))
         assertNull(ShareAutomationPolicy.onlyRegularAirGrabSubtarget(
             "com.malicious.app", options, "com.sec.android.gallery3d"))
         assertNull(ShareAutomationPolicy.onlyRegularAirGrabSubtarget(
