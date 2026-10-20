@@ -4,6 +4,60 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ShareAutomationPolicyTest {
+    @Test fun googleAppTopToolbarShareIgnoresWebsiteShare() {
+        val topClose = ScreenAction(ActionNode(null, "關閉", clickable = true),
+            55f, 114f, 46f, 50f)
+        val topShare = ScreenAction(ActionNode(null, "分享", clickable = true),
+            490f, 115f, 49f, 55f)
+        val topBookmark = ScreenAction(ActionNode(null, "收藏", clickable = true),
+            574f, 114f, 50f, 55f)
+        val webPageShare = ScreenAction(ActionNode(null, "分享", clickable = true),
+            490f, 1335f, 45f, 52f)
+        val nodes = listOf(topClose, topShare, topBookmark, webPageShare)
+        assertEquals(1, ShareAutomationPolicy.googleAppToolbarShare(
+            "com.google.android.googlequicksearchbox", 709f, 1536f, nodes))
+        assertNull(ShareAutomationPolicy.googleAppToolbarShare(
+            "com.android.chrome", 709f, 1536f, nodes))
+        assertNull(ShareAutomationPolicy.googleAppToolbarShare(
+            "com.google.android.googlequicksearchbox", 709f, 1536f,
+            listOf(webPageShare)))
+    }
+
+    @Test fun googleToolbarRefusesWrongIconsOrUnverifiedToolbar() {
+        val close = ScreenAction(ActionNode(null, "Close", clickable = true),
+            58f, 115f, 46f, 55f)
+        val share = ScreenAction(ActionNode(null, "Share", clickable = true),
+            490f, 115f, 50f, 54f)
+        val copy = ScreenAction(ActionNode(null, "Copy", clickable = true),
+            490f, 115f, 50f, 54f)
+        assertNull(ShareAutomationPolicy.googleAppToolbarShare(
+            "com.google.android.googlequicksearchbox", 709f, 1536f,
+            listOf(share)))
+        assertNull(ShareAutomationPolicy.googleAppToolbarShare(
+            "com.google.android.googlequicksearchbox", 709f, 1536f,
+            listOf(close, copy)))
+        assertNull(ShareAutomationPolicy.googleAppToolbarShare(
+            "com.google.android.googlequicksearchbox", 709f, 1536f,
+            listOf(close, share, share)))
+        assertNull(ShareAutomationPolicy.googleAppToolbarShare(
+            "com.google.android.googlequicksearchbox", 709f, 1536f,
+            listOf(close, share.copy(node = share.node.copy(password = true)))))
+        assertNull(ShareAutomationPolicy.googleAppToolbarShare(
+            "com.google.android.googlequicksearchbox", 709f, 1536f,
+            listOf(close, share.copy(y = 420f))))
+    }
+
+    @Test fun googleToolbarShareRecognizesAccessibilityIds() {
+        val close = ScreenAction(ActionNode(null, "Close", clickable = true),
+            58f, 115f, 46f, 55f)
+        val share = ScreenAction(ActionNode(
+            "com.google.android.googlequicksearchbox:id/share_button",
+            null, clickable = true), 490f, 115f, 50f, 54f)
+        assertEquals(1, ShareAutomationPolicy.googleAppToolbarShare(
+            "com.google.android.googlequicksearchbox", 709f, 1536f,
+            listOf(close, share)))
+    }
+
     @Test fun samsungTwoModeSubmenuSelectsOnlyOrdinaryAirGrab() {
         // Real v1.0.16 regression: choosing our app icon exposes a second
         // sheet with ordinary and NFC activities from the same package.
