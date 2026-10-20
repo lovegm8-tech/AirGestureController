@@ -23,6 +23,7 @@ import org.json.JSONObject
 import org.json.JSONArray
 import tw.airgesture.transferbeta.core.AirGrabBundle
 import tw.airgesture.transferbeta.core.NfcAutoAcceptPolicy
+import tw.airgesture.transferbeta.core.NfcWebSharePolicy
 import tw.airgesture.transferbeta.core.GrabContentPolicy
 import tw.airgesture.transferbeta.core.MediaFilePolicy
 import tw.airgesture.transferbeta.core.MediaKind
@@ -257,11 +258,11 @@ class MultiPeerTransferManager(private val app: Context) {
                 p.endpoint, sid, SystemClock.uptimeMillis() + 30_000L)
             sendControl(p, JSONObject().put("type", "nfc_browser_pull")
                 .put("sid", sid).put("nonce", nonce))
-            reportShareStarted("NFC 碰觸成功，正在要求 Chrome 手機分享目前網頁…")
+            reportShareStarted("NFC 碰觸成功，正在要求對方分享目前網頁…")
             main.postDelayed({
                 if (incomingNfcSession?.second == sid) {
                     incomingNfcSession = null
-                    reportCaptureFailure("等待 Chrome 網址逾時；請確認對方仍停留在 Chrome 網頁")
+                    reportCaptureFailure("等待網頁網址逾時；請確認對方仍停留在支援的瀏覽器網頁")
                 }
             }, 30_000L)
         }
@@ -271,23 +272,26 @@ class MultiPeerTransferManager(private val app: Context) {
     private fun onNfcBrowserPull(p: Peer, sid: String, nonce: String) {
         if (!p.verified || !started || busy || pendingBrowserTap != null ||
             sid.length !in 12..100 ||
-            GlobalGrabAccessibilityService.foregroundPackage != "com.android.chrome" ||
+            !NfcWebSharePolicy.allowsForeground(
+                GlobalGrabAccessibilityService.foregroundPackage) ||
             !NfcTapSessionStore.consume(app, nonce)) {
-            reportCaptureFailure("NFC Chrome 分享不可用；請開著 Chrome 並保持配對連線")
+            reportCaptureFailure("NFC 網頁分享不可用；請開著支援的瀏覽器並保持配對連線")
             return
         }
         val expiry = SystemClock.uptimeMillis() + 18_000L
         pendingBrowserTap = PendingBrowserTap(p.hint, sid, expiry)
         boundNfcTarget = p.hint to sid
-        reportShareStarted("NFC 已確認接收者，正在讀取 Chrome 目前網頁…")
-        // Existing scoped accessibility automation opens Chrome's own
-        // Share, never guesses the URL or reads an unrelated app.
+        reportShareStarted("NFC 已確認接收者，正在讀取" +
+            NfcWebSharePolicy.browserName(
+                GlobalGrabAccessibilityService.foregroundPackage) + "目前網頁…")
+        // Existing scoped accessibility automation uses the verified share
+        // entry for each browser; never guesses a URL from unrelated content.
         GlobalGrabBridge.onGrabGesture()
         main.postDelayed({
             if (pendingBrowserTap?.sid == sid) {
                 pendingBrowserTap = null
                 boundNfcTarget = null
-                reportCaptureFailure("Chrome 無法提供目前網址；已取消 NFC 碰觸分享")
+                reportCaptureFailure("瀏覽器無法提供目前網址；已取消 NFC 碰觸分享")
             }
         }, 18_000L)
     }
