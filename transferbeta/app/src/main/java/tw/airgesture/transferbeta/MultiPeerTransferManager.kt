@@ -101,7 +101,7 @@ class MultiPeerTransferManager(private val app: Context) {
         data class LinkOffer(override val sid: String, val url: String) : Offered()
     }
 
-    data class StagedFile(val file: File, val name: String)
+    data class StagedFile(val file: File, val name: String, val precomputedSha256: String? = null)
     private data class ExpectedItem(val name: String, val size: Long, val sha: String)
     private data class PreparedItem(val file: File, val info: ExpectedItem)
 
@@ -873,7 +873,26 @@ class MultiPeerTransferManager(private val app: Context) {
      * Each receiver opts in once and advances its own verified index. No
      * aggregate byte-size ceiling or ZIP/archival staging is involved.
      */
-    fun offerFiles(candidates: List<StagedFile>) {
+    /** NFC manual Sharesheet: one physical tap authenticates ONE chosen recipient,
+     * then transfers 2–32 independent original files sequentially. No ZIP or
+     * aggregate 2-GiB ceiling; non-touched peers receive no offer. */
+    fun offerNfcFiles(candidates: List<StagedFile>, peerId: String, session: String) {
+        val selected = boundNfcTarget
+        boundNfcTarget = null
+        if (selected != (peerId to session)) {
+            candidates.forEach { it.file.delete() }
+            reportCaptureFailure("NFC 身分驗證已失效，請重新碰觸手機")
+            return
+        }
+        offerQueuedFiles(candidates, peerId to session)
+    }
+
+    fun offerFiles(candidates: List<StagedFile>) =
+        offerQueuedFiles(candidates, null)
+
+    private fun offerQueuedFiles(
+        candidates: List<StagedFile>, nfcTarget: Pair<String, String>?
+    ) {
         fun reject(reason: String) {
             candidates.forEach { it.file.delete() }
             reportCaptureFailure(reason)
@@ -886,7 +905,14 @@ class MultiPeerTransferManager(private val app: Context) {
             reject("一次請選取 2 至 ${AirGrabBundle.MAX_FILES} 個檔案")
             return
         }
-        if (peers.values.none { it.verified && it.supportsQueue }) {
+        if (nfcTarget != null &&
+            peers.values.none {
+                it.verified && it.hint == nfcTarget.first && it.supportsQueue
+            }) {
+            reject("NFC 指定接收端未連線或不支援逐檔傳送；請更新接收端")
+            return
+        }
+        if (nfcTarget == null && peers.values.none { it.verified && it.supportsQueue }) {
             reject("接收端版本尚未支援逐檔傳送，請更新兩台裝置")
             return
         }
@@ -905,8 +931,11 @@ class MultiPeerTransferManager(private val app: Context) {
                 val ready = candidates.mapIndexed { i, staged ->
                     val name = TransferPolicy.safeName(staged.name)
                         ?: error("原始檔名無效")
+                    val hash = staged.precomputedSha256?.takeIf {
+                        it.matches(Regex("[0-9a-f]{64}"))
+                    } ?: sha256(staged.file)
                     val item = PreparedItem(staged.file,
-                        ExpectedItem(name, staged.file.length(), sha256(staged.file)))
+                        ExpectedItem(name, staged.file.length(), hash))
                     ui("準備原始檔 ${i + 1}/${candidates.size}")
                     item
                 }
@@ -918,18 +947,23 @@ class MultiPeerTransferManager(private val app: Context) {
                 }
                 val offer = JSONObject().put("type", "queue_offer")
                     .put("sid", sid).put("files", list)
+                if (nfcTarget != null) offer.put("nfc_session", nfcTarget.second)
                 require(offer.toString().toByteArray(Charsets.UTF_8).size <= 16_384) {
                     "檔案名稱太長，無法建立傳輸清單"
                 }
                 main.post {
                     if (!started || !busy || !isConnected || epoch != requestEpoch ||
-                        stagedQueue == null) {
+                        stagedQueue == null || (nfcTarget != null &&
+                            peers.values.none { it.verified && it.hint == nfcTarget.first &&
+                                it.supportsQueue })) {
                         // A stopped or replaced session owns cleanup.
                         return@post
                     }
                     stagedQueue = null
-                    beginBroadcast(offer, queue = ready)
-                    ui("已建立 ${ready.size} 個檔案的逐檔佇列；30 秒內可加入接收")
+                    beginBroadcast(offer, queue = ready, targetPeerId = nfcTarget?.first)
+                    ui(if (nfcTarget != null)
+                        "NFC 已指定接收裝置，${ready.size} 個原始檔逐檔傳送"
+                        else "已建立 ${ready.size} 個檔案的逐檔佇列；30 秒內可加入接收")
                 }
             } catch (error: Exception) {
                 main.post {
@@ -1448,7 +1482,8 @@ class MultiPeerTransferManager(private val app: Context) {
                         AirGrabBundle.isBundle(name)) return
                     files.add(ExpectedItem(name, size, hash))
                 }
-                receiveOffer(p, Offered.QueueOffer(sid, files))
+                receiveOffer(p, Offered.QueueOffer(sid, files),
+                    json.optString("nfc_session").ifBlank { null })
             }
             "file_offer" -> {
                 val name = json.optString("name")
