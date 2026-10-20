@@ -689,6 +689,7 @@ class TransferActivity : ComponentActivity() {
         }
         extraButton("查看版本更新紀錄／更新進度") {
             val versionLog = """
+                v1.0.19｜合併 Chrome、Google App、三星瀏覽器 NFC 網頁碰一碰：雙向傳網址，沿用已配對的 Nearby 驗證與指定接收者自動接收；系統 NFC 自動派送仍待實機驗證
                 v1.0.18｜新增 Chrome 網頁 NFC 雙向碰觸分享技術測試：兩端懸浮操作需保持開啟及 Nearby 已驗證連線，接收端透過系統 NFC ISO-DEP 派送請求瀏覽中的 Chrome 分享網址；是否自動派送視三星 NFC 系統行為，尚待實機驗證
                 v1.0.17｜修正三星相簿在「懸浮操作／NFC 碰一碰」雙分享入口的二次選單卡住；手勢抓取自動選一般懸浮操作，NFC 入口保留手動選擇
                 v1.0.16｜三星相簿分享新增 NFC 碰一碰獨立選項；NFC 一次性驗證綁定已配對 Nearby 裝置，只傳給碰觸對象；成功驗證後自動接收原檔（需兩端背景傳檔運作）
