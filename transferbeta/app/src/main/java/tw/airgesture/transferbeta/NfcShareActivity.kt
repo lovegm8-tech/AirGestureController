@@ -59,7 +59,7 @@ class NfcShareActivity : Activity(), NfcAdapter.ReaderCallback {
         }
         area.addView(title)
         area.addView(TextView(this).apply {
-            text = "先在相簿／檔案 App 按分享，選「NFC 碰一碰」，再把手機背面靠近 S25。\n" +
+            text = "先在相簿／檔案 App 按分享，選「NFC 碰一碰」，再把手機背面靠近接收手機。\n" +
                 "只傳給 NFC 碰觸且已完成原本配對驗證的裝置；無須手勢。\n" +
                 "若對方的傳檔背景服務尚未啟動、螢幕鎖定或 Nearby 未連線，請先排除後重試。"
             textSize = 15f
@@ -188,8 +188,8 @@ class NfcShareActivity : Activity(), NfcAdapter.ReaderCallback {
                     NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK, null)
             readerActive = true
             update(if (source != null)
-                "原始檔「${originalName}」已備妥（${source?.length()} bytes），請碰觸 S25 背面 NFC 位置。"
-                else "網址已備妥，請碰觸 S25 背面 NFC 位置。")
+                "原始檔「${originalName}」已備妥（${source?.length()} bytes），請碰觸接收手機背面 NFC 位置。"
+                else "網址已備妥，請碰觸接收手機背面 NFC 位置。")
         } catch (e: Exception) {
             update("無法啟動 NFC 讀卡模式：" + e.message)
         }
