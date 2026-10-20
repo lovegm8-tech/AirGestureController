@@ -122,12 +122,17 @@ class IosWifiTransfer(private val context: Context) {
             .put("role", role).put("max_files", IosBridgeProtocol.MAX_FILES))
         val ready = stream.readControl("ready")
         require(ready.optInt("major") == 1) { "iOS 傳輸協定版本不相容" }
-        when (payload) {
-            is IosBridgePayload.Files -> sendFiles(stream, payload.originals, update)
-            is IosBridgePayload.Url -> sendUrl(stream, payload.url)
+        return when (payload) {
+            is IosBridgePayload.Files -> {
+                sendFiles(stream, payload.originals, update)
+                "已傳送 " + payload.originals.size + " 個原始檔給 iPhone（完整性驗證通過）"
+            }
+            is IosBridgePayload.Url -> {
+                sendUrl(stream, payload.url)
+                "已傳送網址給 iPhone：" + payload.url
+            }
             IosBridgePayload.Receive -> receiveContent(stream, update)
         }
-        return "iPhone Wi-Fi 傳輸完成，已通過安全性與資料完整性驗證"
     }
     private fun sendUrl(stream: Framed, raw: String) {
         val url = GrabContentPolicy.safeWebUrl(raw) ?: error("無效網址")
@@ -172,7 +177,7 @@ class IosWifiTransfer(private val context: Context) {
         stream.sendControl(JSONObject().put("type", "complete"))
         stream.readControl("complete_ok")
     }
-    private fun receiveContent(stream: Framed, update: (String) -> Unit) {
+    private fun receiveContent(stream: Framed, update: (String) -> Unit): String {
         val offer = stream.readControl("offer")
         when (offer.optString("mode")) {
             "url" -> {
@@ -181,9 +186,13 @@ class IosWifiTransfer(private val context: Context) {
                 stream.sendControl(JSONObject().put("type", "accept"))
                 stream.readControl("complete")
                 stream.sendControl(JSONObject().put("type", "complete_ok"))
-                update("已接收 iPhone 網址：" + url)
+                return "已接收 iPhone 網址：" + url
             }
-            "files" -> receiveFiles(stream, offer, update)
+            "files" -> {
+                receiveFiles(stream, offer, update)
+                return "已接收 " + offer.getJSONArray("files").length() +
+                    " 個原始檔（SHA-256 核對成功）"
+            }
             else -> error("不支援的 iPhone 分享內容")
         }
     }
@@ -202,7 +211,9 @@ class IosWifiTransfer(private val context: Context) {
             Expected(name, size, hash)
         }
         // MediaStore keeps a temporary second copy before publish; budget headroom.
-        val total = expected.sumOf { it.size }
+        val total = expected.fold(0L) { acc, item ->
+            Math.addExact(acc, item.size)
+        }
         require(total >= 0 && total <= Environment.getExternalStorageDirectory().usableSpace -
             TransferPolicy.MIN_FREE_HEADROOM) { "Android 剩餘空間不足" }
         val created = mutableListOf<Uri>()
