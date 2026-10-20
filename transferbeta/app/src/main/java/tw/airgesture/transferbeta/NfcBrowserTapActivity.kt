@@ -16,9 +16,11 @@ import java.util.concurrent.Executors
 /**
  * Android system TECH_DISCOVERED launches this small transparent Activity for
  * a real ISO-DEP tap. ReaderMode is deliberately NOT used: it cannot run with
- * Chrome in front. We do not open a browser or infer its URL on this device.
+ * Chrome, Google App or Samsung Internet in front. We do not infer
+ * a URL on the receiving device.
  *
- * Only a verified Nearby peer can request a one-use authenticated web share.
+ * Only an already-verified Nearby peer can request a one-use authenticated
+ * web share, and the source checks the browser allowlist.
  * Phone-to-phone discovery and Activity dispatch are Samsung/Android dependent.
  */
 class NfcBrowserTapActivity : Activity() {
