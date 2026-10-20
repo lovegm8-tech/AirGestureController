@@ -689,6 +689,7 @@ class TransferActivity : ComponentActivity() {
         }
         extraButton("查看版本更新紀錄／更新進度") {
             val versionLog = """
+                v1.0.20｜新增 NFC 網頁接收待命（接收端保持此頁面，發送端免按分享）；NFC→一次性驗證→Nearby 請求顯示步驟，修正兩台手機背景讀卡無法可靠觸發；保留 NFC 技術驗證頁面
                 v1.0.19｜合併 Chrome、Google App、三星瀏覽器 NFC 網頁碰一碰：雙向傳網址，沿用已配對的 Nearby 驗證與指定接收者自動接收；系統 NFC 自動派送仍待實機驗證
                 v1.0.18｜新增 Chrome 網頁 NFC 雙向碰觸分享技術測試：兩端懸浮操作需保持開啟及 Nearby 已驗證連線，接收端透過系統 NFC ISO-DEP 派送請求瀏覽中的 Chrome 分享網址；是否自動派送視三星 NFC 系統行為，尚待實機驗證
                 v1.0.17｜修正三星相簿在「懸浮操作／NFC 碰一碰」雙分享入口的二次選單卡住；手勢抓取自動選一般懸浮操作，NFC 入口保留手動選擇
@@ -716,6 +717,9 @@ class TransferActivity : ComponentActivity() {
                 else "已停用：玩遊戲時也會繼續辨識手勢", true)
         }
         // Nearby is controlled by the independent homepage switch.
+        extraButton("NFC 網頁接收待命（接收端點這裡）") {
+            startActivity(Intent(this, NfcWebReceiveActivity::class.java))
+        }
         extraButton("NFC 碰一碰 · 技術驗證（不發送照片）") {
             startActivity(Intent(this, NfcProbeActivity::class.java))
         }
