@@ -13,12 +13,14 @@ import android.view.Gravity
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
+import tw.airgesture.transferbeta.core.AirGrabBundle
 import tw.airgesture.transferbeta.core.NfcTapProtocol
 import tw.airgesture.transferbeta.core.ShareEntryPolicy
 import tw.airgesture.transferbeta.core.SharedTextPolicy
 import tw.airgesture.transferbeta.core.TransferPolicy
 import java.io.File
 import java.io.FileOutputStream
+import java.security.MessageDigest
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -39,6 +41,7 @@ class NfcShareActivity : Activity(), NfcAdapter.ReaderCallback {
     private lateinit var status: TextView
     private var source: File? = null
     private var originalName: String? = null
+    private var multiSources: List<MultiPeerTransferManager.StagedFile>? = null
     private var webLink: String? = null
     private var prepared = false
     private var readerActive = false
@@ -59,7 +62,7 @@ class NfcShareActivity : Activity(), NfcAdapter.ReaderCallback {
         }
         area.addView(title)
         area.addView(TextView(this).apply {
-            text = "先在相簿／檔案 App 按分享，選「NFC 碰一碰」，再把手機背面靠近接收手機。\n" +
+            text = "先在相簿／檔案 App 選取 1～32 個檔案，按分享並選「NFC 碰一碰」，再將背面靠近接收手機。\n" +
                 "只傳給 NFC 碰觸且已完成原本配對驗證的裝置；無須手勢。\n" +
                 "若對方的傳檔背景服務尚未啟動、螢幕鎖定或 Nearby 未連線，請先排除後重試。"
             textSize = 15f
@@ -76,11 +79,11 @@ class NfcShareActivity : Activity(), NfcAdapter.ReaderCallback {
             setOnClickListener { finish() }
         })
         setContentView(area)
-        if (intent.action != Intent.ACTION_SEND) {
-            update("請從三星相簿／檔案管理員使用「分享 → NFC 碰一碰」")
-            return
+        when (intent.action) {
+            Intent.ACTION_SEND -> prepareSource(intent)
+            Intent.ACTION_SEND_MULTIPLE -> prepareMultipleSource(intent)
+            else -> update("請從三星相簿／檔案管理員使用「分享 → NFC 碰一碰」")
         }
-        prepareSource(intent)
     }
 
     private fun update(message: String) {
@@ -164,6 +167,81 @@ class NfcShareActivity : Activity(), NfcAdapter.ReaderCallback {
         }
     }
 
+    /**
+     * Stage every original separately while Android grants the temporary
+     * Sharesheet URIs. Calculate each checksum during the staging copy so
+     * the NFC session is not consumed by a second full-file hash pass.
+     * The receiver gets a single authenticated Nearby queue, not a ZIP.
+     */
+    @Suppress("DEPRECATION")
+    private fun prepareMultipleSource(shared: Intent) {
+        val explicit = if (Build.VERSION.SDK_INT >= 33)
+            shared.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        else shared.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
+        val clips = (0 until (shared.clipData?.itemCount ?: 0))
+            .map { shared.clipData?.getItemAt(it)?.uri?.toString() }
+        val originals = ShareEntryPolicy.chooseMultipleOriginals(
+            shared.action, explicit?.map { it.toString() }, clips
+        )?.map(Uri::parse)
+        if (originals == null) {
+            update("NFC 多檔請一次選取 2～${AirGrabBundle.MAX_FILES} 個不重複的原始檔案")
+            return
+        }
+        update("準備 ${originals.size} 個原始檔案；逐檔讀取並驗證…")
+        io.execute {
+            val staged = mutableListOf<MultiPeerTransferManager.StagedFile>()
+            try {
+                val cache = File(cacheDir, "nfc-original-staging").apply { mkdirs() }
+                cache.listFiles()?.filter { it.isFile &&
+                    System.currentTimeMillis() - it.lastModified() > 86_400_000L
+                }?.forEach { it.delete() }
+                for ((index, uri) in originals.withIndex()) {
+                    val proposed = contentResolver.query(uri,
+                        arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                        if (it.moveToFirst()) it.getString(0) else null
+                    } ?: "original-file-${index + 1}"
+                    val name = TransferPolicy.safeName(proposed)
+                        ?: error("第 ${index + 1} 個檔案名稱無效")
+                    val file = File.createTempFile("nfc-part-", ".bin", cache)
+                    staged.add(MultiPeerTransferManager.StagedFile(file, name))
+                    val digest = MessageDigest.getInstance("SHA-256")
+                    var size = 0L
+                    contentResolver.openInputStream(uri)?.use { input ->
+                        FileOutputStream(file).buffered().use { output ->
+                            val buffer = ByteArray(128 * 1024)
+                            while (true) {
+                                val n = input.read(buffer)
+                                if (n < 0) break
+                                if (n == 0) continue
+                                size += n.toLong()
+                                check(size <= TransferPolicy.MAX_BYTES) {
+                                    "第 ${index + 1} 個檔案超過裝置上限"
+                                }
+                                digest.update(buffer, 0, n)
+                                output.write(buffer, 0, n)
+                            }
+                        }
+                    } ?: error("第 ${index + 1} 個檔案沒有原始檔讀取權限")
+                    check(size > 0) { "第 ${index + 1} 個檔案為空" }
+                    staged[index] = MultiPeerTransferManager.StagedFile(file, name,
+                        digest.digest().joinToString("") { "%02x".format(it) })
+                    update("已備妥 ${index + 1}/${originals.size} 個原始檔案")
+                }
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) staged.forEach { it.file.delete() }
+                    else {
+                        multiSources = staged.toList()
+                        prepared = true
+                        enableReaderIfReady()
+                    }
+                }
+            } catch (e: Exception) {
+                staged.forEach { it.file.delete() }
+                update("NFC 多檔準備失敗：" + (e.message ?: "無法讀取原始檔案"))
+            }
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         resumed = true
@@ -187,9 +265,13 @@ class NfcShareActivity : Activity(), NfcAdapter.ReaderCallback {
                     NfcAdapter.FLAG_READER_NFC_B or
                     NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK, null)
             readerActive = true
-            update(if (source != null)
-                "原始檔「${originalName}」已備妥（${source?.length()} bytes），請碰觸接收手機背面 NFC 位置。"
-                else "網址已備妥，請碰觸接收手機背面 NFC 位置。")
+            update(when {
+                multiSources != null ->
+                    "${multiSources?.size} 個原始檔已備妥，請碰觸接收手機背面 NFC 位置。"
+                source != null ->
+                    "原始檔「${originalName}」已備妥（${source?.length()} bytes），請碰觸接收手機背面 NFC 位置。"
+                else -> "網址已備妥，請碰觸接收手機背面 NFC 位置。"
+            })
         } catch (e: Exception) {
             update("無法啟動 NFC 讀卡模式：" + e.message)
         }
@@ -240,7 +322,12 @@ class NfcShareActivity : Activity(), NfcAdapter.ReaderCallback {
                     }
                     val file = source
                     val name = originalName
-                    if (file != null && name != null) {
+                    val many = multiSources
+                    if (many != null) {
+                        transferredOwnership = true
+                        multiSources = null
+                        manager.offerNfcFiles(many, session.peerId, ticket)
+                    } else if (file != null && name != null) {
                         transferredOwnership = true
                         source = null
                         manager.offerNfcFile(file, name, session.peerId, ticket)
@@ -275,7 +362,10 @@ class NfcShareActivity : Activity(), NfcAdapter.ReaderCallback {
     }
 
     override fun onDestroy() {
-        if (!transferredOwnership) source?.delete()
+        if (!transferredOwnership) {
+            source?.delete()
+            multiSources?.forEach { it.file.delete() }
+        }
         io.shutdown()
         super.onDestroy()
     }
