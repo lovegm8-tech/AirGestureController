@@ -14,6 +14,21 @@ class NfcTapCardService : HostApduService() {
     override fun processCommandApdu(commandApdu: ByteArray?, extras: Bundle?): ByteArray {
         // Preserve the previous diagnostic SELECT reply and follow it with a
         // separate session APDU. The reader still must be in OUR app foreground.
+        if (NfcTapProtocol.isBrowserSessionCommand(commandApdu)) {
+            if (!selected || !GlobalGestureService.isActive ||
+                GlobalGestureService.transfer?.isConnected != true ||
+                GlobalGrabAccessibilityService.foregroundPackage != "com.android.chrome") {
+                return NfcTapProtocol.notReadyResponse()
+            }
+            val localId = getSharedPreferences("device", MODE_PRIVATE)
+                .getString("id", null) ?: return NfcTapProtocol.notReadyResponse()
+            return try {
+                NfcTapProtocol.sessionResponse(localId,
+                    NfcTapSessionStore.issue(applicationContext))
+            } catch (_: IllegalArgumentException) {
+                NfcTapProtocol.notReadyResponse()
+            }
+        }
         if (NfcTapProtocol.isSessionCommand(commandApdu)) {
             if (!selected || !GlobalGestureService.isActive ||
                 GlobalGestureService.transfer?.isConnected != true) {
