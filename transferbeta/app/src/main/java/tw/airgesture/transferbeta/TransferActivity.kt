@@ -689,9 +689,9 @@ class TransferActivity : ComponentActivity() {
         }
         extraButton("查看版本更新紀錄／更新進度") {
             val versionLog = """
-                v1.0.20｜新增 NFC 網頁接收待命（接收端保持此頁面，發送端免按分享）；NFC→一次性驗證→Nearby 請求顯示步驟，修正兩台手機背景讀卡無法可靠觸發；保留 NFC 技術驗證頁面
-                v1.0.19｜合併 Chrome、Google App、三星瀏覽器 NFC 網頁碰一碰：雙向傳網址，沿用已配對的 Nearby 驗證與指定接收者自動接收；系統 NFC 自動派送仍待實機驗證
-                v1.0.18｜新增 Chrome 網頁 NFC 雙向碰觸分享技術測試：兩端懸浮操作需保持開啟及 Nearby 已驗證連線，接收端透過系統 NFC ISO-DEP 派送請求瀏覽中的 Chrome 分享網址；是否自動派送視三星 NFC 系統行為，尚待實機驗證
+                v1.0.20｜依實機結果移除「不按分享就碰觸傳送」和 NFC 網頁接收待命實驗；保留手動「分享 → 懸浮操作 · NFC 碰一碰」發送單張照片、影片、文件或有效網址，Nearby 單一指定接收者自動接收
+                v1.0.19｜曾嘗試免按分享的 NFC 網頁碰觸（已在 v1.0.20 移除）
+                v1.0.18｜NFC 背景網頁實驗原型（已移除）
                 v1.0.17｜修正三星相簿在「懸浮操作／NFC 碰一碰」雙分享入口的二次選單卡住；手勢抓取自動選一般懸浮操作，NFC 入口保留手動選擇
                 v1.0.16｜三星相簿分享新增 NFC 碰一碰獨立選項；NFC 一次性驗證綁定已配對 Nearby 裝置，只傳給碰觸對象；成功驗證後自動接收原檔（需兩端背景傳檔運作）
                 v1.0.15｜修正 S26 Ultra 前鏡頭未鏡像影像的左右手正反判斷：掌心可起滑、手背不可起滑；不影響傳檔與握拳\n                v1.0.14｜首頁獨立控制前鏡頭手勢／Nearby 傳檔；純傳檔模式不用開相機或無障礙服務；解鎖後恢復附近搜尋；通知顯示模式
@@ -717,9 +717,6 @@ class TransferActivity : ComponentActivity() {
                 else "已停用：玩遊戲時也會繼續辨識手勢", true)
         }
         // Nearby is controlled by the independent homepage switch.
-        extraButton("NFC 網頁接收待命（接收端點這裡）") {
-            startActivity(Intent(this, NfcWebReceiveActivity::class.java))
-        }
         extraButton("NFC 碰一碰 · 技術驗證（不發送照片）") {
             startActivity(Intent(this, NfcProbeActivity::class.java))
         }
