@@ -1,7 +1,7 @@
 
 name: Floating Control Signed Test APK
 
-# Editing this file and committing on the integration branch triggers one APK build.
+# Build v1.0.21 signed NFC multi-file verification on the integration branch.
 # Later builds can be started manually in GitHub Actions without changing YAML.
 on:
   push:
