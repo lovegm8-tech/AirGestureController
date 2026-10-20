@@ -160,6 +160,49 @@ object ShareAutomationPolicy {
         return matches.singleOrNull()?.index
     }
     /**
+     * Samsung One UI groups multiple ACTION_SEND activities from the same
+     * package under a single app tile. Clicking "懸浮操作" then opens a SECOND
+     * chooser containing "懸浮操作" and "懸浮操作 · NFC 碰一碰".
+     *
+     * A hand-grab has already authorized the ordinary AirGrab share. Select
+     * only the uniquely named ordinary option, and ONLY when the distinct NFC
+     * option is visible at the same time. Never select the NFC target through
+     * ordinary gesture automation. No coordinate guessing or generic clicking.
+     */
+    fun onlyRegularAirGrabSubtarget(
+        pkg: String?,
+        nodes: List<ActionNode>,
+        origin: String?
+    ): Int? {
+        if (!isTrustedResolver(pkg) ||
+            (origin != "com.sec.android.gallery3d" &&
+             origin != "com.google.android.apps.photos" &&
+             origin != "com.sec.android.app.myfiles" &&
+             origin != "com.google.android.youtube" &&
+             origin != "com.android.chrome")) return null
+        fun textOf(n: ActionNode) = labels(n).map {
+            it.trim().lowercase().replace(Regex("\\s+"), " ")
+        }.toSet()
+        val ordinary = nodes.withIndex().filter { (_, node) ->
+            node.visible && node.clickable && !node.password &&
+                textOf(node).contains("懸浮操作") &&
+                textOf(node).none { it.contains("nfc") || it.contains("碰一碰") }
+        }
+        val nfc = nodes.withIndex().filter { (_, node) ->
+            node.visible && node.clickable && !node.password &&
+                textOf(node).any {
+                    it == "懸浮操作 · nfc 碰一碰" ||
+                    it == "懸浮操作·nfc 碰一碰" ||
+                    it == "懸浮操作 nfc 碰一碰"
+                }
+        }
+        return if (ordinary.size == 1 && nfc.size == 1 &&
+            ordinary.single().index != nfc.single().index)
+            ordinary.single().index
+        else null
+    }
+
+    /**
      * Chrome's native Sharing Hub belongs to the browser package rather than
      * the Android intent resolver. It must be identified before selecting a
      * target; finding "AirGrab" in an arbitrary web page is not authorization.
