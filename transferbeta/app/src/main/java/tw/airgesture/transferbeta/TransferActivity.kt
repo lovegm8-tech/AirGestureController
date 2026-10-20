@@ -718,6 +718,10 @@ class TransferActivity : ComponentActivity() {
                 else "已停用：玩遊戲時也會繼續辨識手勢", true)
         }
         // Nearby is controlled by the independent homepage switch.
+        extraButton("iPhone 14 跨平台 NFC／Wi-Fi（獨立開發入口）") {
+            startActivity(Intent(this,
+                tw.airgesture.transferbeta.crossplatform.IosBridgeActivity::class.java))
+        }
         extraButton("NFC 碰一碰 · 技術驗證（不發送照片）") {
             startActivity(Intent(this, NfcProbeActivity::class.java))
         }
