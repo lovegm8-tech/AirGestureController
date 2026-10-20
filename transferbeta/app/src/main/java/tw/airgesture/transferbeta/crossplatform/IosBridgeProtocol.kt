@@ -1,6 +1,5 @@
 package tw.airgesture.transferbeta.crossplatform
 
-import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -36,7 +35,12 @@ object IosBridgeProtocol {
         return byteArrayOf(0x00, 0xA4.toByte(), 0x04, 0x00, aid.size.toByte()) +
             aid + byteArrayOf(0)
     }
-    fun isSelect(apdu: ByteArray?): Boolean = apdu?.contentEquals(selectAid()) == true
+    fun isSelect(apdu: ByteArray?): Boolean {
+        val select = selectAid()
+        // Core NFC/ISO7816 stacks may omit or supply the trailing Le byte.
+        return apdu != null && (apdu.contentEquals(select) ||
+            apdu.contentEquals(select.copyOf(select.size - 1)))
+    }
     fun isReadHello(apdu: ByteArray?): Boolean = apdu?.contentEquals(READ_HELLO) == true
     fun authBody(apdu: ByteArray?): ByteArray? {
         if (apdu == null || apdu.size !in 53..54 ||
