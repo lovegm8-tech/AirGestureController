@@ -299,7 +299,7 @@ class GlobalGestureService : LifecycleService() {
                 // Nearby is independent from the camera: in transfer-only
                 // mode the screen unlock still starts advertising/discovery.
                 power.screenChanged(gestureCameraEnabled)
-                connections.setDiscoveryEnabled(nearbyTransferEnabled)
+                connections.resumeAfterUnlock(nearbyTransferEnabled)
                 if (gestureCameraEnabled) bindCamera()
             } else if (++cameraRetryCount <= 25) {
                 // Infrequent checks handle devices that do not dispatch

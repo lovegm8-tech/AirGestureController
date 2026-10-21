@@ -1,7 +1,7 @@
 
 name: Floating Control Signed Test APK
 
-# Build v1.0.21 signed NFC multi-file verification on the integration branch.
+# Build signed NFC/Nearby reliability release on the integration branch.
 # Later builds can be started manually in GitHub Actions without changing YAML.
 on:
   push:
@@ -9,6 +9,10 @@ on:
       - experiment/floating-control-integration
     paths:
       - '.github/workflows/floating-control-release.yml'
+      - 'transferbeta/app/src/main/java/tw/airgesture/transferbeta/NfcShareActivity.kt'
+      - 'transferbeta/app/src/main/java/tw/airgesture/transferbeta/MultiPeerTransferManager.kt'
+      - 'transferbeta/app/src/main/java/tw/airgesture/transferbeta/GlobalGestureService.kt'
+      - 'transferbeta/app/build.gradle.kts'
   workflow_dispatch:
 
 permissions:

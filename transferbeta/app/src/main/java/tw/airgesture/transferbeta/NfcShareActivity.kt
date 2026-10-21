@@ -1,6 +1,11 @@
 package tw.airgesture.transferbeta
 
 import android.app.Activity
+import android.app.AlertDialog
+import android.os.Handler
+import android.os.Looper
+import java.text.DateFormat
+import java.util.Date
 import android.content.Intent
 import android.net.Uri
 import android.nfc.NfcAdapter
@@ -47,6 +52,63 @@ class NfcShareActivity : Activity(), NfcAdapter.ReaderCallback {
     private var readerActive = false
     private var resumed = false
     private var transferredOwnership = false
+    private val uiHandler = Handler(Looper.getMainLooper())
+    private var readerSetupAttempted = false
+    private var readerEpoch = 0
+    private var nfcAutoRetryDone = false
+    @Volatile private var nfcTagSeen = false
+
+    /** Local diagnostics only: no file contents, peer identity or session nonce. */
+    private fun traceNfc(event: String) {
+        synchronized(NfcShareActivity::class.java) {
+            val prefs = getSharedPreferences("nfc_reader_diagnostics", MODE_PRIVATE)
+            val stamp = DateFormat.getDateTimeInstance().format(Date())
+            val history = prefs.getString("events", "").orEmpty()
+            prefs.edit().putString("events", (history + "$stamp  $event\n").takeLast(3600)).apply()
+        }
+    }
+
+    /** Restart only this Activity's reader session, never the system NFC switch. */
+    private fun restartReader(reason: String) {
+        if (!resumed || !prepared || transferredOwnership || isFinishing) return
+        if (awaitingBinding.get()) {
+            update("NFC 正在驗證接收裝置，請稍候")
+            return
+        }
+        val adapter = nfc
+        if (adapter == null || !adapter.isEnabled) {
+            traceNfc("RESTART_BLOCKED_NFC_OFF")
+            update("手機 NFC 未開啟，請先在系統設定中啟用")
+            return
+        }
+        ++readerEpoch
+        try {
+            adapter.disableReaderMode(this)
+        } catch (e: Exception) {
+            traceNfc("DISABLE_READER_${e.javaClass.simpleName}")
+        }
+        readerActive = false
+        traceNfc("RESTART_READER_$reason")
+        update("正在重新初始化 NFC 讀取模式…")
+        uiHandler.postDelayed({
+            if (resumed && prepared && !transferredOwnership && !isFinishing) {
+                enableReaderIfReady()
+            }
+        }, 300L)
+    }
+
+    private fun scheduleReaderNoTagRecovery() {
+        val generation = ++readerEpoch
+        uiHandler.postDelayed({
+            if (generation == readerEpoch && readerActive && resumed &&
+                !nfcTagSeen && !nfcAutoRetryDone && !awaitingBinding.get() &&
+                !transferredOwnership) {
+                nfcAutoRetryDone = true
+                traceNfc("NO_TAG_12S_AUTO_RETRY")
+                restartReader("12 秒未感應")
+            }
+        }, 12_000L)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -74,6 +136,21 @@ class NfcShareActivity : Activity(), NfcAdapter.ReaderCallback {
             setPadding(0, 14, 0, 20)
         }
         area.addView(status)
+        area.addView(Button(this).apply {
+            text = "重新初始化 NFC 讀取模式"
+            setOnClickListener { restartReader("使用者手動重試") }
+        })
+        area.addView(Button(this).apply {
+            text = "查看 NFC 診斷紀錄"
+            setOnClickListener {
+                val events = getSharedPreferences("nfc_reader_diagnostics", MODE_PRIVATE)
+                    .getString("events", null).orEmpty()
+                AlertDialog.Builder(this@NfcShareActivity)
+                    .setTitle("NFC 讀取診斷（只存在本機）")
+                    .setMessage(events.ifBlank { "目前尚無紀錄" })
+                    .setPositiveButton("關閉", null).show()
+            }
+        })
         area.addView(Button(this).apply {
             text = "取消 NFC 傳送"
             setOnClickListener { finish() }
@@ -250,6 +327,13 @@ class NfcShareActivity : Activity(), NfcAdapter.ReaderCallback {
 
     private fun enableReaderIfReady() {
         if (!resumed || !prepared || readerActive || transferredOwnership) return
+        // Each explicit share starts with a clean app-owned NFC reader session.
+        // The public Android API cannot toggle the device-wide NFC radio.
+        if (!readerSetupAttempted) {
+            readerSetupAttempted = true
+            restartReader("傳送前預備")
+            return
+        }
         val manager = GlobalGestureService.transfer
         if (!GlobalGestureService.isActive || manager == null || !manager.isConnected) {
             update("尚未連線到已配對裝置。請先在兩台手機啟動附近傳檔、解鎖並完成配對；再返回此畫面碰觸。")
@@ -265,6 +349,8 @@ class NfcShareActivity : Activity(), NfcAdapter.ReaderCallback {
                     NfcAdapter.FLAG_READER_NFC_B or
                     NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK, null)
             readerActive = true
+            traceNfc("READER_ENABLED")
+            scheduleReaderNoTagRecovery()
             update(when {
                 multiSources != null ->
                     "${multiSources?.size} 個原始檔已備妥，請碰觸接收手機背面 NFC 位置。"
@@ -273,15 +359,19 @@ class NfcShareActivity : Activity(), NfcAdapter.ReaderCallback {
                 else -> "網址已備妥，請碰觸接收手機背面 NFC 位置。"
             })
         } catch (e: Exception) {
+            traceNfc("READER_ENABLE_ERROR_${e.javaClass.simpleName}")
             update("無法啟動 NFC 讀卡模式：" + e.message)
         }
     }
 
     override fun onTagDiscovered(tag: Tag) {
+        nfcTagSeen = true
+        traceNfc("TAG_DISCOVERED")
         if (!awaitingBinding.compareAndSet(false, true) || !prepared ||
             transferredOwnership) return
         val iso = IsoDep.get(tag)
         if (iso == null) {
+            traceNfc("TAG_NOT_ISODEP")
             awaitingBinding.set(false)
             update("已感應 NFC，但不是另一支安裝懸浮操作的手機；請調整位置。")
             return
@@ -291,6 +381,7 @@ class NfcShareActivity : Activity(), NfcAdapter.ReaderCallback {
             iso.timeout = 2600
             if (!NfcTapProtocol.isSuccessfulProbe(
                     iso.transceive(NfcTapProtocol.selectApdu()))) {
+                traceNfc("HCE_SELECT_FAILED")
                 awaitingBinding.set(false)
                 update("碰觸成功，但對方沒有回應懸浮操作協定。")
                 return
@@ -298,6 +389,7 @@ class NfcShareActivity : Activity(), NfcAdapter.ReaderCallback {
             val session = NfcTapProtocol.decodeSessionResponse(
                 iso.transceive(NfcTapProtocol.getSessionCommand()))
             if (session == null) {
+                traceNfc("HCE_SESSION_UNAVAILABLE")
                 awaitingBinding.set(false)
                 update("對方 NFC 已回應，但背景傳檔未啟動或沒有已驗證的 Nearby 連線。")
                 return
@@ -316,6 +408,7 @@ class NfcShareActivity : Activity(), NfcAdapter.ReaderCallback {
                         return@bindNfcTap
                     }
                     if (!ok) {
+                        traceNfc("NEARBY_BIND_FAILED")
                         awaitingBinding.set(false)
                         update(message + "，可重新碰觸")
                         return@bindNfcTap
@@ -339,11 +432,13 @@ class NfcShareActivity : Activity(), NfcAdapter.ReaderCallback {
                         update("分享的檔案尚未準備好，請重新操作")
                         return@bindNfcTap
                     }
+                    traceNfc("NFC_BIND_SUCCESS_TRANSFER_STARTED")
                     update("NFC 身分驗證成功，已開始對指定手機傳送；接收端會驗證原始檔 SHA-256。")
                     window.decorView.postDelayed({ if (!isFinishing) finish() }, 1500L)
                 }
             }
         } catch (e: Exception) {
+            traceNfc("TAG_COMM_ERROR_${e.javaClass.simpleName}")
             awaitingBinding.set(false)
             update("NFC 碰觸失敗：" + (e.message ?: e.javaClass.simpleName) +
                 "；請確認 NFC 已開啟並稍微移動兩支手機的位置")
@@ -354,9 +449,12 @@ class NfcShareActivity : Activity(), NfcAdapter.ReaderCallback {
 
     override fun onPause() {
         resumed = false
+        ++readerEpoch
+        uiHandler.removeCallbacksAndMessages(null)
         if (readerActive) {
             try { nfc?.disableReaderMode(this) } catch (_: Exception) { }
             readerActive = false
+            traceNfc("READER_DISABLED_ON_PAUSE")
         }
         super.onPause()
     }

@@ -157,6 +157,8 @@ class MultiPeerTransferManager(private val app: Context) {
     private var transcoder: CompatibilityVideoTranscoder? = null
     private var displayedPair: String? = null
     private var lastConnected = false
+    private var trustedReconnectScheduled = false
+    private var lastTrustedReconnectAt = 0L
 
     val isConnected: Boolean get() = peers.values.any { it.verified }
     val rememberedDeviceId: String? get() = trusted.trustedId()
@@ -245,7 +247,21 @@ class MultiPeerTransferManager(private val app: Context) {
             client.stopAdvertising()
             scanning = false
             ui("熄屏省電：暫停搜尋附近手機，現有連線仍保留")
-        } else search()
+        } else {
+            // Unlock is a fresh opportunity to locate previously trusted devices.
+            val now = SystemClock.uptimeMillis()
+            searchStartedAt = now
+            fastDiscoveryUntil = now + 120_000L
+            search()
+        }
+    }
+
+    /** Only called after the keyguard is actually unlocked. */
+    fun resumeAfterUnlock(enabled: Boolean) {
+        val wasEnabled = discoveryEnabled
+        setDiscoveryEnabled(enabled)
+        if (enabled && wasEnabled && started &&
+            !isConnected && rememberedDeviceIds.isNotEmpty()) refresh()
     }
 
     fun start() {
@@ -509,6 +525,28 @@ class MultiPeerTransferManager(private val app: Context) {
         }
     }
 
+    /** Reconnect a dropped trusted peer without waiting for the slow idle scan cycle.
+     * Coalesce bursts and limit retries to avoid constant radio scanning.
+     */
+    private fun scheduleTrustedReconnect() {
+        if (!started || !discoveryEnabled || trustedReconnectScheduled ||
+            rememberedDeviceIds.isEmpty()) return
+        val now = SystemClock.uptimeMillis()
+        val delay = maxOf(750L, lastTrustedReconnectAt + 15_000L - now)
+        trustedReconnectScheduled = true
+        main.postDelayed({
+            trustedReconnectScheduled = false
+            if (!started || !discoveryEnabled ||
+                rememberedDeviceIds.none { id -> peers.values.none { it.verified && it.hint == id } }
+            ) return@postDelayed
+            lastTrustedReconnectAt = SystemClock.uptimeMillis()
+            fastDiscoveryUntil = lastTrustedReconnectAt + 120_000L
+            searchStartedAt = lastTrustedReconnectAt
+            search()
+            ui("信任裝置已斷線，正在自動重新搜尋")
+        }, delay)
+    }
+
     private fun dropPeer(p: Peer, reason: String) {
         if (peers[p.endpoint] !== p) return
         peers.remove(p.endpoint)
@@ -549,6 +587,7 @@ class MultiPeerTransferManager(private val app: Context) {
             busy = false
         }
         if (started && peers.isEmpty()) ui("附近裝置已斷線，正在繼續搜尋")
+        if (trusted.isRecognizedHint(p.hint)) scheduleTrustedReconnect()
     }
 
     private fun startAuthentication(p: Peer) {
