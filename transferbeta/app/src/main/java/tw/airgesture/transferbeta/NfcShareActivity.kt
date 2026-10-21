@@ -13,6 +13,7 @@ import android.nfc.Tag
 import android.nfc.tech.IsoDep
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.provider.OpenableColumns
 import android.view.Gravity
 import android.widget.Button
@@ -54,6 +55,7 @@ class NfcShareActivity : Activity(), NfcAdapter.ReaderCallback {
     private var transferredOwnership = false
     private val uiHandler = Handler(Looper.getMainLooper())
     private var readerSetupAttempted = false
+    private var lastNearbyRecoveryAt = 0L
     private var readerEpoch = 0
     private var nfcAutoRetryDone = false
     @Volatile private var nfcTagSeen = false
@@ -66,6 +68,18 @@ class NfcShareActivity : Activity(), NfcAdapter.ReaderCallback {
             val history = prefs.getString("events", "").orEmpty()
             prefs.edit().putString("events", (history + "$stamp  $event\n").takeLast(3600)).apply()
         }
+    }
+
+    /** When disconnected, explicitly wake Nearby discovery without clearing trusted peers. */
+    private fun requestNearbyRecovery() {
+        val manager = GlobalGestureService.transfer ?: return
+        if (!GlobalGestureService.isActive || manager.isConnected) return
+        val now = SystemClock.uptimeMillis()
+        if (now - lastNearbyRecoveryAt < 12_000L) return
+        lastNearbyRecoveryAt = now
+        manager.refresh()
+        traceNfc("SENDER_NEARBY_RECONNECT_REQUESTED")
+        update("尚未連線到信任裝置，正在自動搜尋；重新連線後再碰一次即可傳送")
     }
 
     /** Restart only this Activity's reader session, never the system NFC switch. */
@@ -336,7 +350,8 @@ class NfcShareActivity : Activity(), NfcAdapter.ReaderCallback {
         }
         val manager = GlobalGestureService.transfer
         if (!GlobalGestureService.isActive || manager == null || !manager.isConnected) {
-            update("尚未連線到已配對裝置。請先在兩台手機啟動附近傳檔、解鎖並完成配對；再返回此畫面碰觸。")
+            update("尚未連線到信任裝置，正在嘗試恢復連線；連線恢復後再碰一次")
+            requestNearbyRecovery()
             // Reader can still run: when a verified peer comes online later the
             // handler will check the connection again before NFC binding.
         }
@@ -391,14 +406,16 @@ class NfcShareActivity : Activity(), NfcAdapter.ReaderCallback {
             if (session == null) {
                 traceNfc("HCE_SESSION_UNAVAILABLE")
                 awaitingBinding.set(false)
-                update("對方 NFC 已回應，但背景傳檔未啟動或沒有已驗證的 Nearby 連線。")
+                runOnUiThread { requestNearbyRecovery() }
+                update("接收端 NFC 已感應，但其中一方沒有已驗證的 Nearby 連線；已嘗試重新搜尋，連線後請再碰一次。")
                 return
             }
             runOnUiThread {
                 val manager = GlobalGestureService.transfer
                 if (!prepared || manager?.isConnected != true || isFinishing) {
                     awaitingBinding.set(false)
-                    update("請先與接收手機建立 Nearby 已配對連線。")
+                    requestNearbyRecovery()
+                    update("正在搜尋信任裝置，連線恢復後再碰一次。")
                     return@runOnUiThread
                 }
                 update("NFC 已感應 · 正在透過已配對連線確認接收裝置…")

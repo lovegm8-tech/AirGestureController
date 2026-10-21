@@ -2,6 +2,9 @@ package tw.airgesture.transferbeta
 
 import android.nfc.cardemulation.HostApduService
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import tw.airgesture.transferbeta.core.NfcTapProtocol
 
 /**
@@ -11,12 +14,29 @@ import tw.airgesture.transferbeta.core.NfcTapProtocol
  */
 class NfcTapCardService : HostApduService() {
     private var selected = false
+    private val main = Handler(Looper.getMainLooper())
+    @Volatile private var lastNearbyRecoveryAt = 0L
+
+    /** NFC contact can wake a receiver's trusted-peer discovery, not system NFC. */
+    private fun tryRecoverNearby() {
+        if (!GlobalGestureService.isActive) return
+        val now = SystemClock.uptimeMillis()
+        if (now - lastNearbyRecoveryAt < 12_000L) return
+        lastNearbyRecoveryAt = now
+        main.post {
+            val manager = GlobalGestureService.transfer
+            if (GlobalGestureService.isActive && manager != null && !manager.isConnected) {
+                manager.refresh()
+            }
+        }
+    }
 
     override fun processCommandApdu(commandApdu: ByteArray?, extras: Bundle?): ByteArray {
         // Only explicit NFC Sharesheet sessions may request an identity token.
         if (NfcTapProtocol.isSessionCommand(commandApdu)) {
             if (!selected || !GlobalGestureService.isActive ||
                 GlobalGestureService.transfer?.isConnected != true) {
+                tryRecoverNearby()
                 return NfcTapProtocol.notReadyResponse()
             }
             val prefs = getSharedPreferences("device", MODE_PRIVATE)
@@ -31,6 +51,8 @@ class NfcTapCardService : HostApduService() {
         val reply = NfcTapProtocol.respond(commandApdu)
         selected = NfcTapProtocol.isSuccessfulProbe(reply)
         if (selected) {
+            // The receiver can wake a trusted-peer search on physical NFC contact.
+            if (GlobalGestureService.transfer?.isConnected != true) tryRecoverNearby()
             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putLong(LAST_PROBE_TIME, System.currentTimeMillis()).apply()
         }
