@@ -316,11 +316,10 @@ public final class SubtitleCaptureService extends Service {
     }
 
     private Rect normalizeToPixels(RectF fractions) {
-        int l = Math.max(0, Math.min(width - 1, Math.round(fractions.left * width)));
-        int t = Math.max(0, Math.min(height - 1, Math.round(fractions.top * height)));
-        int r = Math.max(l + 1, Math.min(width, Math.round(fractions.right * width)));
-        int b = Math.max(t + 1, Math.min(height, Math.round(fractions.bottom * height)));
-        return new Rect(l, t, r, b);
+        int[] p = SubtitleRoiBounds.pixels(
+                fractions.left, fractions.top, fractions.right, fractions.bottom,
+                width, height);
+        return new Rect(p[0], p[1], p[2], p[3]);
     }
 
     private void closeSelectionEditor() {
