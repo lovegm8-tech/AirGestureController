@@ -689,6 +689,21 @@ class TransferActivity : ComponentActivity() {
             }
         }
         modePanel.addView(subtitleArea)
+        modePanel.addView(Button(this).apply {
+            text = "查看字幕辨識診斷（原文／翻譯）"
+            isAllCaps = false
+            setOnClickListener {
+                AlertDialog.Builder(this@TransferActivity)
+                    .setTitle("本機字幕辨識診斷")
+                    .setMessage(
+                        "掃描方式：${SubtitleCaptureService.lastScanMode}" +
+                        "\n\nOCR 原文：\n${SubtitleCaptureService.lastRecognizedSource}" +
+                        "\n\n翻譯結果：\n${SubtitleCaptureService.lastTranslationResult}" +
+                        "\n\n本頁僅顯示記憶體中的最近一筆，不上傳影片或字幕。"
+                    )
+                    .setPositiveButton("關閉", null).show()
+            }
+        })
         subtitleCustomAreaControls.visibility =
             if (areaPreferences.getInt("subtitle_area_mode", 4) == 5) View.VISIBLE
             else View.GONE
