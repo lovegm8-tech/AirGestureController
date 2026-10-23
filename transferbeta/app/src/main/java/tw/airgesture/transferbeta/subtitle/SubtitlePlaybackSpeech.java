@@ -119,7 +119,8 @@ public final class SubtitlePlaybackSpeech {
             }
             if (!alive.get()) throw new InterruptedException("cancelled");
             if (bytes < 10_000_000) throw new java.io.IOException("model archive incomplete");
-            callback.onStatus("正在安裝英文離線語音模型");
+            callback.onStatus("正在安裝" + ("ja".equals(language) ? "日文" : "英文") +
+                    "離線語音模型");
             File tmpDir = new File(context.getFilesDir(), modelFolder + "-installing");
             deleteRecursive(tmpDir);
             if (!tmpDir.mkdirs()) throw new java.io.IOException("cannot create model directory");
