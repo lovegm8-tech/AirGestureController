@@ -1,6 +1,8 @@
 package tw.airgesture.transferbeta.subtitle;
 
 import android.app.Activity;
+import android.Manifest;
+import android.content.pm.PackageManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -87,6 +89,13 @@ public final class SubtitleCaptureService extends Service {
     private FrameLayout editorRoot;
     private SubtitleRoiEditor roiEditor;
     private SubtitleBubbleController translationBubble;
+    private SubtitlePlaybackSpeech playbackSpeech;
+    private boolean voiceFallbackEnabled = false;
+    private long lastOcrCaptionMs = 0L;
+    private long lastVoiceCaptionMs = 0L;
+    private String lastSpokenSource = "";
+    public static volatile String lastVoiceStatus = "語音補位未啟用";
+    public static volatile String lastSpokenOriginal = "尚無語音辨識結果";
     private volatile boolean pausedByUser = false;
     private volatile Rect activeRoi;
     private volatile boolean calibrating = true;
@@ -128,6 +137,8 @@ public final class SubtitleCaptureService extends Service {
         lastCandidateSummary = "尚無 OCR 候選字幕";
         lastTranslationQuality = "尚無翻譯結果";
         lastSelectionStatus = "等待 OCR 擷取畫面";
+        lastVoiceStatus = "語音補位未啟用";
+        lastSpokenOriginal = "尚無語音辨識結果";
         workerThread = new HandlerThread("floating-subtitle-ocr");
         workerThread.start();
         worker = new Handler(workerThread.getLooper());
@@ -164,8 +175,16 @@ public final class SubtitleCaptureService extends Service {
 
         try {
             createNotificationChannel();
-            startForeground(NOTIFICATION_ID, makeNotification(),
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+            voiceFallbackEnabled = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                    .getBoolean("enable_voice_fallback_en", false)
+                    && "en".equals(getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                            .getString("source_language", "en"))
+                    && checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                            == PackageManager.PERMISSION_GRANTED;
+            int foregroundTypes = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION;
+            if (voiceFallbackEnabled && Build.VERSION.SDK_INT >= 30)
+                foregroundTypes |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
+            startForeground(NOTIFICATION_ID, makeNotification(), foregroundTypes);
             running = true;
             createCaption();
             initializeRecognizer();
@@ -184,6 +203,7 @@ public final class SubtitleCaptureService extends Service {
                     DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                     imageReader.getSurface(), null, main);
             worker.post(frameLoop);
+            if (voiceFallbackEnabled) startPlaybackSpeech();
             // Let the user return to the video after MediaProjection consent.
             main.postDelayed(this::openSelectionEditor, 1250L);
         } catch (Exception exception) {
@@ -459,6 +479,69 @@ public final class SubtitleCaptureService extends Service {
             closeSelectionEditor();
             showReopenButton();
         }
+    }
+
+
+    private void startPlaybackSpeech() {
+        lastVoiceStatus = "正在準備英文離線語音補位";
+        playbackSpeech = new SubtitlePlaybackSpeech(this, mediaProjection,
+                new SubtitlePlaybackSpeech.Callback() {
+                    @Override public void onStatus(String status) {
+                        lastVoiceStatus = status;
+                    }
+                    @Override public void onUtterance(String english) {
+                        translateVoiceFallback(english);
+                    }
+                });
+        playbackSpeech.start();
+    }
+
+    private void translateVoiceFallback(String english) {
+        if (english == null) return;
+        String source = english.replaceAll("\\s+", " ").trim();
+        if (source.length() < 9 || source.equalsIgnoreCase(lastSpokenSource)) return;
+        lastSpokenOriginal = source;
+        long now = SystemClock.elapsedRealtime();
+        if (!SubtitleVoicePriority.mayDisplayVoice(voiceFallbackEnabled, modelReady,
+                calibrating, pausedByUser, now, lastOcrCaptionMs, lastVoiceCaptionMs)) return;
+        if (translator == null || !translateBusy.compareAndSet(false, true)) return;
+        lastSpokenSource = source;
+        translator.translate(source)
+                .addOnSuccessListener(translated -> {
+                    long finishedAt = SystemClock.elapsedRealtime();
+                    if (!running || !SubtitleVoicePriority.mayDisplayVoice(
+                            voiceFallbackEnabled, modelReady, calibrating, pausedByUser,
+                            finishedAt, lastOcrCaptionMs, lastVoiceCaptionMs)) return;
+                    String zh = traditionalize(translated);
+                    boolean chinese = false;
+                    for (int i = 0; i < zh.length(); i++) {
+                        char c = zh.charAt(i);
+                        if (c >= 0x4e00 && c <= 0x9fff) { chinese = true; break; }
+                    }
+                    if (!chinese) return; // Never present un-translated English as Chinese
+                    lastVoiceCaptionMs = finishedAt;
+                    lastTranslationResult = zh;
+                    lastVoiceStatus = "語音補位已顯示中文字幕";
+                    showCaption(zh);
+                    positionVoiceCaption();
+                })
+                .addOnFailureListener(error -> {
+                    if (source.equals(lastSpokenSource)) lastSpokenSource = "";
+                    lastVoiceStatus = "英文語音翻譯失敗：" + error.getClass().getSimpleName();
+                })
+                .addOnCompleteListener(done -> translateBusy.set(false));
+    }
+
+    private void positionVoiceCaption() {
+        if (captionDraggedByUser) return;
+        main.post(() -> {
+            if (!running || calibrating || captionView == null || captionParams == null ||
+                    captionDraggedByUser) return;
+            captionParams.x = Math.max(0, Math.round(width * 0.07f));
+            captionParams.y = Math.max(0, Math.round(height * 0.68f));
+            try { windowManager.updateViewLayout(captionView, captionParams); }
+            catch (IllegalArgumentException ignored) { }
+        });
     }
 
     private void showCaption(String text) {
@@ -817,6 +900,7 @@ public final class SubtitleCaptureService extends Service {
                         showCaption("等待正確的中文字幕…");
                         return;
                     }
+                    lastOcrCaptionMs = SystemClock.elapsedRealtime();
                     showCaption(lastTranslation);
                     positionCaptionAbove(translatedCandidate);
                 })
@@ -867,6 +951,10 @@ public final class SubtitleCaptureService extends Service {
         running = false;
         modelReady = false;
         if (worker != null) worker.removeCallbacksAndMessages(null);
+        if (playbackSpeech != null) {
+            playbackSpeech.stop();
+            playbackSpeech = null;
+        }
         if (virtualDisplay != null) { virtualDisplay.release(); virtualDisplay = null; }
         if (imageReader != null) { imageReader.close(); imageReader = null; }
         if (mediaProjection != null) {
