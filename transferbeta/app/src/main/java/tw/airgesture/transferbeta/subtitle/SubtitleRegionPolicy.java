@@ -67,6 +67,18 @@ public final class SubtitleRegionPolicy {
                 scriptHits++;
             }
         }
-        return scriptHits >= ("ja".equals(language) || "ko".equals(language) ? 1 : 2);
+        if ("en".equals(language)) {
+            // Prevent Chinese-heavy recommendation titles, page controls or our
+            // translated overlay from being mistaken for English dialogue merely
+            // because they contain two English words such as "Lofi Chill".
+            int chinese = 0;
+            for (int i = 0; i < t.length(); i++) {
+                char c = t.charAt(i);
+                if (c >= '\\u4e00' && c <= '\\u9fff') chinese++;
+            }
+            if (scriptHits < 2) return false;
+            return chinese == 0 || scriptHits >= chinese * 1.7f;
+        }
+        return scriptHits >= 1;
     }
 }
