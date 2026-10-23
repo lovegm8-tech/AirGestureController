@@ -89,6 +89,8 @@ public final class SubtitleCaptureService extends Service {
     private int width, height, densityDpi;
     private String lastSource = "";
     private String lastTranslation = "";
+    private SubtitleCandidatePolicy.Candidate previousCandidate;
+    private boolean captionDraggedByUser = false;
     private volatile long lastSubtitleObservedMs = 0L;
     private int captureCropY = 0;
     private String sourceLanguage = "en";
@@ -224,7 +226,9 @@ public final class SubtitleCaptureService extends Service {
         captionParams.gravity = Gravity.TOP | Gravity.LEFT;
         captionParams.x = Math.round(metrics.widthPixels * 0.07f);
         // Put the Chinese subtitle near the bottom by default; users can drag it.
-        captionParams.y = Math.round(metrics.heightPixels * 0.76f);
+        // The initial hint is positioned high; translated captions follow the
+        // actual detected subtitle position once OCR finds dialogue.
+        captionParams.y = Math.round(metrics.heightPixels * 0.18f);
         captionView.setOnTouchListener(new android.view.View.OnTouchListener() {
             private float rawX, rawY;
             private int baseX, baseY;
@@ -235,6 +239,10 @@ public final class SubtitleCaptureService extends Service {
                         baseX = captionParams.x; baseY = captionParams.y;
                         return true;
                     case MotionEvent.ACTION_MOVE:
+                        if (Math.abs(event.getRawX() - rawX) > dp(8)
+                                || Math.abs(event.getRawY() - rawY) > dp(8)) {
+                            captionDraggedByUser = true;
+                        }
                         captionParams.x = Math.max(0, baseX + Math.round(event.getRawX() - rawX));
                         captionParams.y = Math.max(0, baseY + Math.round(event.getRawY() - rawY));
                         try { windowManager.updateViewLayout(captionView, captionParams); }
@@ -254,6 +262,36 @@ public final class SubtitleCaptureService extends Service {
     private void showCaption(String text) {
         main.post(() -> {
             if (running && captionView != null) captionView.setText(text);
+        });
+    }
+
+
+    /**
+     * Place translated text immediately above the original OCR subtitle.
+     * User dragging the floating box pauses auto following for this session.
+     */
+    private void positionCaptionAbove(SubtitleCandidatePolicy.Candidate original) {
+        if (original == null || captionDraggedByUser) return;
+        main.post(() -> {
+            if (!running || captionView == null || captionParams == null || captionDraggedByUser) return;
+            captionView.post(() -> {
+                if (!running || captionView == null || captionParams == null || captionDraggedByUser)
+                    return;
+                // Re-measure after each text update. A longer translation must not
+                // grow down onto the source subtitle.
+                captionView.measure(
+                        android.view.View.MeasureSpec.makeMeasureSpec(captionParams.width,
+                                android.view.View.MeasureSpec.EXACTLY),
+                        android.view.View.MeasureSpec.makeMeasureSpec(height,
+                                android.view.View.MeasureSpec.AT_MOST));
+                int viewHeight = Math.max(dp(38), captionView.getMeasuredHeight());
+                int wantedX = original.centerX() - captionParams.width / 2;
+                int wantedY = original.top - viewHeight - dp(9);
+                captionParams.x = Math.max(0, Math.min(Math.max(0, width - captionParams.width), wantedX));
+                captionParams.y = Math.max(0, Math.min(Math.max(0, height - viewHeight), wantedY));
+                try { windowManager.updateViewLayout(captionView, captionParams); }
+                catch (IllegalArgumentException ignored) { }
+            });
         });
     }
 
@@ -317,7 +355,7 @@ public final class SubtitleCaptureService extends Service {
             screen = Bitmap.createBitmap(paddedWidth, height, Bitmap.Config.ARGB_8888);
             screen.copyPixelsFromBuffer(buffer);
             final int mode = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
-                    .getInt("subtitle_area_mode", SubtitleRegionPolicy.AUTO);
+                    .getInt("subtitle_area_mode", SubtitleRegionPolicy.FULL_SCREEN);
             final int topPercent = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
                     .getInt("subtitle_area_top_pct", 20);
             final int bottomPercent = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
@@ -325,12 +363,13 @@ public final class SubtitleCaptureService extends Service {
             final int[] region = SubtitleRegionPolicy.verticalBounds(
                     width, height, mode, topPercent, bottomPercent);
             captureCropY = region[0];
+            final int frameCropY = region[0];
             crop = Bitmap.createBitmap(screen, 0, region[0], width,
                     region[1] - region[0]);
             Bitmap owned = crop;
             crop = null;
             recognizer.process(InputImage.fromBitmap(owned, 0))
-                    .addOnSuccessListener(this::translateRecognizedLines)
+                    .addOnSuccessListener(text -> translateRecognizedLines(text, frameCropY))
                     .addOnCompleteListener(task -> {
                         owned.recycle();
                         ocrBusy.set(false);
@@ -346,46 +385,75 @@ public final class SubtitleCaptureService extends Service {
         }
     }
 
-    private void translateRecognizedLines(Text result) {
+
+    private void translateRecognizedLines(Text result, int frameCropY) {
         if (!running || !modelReady || translator == null) return;
-        List<Text.Line> lines = new ArrayList<>();
+        List<SubtitleCandidatePolicy.Candidate> candidates = new ArrayList<>();
         for (Text.TextBlock block : result.getTextBlocks()) {
+            List<Text.Line> valid = new ArrayList<>();
             for (Text.Line line : block.getLines()) {
                 Rect rect = line.getBoundingBox();
-                String txt = line.getText().trim();
-                if (rect == null || txt.length() < 3) continue;
-                int center = rect.centerX();
-                if (center < width * 0.12f || center > width * 0.88f) continue;
-                if (!SubtitleRegionPolicy.isPossibleSubtitle(txt, sourceLanguage)) continue;
-                lines.add(line);
+                String raw = line.getText().trim();
+                if (rect == null || !SubtitleRegionPolicy.isPossibleSubtitle(raw, sourceLanguage))
+                    continue;
+                valid.add(line);
+                candidates.add(new SubtitleCandidatePolicy.Candidate(raw,
+                        rect.left, rect.top + frameCropY,
+                        rect.right, rect.bottom + frameCropY));
+            }
+            // Keep a complete two-line subtitle together when ML Kit grouped it.
+            // A long paragraph or a metadata panel is not a normal caption.
+            if (valid.size() >= 2 && valid.size() <= 3) {
+                StringBuilder combined = new StringBuilder();
+                int left = Integer.MAX_VALUE, top = Integer.MAX_VALUE;
+                int right = 0, bottom = 0;
+                for (Text.Line line : valid) {
+                    Rect rect = line.getBoundingBox();
+                    if (combined.length() > 0) combined.append(' ');
+                    combined.append(line.getText().trim());
+                    left = Math.min(left, rect.left);
+                    right = Math.max(right, rect.right);
+                    top = Math.min(top, rect.top);
+                    bottom = Math.max(bottom, rect.bottom);
+                }
+                if (bottom - top < height * 0.13f && combined.length() <= 280) {
+                    candidates.add(new SubtitleCandidatePolicy.Candidate(
+                            combined.toString(), left, top + frameCropY,
+                            right, bottom + frameCropY));
+                }
             }
         }
-        if (lines.isEmpty()) {
+        SubtitleCandidatePolicy.Candidate chosen =
+                SubtitleCandidatePolicy.best(candidates, width, height, previousCandidate);
+        if (chosen == null) {
             if (lastSubtitleObservedMs > 0L &&
                     SystemClock.elapsedRealtime() - lastSubtitleObservedMs > 4300L) {
                 lastSubtitleObservedMs = 0L;
                 lastSource = "";
                 lastTranslation = "";
+                previousCandidate = null;
                 showCaption("等待外語字幕…");
             }
             return;
         }
         lastSubtitleObservedMs = SystemClock.elapsedRealtime();
-        lines.sort(Comparator.comparingInt(a -> a.getBoundingBox().top));
-        List<String> latest = new ArrayList<>();
-        for (int i = Math.max(0, lines.size() - 2); i < lines.size(); i++) {
-            latest.add(lines.get(i).getText().trim());
+        // Tracking is based on OCR coordinates, not a fixed screen crop.
+        String source = chosen.text.replaceAll("\\s+", " ").trim();
+        if (source.length() < 3) return;
+        if (source.equals(lastSource)) {
+            positionCaptionAbove(chosen);
+            return;
         }
-        String source = String.join(" ", latest).replaceAll("\\s+", " ").trim();
-        if (source.length() < 3 || source.equals(lastSource)) return;
         if (!translateBusy.compareAndSet(false, true)) return;
+        final SubtitleCandidatePolicy.Candidate translatedCandidate = chosen;
         lastSource = source;
+        previousCandidate = chosen;
         translator.translate(source)
-                .addOnSuccessListener(text -> {
+                .addOnSuccessListener(translated -> {
                     if (!running || !source.equals(lastSource)) return;
-                    String converted = traditionalize(text);
-                    lastTranslation = converted;
-                    showCaption(converted);
+                    lastTranslation = traditionalize(translated);
+                    showCaption(lastTranslation);
+                    positionCaptionAbove(translatedCandidate);
                 })
                 .addOnFailureListener(error -> {
                     if (source.equals(lastSource)) lastSource = "";
