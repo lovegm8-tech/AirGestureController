@@ -26,30 +26,44 @@ public class SubtitleVoiceFallbackTest {
         SubtitleSpeechModels.folder("ko");
     }
 
-    @Test public void freshOcrAlwaysBlocksVoiceReplacement() {
-        assertFalse(SubtitleVoicePriority.mayDisplayVoice(true,true,false,false,
+
+    @Test public void voiceCanReplaceRecentOcr() {
+        assertTrue(SubtitleVoicePriority.mayDisplayVoice(true,true,false,false,
                 10_000,9_900,0));
-        assertFalse(SubtitleVoicePriority.mayDisplayVoice(true,true,false,false,
-                10_000,8_000,0));
-    }
-
-    @Test public void staleOcrAllowsSpeechForAnimeAndEnglish() {
         assertTrue(SubtitleVoicePriority.mayDisplayVoice(true,true,false,false,
-                10_000,7_000,0));
+                10_000,9_900,8_200));
         assertFalse(SubtitleVoicePriority.mayDisplayVoice(true,true,false,false,
-                10_000,7_000,9_000));
-        assertTrue(SubtitleVoicePriority.mayDisplayVoice(true,true,false,false,
-                10_000,7_000,7_000));
+                10_000,0,9_000));
     }
-
-    @Test public void neverTranslateWhenPausedEditingOrOptedOut() {
-        assertFalse(SubtitleVoicePriority.mayDisplayVoice(false,true,false,false,
-                10_000,0,0));
+    @Test public void ocrWaitsForSpeechWarmupAndThenFillsGaps() {
+        assertFalse(SubtitleVoicePriority.mayScanOcr(true,false,false,false,
+                5_000,1_000,0));
+        assertTrue(SubtitleVoicePriority.mayScanOcr(true,false,false,false,
+                8_000,1_000,0));
+        assertFalse(SubtitleVoicePriority.mayScanOcr(true,false,false,false,
+                10_000,1_000,7_500));
+        assertTrue(SubtitleVoicePriority.mayScanOcr(true,false,false,false,
+                13_000,1_000,7_500));
+        assertTrue(SubtitleVoicePriority.mayScanOcr(true,true,false,false,
+                2_000,1_000,0));
+    }
+    @Test public void freshVoiceCaptionBeatsOcr() {
+        assertFalse(SubtitleVoicePriority.mayDisplayOcr(true,10_000,9_900));
+        assertTrue(SubtitleVoicePriority.mayDisplayOcr(true,16_000,9_900));
+        assertTrue(SubtitleVoicePriority.mayDisplayOcr(false,10_000,9_900));
+    }
+    @Test public void respectPausedOrEditingState() {
         assertFalse(SubtitleVoicePriority.mayDisplayVoice(true,true,true,false,
                 10_000,0,0));
         assertFalse(SubtitleVoicePriority.mayDisplayVoice(true,true,false,true,
                 10_000,0,0));
+        assertFalse(SubtitleVoicePriority.mayDisplayVoice(false,true,false,false,
+                10_000,0,0));
         assertFalse(SubtitleVoicePriority.mayDisplayVoice(true,false,false,false,
+                10_000,0,0));
+        assertFalse(SubtitleVoicePriority.mayScanOcr(true,false,true,false,
+                10_000,0,0));
+        assertFalse(SubtitleVoicePriority.mayScanOcr(false,false,false,true,
                 10_000,0,0));
     }
 }
