@@ -86,7 +86,8 @@ public final class SubtitleCaptureService extends Service {
     private TextView captionView;
     private FrameLayout editorRoot;
     private SubtitleRoiEditor roiEditor;
-    private TextView reopenEditorView;
+    private SubtitleBubbleController translationBubble;
+    private volatile boolean pausedByUser = false;
     private volatile Rect activeRoi;
     private volatile boolean calibrating = true;
     private volatile boolean manuallySelecting = false;
@@ -331,38 +332,37 @@ public final class SubtitleCaptureService extends Service {
         }
     }
 
+
+    /** Compatibility helpers: the old transient editor link is now a persistent ball. */
     private void hideReopenButton() {
-        if (reopenEditorView != null) {
-            try { windowManager.removeView(reopenEditorView); }
-            catch (IllegalArgumentException ignored) { }
-            reopenEditorView = null;
-        }
+        if (translationBubble != null) translationBubble.hide();
     }
 
-    /** A tiny, nonblocking launcher so the user can navigate to a video first. */
     private void showReopenButton() {
-        hideReopenButton();
-        reopenEditorView = new TextView(this);
-        reopenEditorView.setText("框選字幕");
-        reopenEditorView.setTextColor(Color.WHITE);
-        reopenEditorView.setTextSize(15f);
-        reopenEditorView.setPadding(unitDp(14), unitDp(11), unitDp(14), unitDp(11));
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.rgb(18, 102, 142));
-        bg.setCornerRadius(unitDp(26));
-        reopenEditorView.setBackground(bg);
-        WindowManager.LayoutParams p = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
-                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN |
-                        WindowManager.LayoutParams.FLAG_SECURE,
-                PixelFormat.TRANSLUCENT);
-        p.gravity = Gravity.RIGHT | Gravity.CENTER_VERTICAL;
-        p.x = unitDp(12);
-        reopenEditorView.setOnClickListener(v -> openSelectionEditor());
-        try { windowManager.addView(reopenEditorView, p); }
-        catch (Exception ignored) { reopenEditorView = null; }
+        if (!running) return;
+        if (translationBubble == null) {
+            translationBubble = new SubtitleBubbleController(
+                    this, windowManager, new SubtitleBubbleController.Actions() {
+                @Override public void onRecalibrate() { openSelectionEditor(); }
+                @Override public void onTogglePaused() { togglePausedTranslation(); }
+                @Override public void onStop() { stopSelf(); }
+            });
+        }
+        translationBubble.show();
+        translationBubble.updatePaused(pausedByUser);
+    }
+
+    private void togglePausedTranslation() {
+        pausedByUser = !pausedByUser;
+        if (pausedByUser) {
+            showCaption("翻譯已暫停");
+        } else {
+            lastSource = "";
+            previousCandidate = null;
+            stableSubtitleFrames = 0;
+            showCaption(modelReady ? "等待框內字幕…" : "正在準備翻譯模型…");
+        }
+        if (translationBubble != null) translationBubble.updatePaused(pausedByUser);
     }
 
     /** Editable overlay is never included in the recorded OCR screenshot. */
@@ -426,7 +426,8 @@ public final class SubtitleCaptureService extends Service {
                 activeRoi = region;
                 manuallySelecting = false;
                 closeSelectionEditor();
-                hideReopenButton();
+                pausedByUser = false;
+                showReopenButton();
                 lastSource = "";
                 previousCandidate = null;
                 stableSubtitleFrames = 0;
@@ -504,7 +505,8 @@ public final class SubtitleCaptureService extends Service {
         @Override public void run() {
             if (!running) return;
             try {
-                if (!calibrating && modelReady && ocrBusy.compareAndSet(false, true)) captureFrame();
+                if (!calibrating && !pausedByUser && modelReady &&
+                        ocrBusy.compareAndSet(false, true)) captureFrame();
                 adaptRotation();
             } catch (Exception ignored) {
                 ocrBusy.set(false);
@@ -667,7 +669,7 @@ public final class SubtitleCaptureService extends Service {
 
     private void translateRecognizedLines(Text result, int frameCropX, int frameCropY,
                                           float imageScale, boolean manualRoiActive) {
-        if (!running || !modelReady || translator == null) return;
+        if (!running || calibrating || pausedByUser || !modelReady || translator == null) return;
         List<SubtitleCandidatePolicy.Candidate> candidates = new ArrayList<>();
         List<SubtitleCandidatePolicy.Candidate> pageLines = new ArrayList<>();
         for (Text.TextBlock block : result.getTextBlocks()) {
@@ -793,7 +795,8 @@ public final class SubtitleCaptureService extends Service {
         lastSource = source;
         translator.translate(source)
                 .addOnSuccessListener(translated -> {
-                    if (!running || !source.equals(lastSource)) return;
+                    if (!running || pausedByUser || calibrating ||
+                            !source.equals(lastSource)) return;
                     lastTranslation = traditionalize(translated);
                     lastTranslationResult = lastTranslation;
                     // Do not blindly remove Latin characters: proper names
