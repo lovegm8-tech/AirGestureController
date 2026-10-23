@@ -10,8 +10,10 @@ public final class SubtitleVoicePriority {
     public static boolean mayDisplayVoice(boolean voiceEnabled, boolean modelReady,
                                           boolean editing, boolean paused,
                                           long nowMs, long lastOcrMs, long lastVoiceMs) {
-        if (!voiceEnabled || !modelReady || editing || paused) return false;
-        return lastVoiceMs <= 0 || nowMs - lastVoiceMs >= 1250L;
+        // The subtitle service owns the 750 ms display cadence and queues
+        // incremental hypotheses. Do not drop words merely because a caption
+        // was displayed recently.
+        return voiceEnabled && modelReady && !editing && !paused;
     }
 
     /** Only run expensive image recognition if audio is disabled, absent or stale. */
