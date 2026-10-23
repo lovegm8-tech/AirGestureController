@@ -286,7 +286,11 @@ public final class SubtitleCaptureService extends Service {
                                 android.view.View.MeasureSpec.AT_MOST));
                 int viewHeight = Math.max(dp(38), captionView.getMeasuredHeight());
                 int wantedX = original.centerX() - captionParams.width / 2;
-                int wantedY = original.top - viewHeight - dp(9);
+                int gap = dp(9);
+                int wantedY = original.top - viewHeight - gap;
+                // If the source caption is too close to the top edge, display
+                // beneath it rather than cover its English/Japanese/Korean text.
+                if (wantedY < 0) wantedY = original.bottom + gap;
                 captionParams.x = Math.max(0, Math.min(Math.max(0, width - captionParams.width), wantedX));
                 captionParams.y = Math.max(0, Math.min(Math.max(0, height - viewHeight), wantedY));
                 try { windowManager.updateViewLayout(captionView, captionParams); }
