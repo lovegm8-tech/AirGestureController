@@ -81,7 +81,8 @@ object SubtitleLocalAi {
 
     /** Only invoked by a user's explicit button click. */
     @JvmStatic fun download(context: Context): String {
-        if (modelInstalled(context)) return "AI 模型已存在，無須重複下載"
+        if (modelInstalled(context) && !permanentlyInvalid) return "AI 模型已存在，無須重複下載"
+        permanentlyInvalid = false
         val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
         val pref = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
         val oldId = pref.getLong(DOWNLOAD_ID, -1)
