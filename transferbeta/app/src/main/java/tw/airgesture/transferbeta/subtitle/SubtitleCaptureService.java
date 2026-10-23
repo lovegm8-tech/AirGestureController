@@ -95,10 +95,12 @@ public final class SubtitleCaptureService extends Service {
     private volatile long lastSubtitleObservedMs = 0L;
     private int captureCropY = 0;
     private int scanCounter = 0;
-    private static final float PORTRAIT_ZOOM = 1.6f;
+    private static final float PORTRAIT_ZOOM = 1.8f;
     public static volatile String lastRecognizedSource = "尚未辨識到原文";
     public static volatile String lastTranslationResult = "尚未翻譯";
     public static volatile String lastScanMode = "尚未開始掃描";
+    public static volatile String lastCandidateSummary = "尚無 OCR 候選字幕";
+    public static volatile String lastTranslationQuality = "尚無翻譯結果";
     private String sourceLanguage = "en";
 
     @Override public void onCreate() {
@@ -107,6 +109,8 @@ public final class SubtitleCaptureService extends Service {
         lastRecognizedSource = "尚未辨識到原文";
         lastTranslationResult = "尚未翻譯";
         lastScanMode = "初始化";
+        lastCandidateSummary = "尚無 OCR 候選字幕";
+        lastTranslationQuality = "尚無翻譯結果";
         workerThread = new HandlerThread("floating-subtitle-ocr");
         workerThread.start();
         worker = new Handler(workerThread.getLooper());
@@ -384,14 +388,15 @@ public final class SubtitleCaptureService extends Service {
             final boolean portraitZoom =
                     height > width * 1.25f
                     && mode == SubtitleRegionPolicy.FULL_SCREEN
-                    && (++scanCounter % 3 == 1);
-            // Full display is still scanned on the other 2/3 frames.
-            // On every third frame, magnify the upper portrait video player.
+                    && (++scanCounter % 2 == 1);
+            // Full display is still scanned on every alternate frame.
+            // The alternate pass magnifies ONLY the upper video area; the
+            // previous 47% crop included recommendation titles below the player.
             // This restores readability for 12px subtitles which are too small
             // for ML Kit in a 1080x2400 screenshot.
             if (portraitZoom) {
                 Bitmap videoRegion = Bitmap.createBitmap(
-                        screen, 0, 0, width, Math.max(1, Math.round(height * 0.47f)));
+                        screen, 0, 0, width, Math.max(1, Math.round(height * 0.375f)));
                 try {
                     enlarged = Bitmap.createScaledBitmap(videoRegion,
                             Math.max(1, Math.round(width * PORTRAIT_ZOOM)),
@@ -472,6 +477,23 @@ public final class SubtitleCaptureService extends Service {
         }
         java.util.List<SubtitleCandidatePolicy.Candidate> originals = new ArrayList<>(candidates);
         candidates.addAll(SubtitleCandidatePolicy.joinNearbyLines(originals, width));
+        // Diagnostics are kept only in memory; no screen frames or text are sent
+        // to our server. Show ranking and location to distinguish OCR selection
+        // errors from ML Kit translation problems in the field.
+        List<SubtitleCandidatePolicy.Candidate> ranking = new ArrayList<>(candidates);
+        ranking.sort((a, b) -> Double.compare(
+                SubtitleCandidatePolicy.score(b, width, height, previousCandidate, stableSubtitleFrames),
+                SubtitleCandidatePolicy.score(a, width, height, previousCandidate, stableSubtitleFrames)));
+        StringBuilder candidateSummary = new StringBuilder();
+        for (int idx = 0; idx < Math.min(5, ranking.size()); idx++) {
+            SubtitleCandidatePolicy.Candidate item = ranking.get(idx);
+            if (candidateSummary.length() > 0) candidateSummary.append("\\n");
+            candidateSummary.append(idx + 1).append(". [")
+                    .append(Math.round(item.centerY() * 100f / height)).append("%] ")
+                    .append(item.text.substring(0, Math.min(90, item.text.length())));
+        }
+        lastCandidateSummary = candidateSummary.length() == 0
+                ? "此影格沒有符合來源語言的候選文字" : candidateSummary.toString();
         SubtitleCandidatePolicy.Candidate chosen =
                 SubtitleCandidatePolicy.best(candidates, width, height, previousCandidate, stableSubtitleFrames);
         if (chosen == null) {
@@ -507,6 +529,18 @@ public final class SubtitleCaptureService extends Service {
                     if (!running || !source.equals(lastSource)) return;
                     lastTranslation = traditionalize(translated);
                     lastTranslationResult = lastTranslation;
+                    // Do not blindly remove Latin characters: proper names
+                    // such as Harry Potter and invented spell names are valid.
+                    // Report mixed-language output in diagnostics instead.
+                    int han = 0, latin = 0;
+                    for (int i = 0; i < lastTranslation.length(); i++) {
+                        char c = lastTranslation.charAt(i);
+                        if (c >= 0x4e00 && c <= 0x9fff) han++;
+                        else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) latin++;
+                    }
+                    lastTranslationQuality = latin > 6 && han > 0
+                            ? "含英文片段：可能是專有名詞或模型漏譯（請對照 OCR 原文）"
+                            : (han == 0 && latin > 0 ? "翻譯未輸出中文，請檢查原文辨識與語言" : "有輸出中文字");
                     showCaption(lastTranslation);
                     positionCaptionAbove(translatedCandidate);
                 })
