@@ -34,7 +34,8 @@ public final class SubtitleSelectionPolicy {
         }
         return middleCount >= 3
                 || (middleCount >= 2 && (middleEdgeCount >= 1 || lowerCount >= 1))
-                || (middleCount >= 1 && middleEdgeCount >= 1 && lowerCount >= 2);
+                || (middleCount >= 1 && lowerCount >= 2)
+                || (middleCount >= 1 && middleEdgeCount >= 1 && lowerCount >= 1);
     }
 
     /**
