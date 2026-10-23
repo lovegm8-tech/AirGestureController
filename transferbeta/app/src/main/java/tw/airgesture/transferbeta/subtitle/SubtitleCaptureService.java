@@ -93,6 +93,8 @@ public final class SubtitleCaptureService extends Service {
     private TextView captionFirstLine;
     private TextView captionSecondLine;
     private final SubtitleTwoLineBuffer twoLineCaptions = new SubtitleTwoLineBuffer();
+    public static volatile String lastAiStatus = "AI 模型尚未載入";
+    private volatile boolean aiRefineEnabled = false;
     private FrameLayout editorRoot;
     private ScrollView diagnosticView;
     private volatile Bitmap latestOcrCropPreview;
@@ -237,6 +239,10 @@ public final class SubtitleCaptureService extends Service {
                 foregroundTypes |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
             startForeground(NOTIFICATION_ID, makeNotification(), foregroundTypes);
             running = true;
+            aiRefineEnabled = SubtitleLocalAi.enabled(this) &&
+                    SubtitleLocalAi.modelInstalled(this);
+            lastAiStatus = aiRefineEnabled ? "本地 Qwen 已安裝，等待完整台詞進行潤飾" :
+                    "使用 ML Kit 快速翻譯（本地 AI 尚未安裝／停用）";
             // Voice-first starts immediately; picking an OCR rectangle is
             // optional and must never gate AudioPlaybackCapture callbacks.
             calibrating = false;
@@ -696,6 +702,23 @@ public final class SubtitleCaptureService extends Service {
                     lastVoiceStatus = sourceFinal ? "完整句修正已更新" : "語音中文字幕已更新";
                     publishVoiceCaption(sourceId, zh);
                     positionVoiceCaption();
+                    if (sourceFinal && aiRefineEnabled) {
+                        // ML Kit must be shown FIRST. Background LiteRT-LM
+                        // is a best-effort refinement of THIS SAME row.
+                        final String previous = twoLineCaptions.count() >= 2
+                                ? twoLineCaptions.first() : "";
+                        final String sourceSentence = source;
+                        SubtitleLocalAi.refine(getApplicationContext(), sourceLanguage,
+                                sourceSentence, zh, previous, improved -> main.post(() -> {
+                                    if (!running || pausedByUser || calibrating ||
+                                            !aiRefineEnabled) return;
+                                    if (twoLineCaptions.putVoice(sourceId, improved)) {
+                                        renderTwoLineCaptions();
+                                        lastTranslationResult = improved;
+                                        lastAiStatus = "Qwen 已修正第 " + sourceId + " 句";
+                                    }
+                                }));
+                    }
                 })
                 .addOnFailureListener(error -> {
                     if (source.equals(lastSpokenSource)) lastSpokenSource = "";
@@ -784,7 +807,9 @@ public final class SubtitleCaptureService extends Service {
                     "\n模型：" + lastModelStatus +
                     "\n選取：" + lastSelectionStatus +
                     "\n語音：" + lastVoiceStatus +
-                    "\n翻譯延遲診斷：" + lastVoiceLatencyStatus);
+                    "\n翻譯延遲診斷：" + lastVoiceLatencyStatus +
+                    "\n本地 Qwen：" + lastAiStatus +
+                    "\n模型狀態：" + SubtitleLocalAi.status(this));
             contents.addView(details);
 
             Button dismiss = new Button(this);
@@ -1372,6 +1397,8 @@ public final class SubtitleCaptureService extends Service {
             playbackSpeech.stop();
             playbackSpeech = null;
         }
+        // Do not run a large model once subtitles have been stopped.
+        SubtitleLocalAi.release();
         if (virtualDisplay != null) { virtualDisplay.release(); virtualDisplay = null; }
         if (imageReader != null) { imageReader.close(); imageReader = null; }
         if (mediaProjection != null) {
