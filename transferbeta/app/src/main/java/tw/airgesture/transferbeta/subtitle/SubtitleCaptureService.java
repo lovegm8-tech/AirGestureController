@@ -95,6 +95,8 @@ public final class SubtitleCaptureService extends Service {
     private volatile long lastSubtitleObservedMs = 0L;
     private int captureCropY = 0;
     private int scanCounter = 0;
+    private long embeddedPageObservedMs = -30000L;
+    public static volatile String lastSelectionStatus = "尚未選取字幕";
     private static final float PORTRAIT_ZOOM = 1.8f;
     public static volatile String lastRecognizedSource = "尚未辨識到原文";
     public static volatile String lastTranslationResult = "尚未翻譯";
@@ -111,6 +113,7 @@ public final class SubtitleCaptureService extends Service {
         lastScanMode = "初始化";
         lastCandidateSummary = "尚無 OCR 候選字幕";
         lastTranslationQuality = "尚無翻譯結果";
+        lastSelectionStatus = "等待 OCR 擷取畫面";
         workerThread = new HandlerThread("floating-subtitle-ocr");
         workerThread.start();
         worker = new Handler(workerThread.getLooper());
@@ -388,31 +391,35 @@ public final class SubtitleCaptureService extends Service {
             final boolean portraitZoom =
                     height > width * 1.25f
                     && mode == SubtitleRegionPolicy.FULL_SCREEN
-                    && (++scanCounter % 2 == 1);
-            // Full display is still scanned on every alternate frame.
-            // The alternate pass magnifies ONLY the upper video area; the
-            // previous 47% crop included recommendation titles below the player.
-            // This restores readability for 12px subtitles which are too small
-            // for ML Kit in a 1080x2400 screenshot.
+                    && (++scanCounter % 3 != 0);
+            final boolean subtitleBand = portraitZoom && scanCounter % 3 == 1;
+            // Always scan the full display periodically. The other two passes
+            // magnify the embedded video: one whole player and one focused
+            // bottom subtitle band. The band deliberately excludes the
+            // recommended videos/search UI starting below ~37.5%.
             if (portraitZoom) {
+                int videoTop = subtitleBand ? Math.round(height * 0.21f) : 0;
+                int videoBottom = Math.max(videoTop + 1, Math.round(height * 0.375f));
                 Bitmap videoRegion = Bitmap.createBitmap(
-                        screen, 0, 0, width, Math.max(1, Math.round(height * 0.375f)));
+                        screen, 0, videoTop, width, videoBottom - videoTop);
+                float zoomFactor = subtitleBand ? 2.35f : PORTRAIT_ZOOM;
                 try {
                     enlarged = Bitmap.createScaledBitmap(videoRegion,
-                            Math.max(1, Math.round(width * PORTRAIT_ZOOM)),
-                            Math.max(1, Math.round(videoRegion.getHeight() * PORTRAIT_ZOOM)),
+                            Math.max(1, Math.round(width * zoomFactor)),
+                            Math.max(1, Math.round(videoRegion.getHeight() * zoomFactor)),
                             true);
                 } finally { videoRegion.recycle(); }
                 crop.recycle();
                 crop = enlarged;
                 enlarged = null;
-                rawCropY = 0;
-                imageScale = PORTRAIT_ZOOM;
+                rawCropY = videoTop;
+                imageScale = zoomFactor;
             }
             final int frameCropY = rawCropY;
             final float frameScale = imageScale;
-            lastScanMode = portraitZoom ? "直向播放器文字放大掃描" :
-                    (height > width ? "直向全螢幕" : "橫向全螢幕");
+            lastScanMode = subtitleBand ? "直向影片字幕帶放大 2.35 倍" :
+                    (portraitZoom ? "直向播放器放大 1.8 倍" :
+                    (height > width ? "直向全螢幕" : "橫向全螢幕"));
             Bitmap owned = crop;
             crop = null;
             recognizer.process(InputImage.fromBitmap(owned, 0))
@@ -437,13 +444,21 @@ public final class SubtitleCaptureService extends Service {
     private void translateRecognizedLines(Text result, int frameCropY, float imageScale) {
         if (!running || !modelReady || translator == null) return;
         List<SubtitleCandidatePolicy.Candidate> candidates = new ArrayList<>();
+        List<SubtitleCandidatePolicy.Candidate> pageLines = new ArrayList<>();
         for (Text.TextBlock block : result.getTextBlocks()) {
             List<Text.Line> valid = new ArrayList<>();
             for (Text.Line line : block.getLines()) {
                 Rect rect = line.getBoundingBox();
                 String raw = line.getText().trim();
-                if (rect == null || !SubtitleRegionPolicy.isPossibleSubtitle(raw, sourceLanguage))
-                    continue;
+                if (rect == null || raw.length() < 2) continue;
+                // Detect text-based page chrome using unfiltered OCR results,
+                // including labels in the wrong language.
+                pageLines.add(new SubtitleCandidatePolicy.Candidate(raw,
+                        Math.round(rect.left / imageScale),
+                        Math.round(rect.top / imageScale) + frameCropY,
+                        Math.round(rect.right / imageScale),
+                        Math.round(rect.bottom / imageScale) + frameCropY));
+                if (!SubtitleRegionPolicy.isPossibleSubtitle(raw, sourceLanguage)) continue;
                 valid.add(line);
                 candidates.add(new SubtitleCandidatePolicy.Candidate(raw,
                         Math.round(rect.left / imageScale),
@@ -494,8 +509,24 @@ public final class SubtitleCaptureService extends Service {
         }
         lastCandidateSummary = candidateSummary.length() == 0
                 ? "此影格沒有符合來源語言的候選文字" : candidateSummary.toString();
+        boolean playerOnlyPass = height > width * 1.25f && imageScale > 1f;
+        boolean portraitFullScan = height > width * 1.25f && !playerOnlyPass;
+        if (portraitFullScan &&
+                SubtitleSelectionPolicy.isEmbeddedPlayerPage(pageLines, width, height)) {
+            embeddedPageObservedMs = SystemClock.elapsedRealtime();
+        }
+        boolean embeddedPage = portraitFullScan
+                && SystemClock.elapsedRealtime() - embeddedPageObservedMs < 12000L;
         SubtitleCandidatePolicy.Candidate chosen =
-                SubtitleCandidatePolicy.best(candidates, width, height, previousCandidate, stableSubtitleFrames);
+                SubtitleSelectionPolicy.select(candidates, width, height,
+                        previousCandidate, stableSubtitleFrames,
+                        embeddedPage, playerOnlyPass);
+        lastSelectionStatus = chosen == null
+                ? (embeddedPage || playerOnlyPass
+                    ? "無可信影片字幕：已跳過搜尋標題與推薦內容"
+                    : "本影格未找到符合字幕條件的文字")
+                : (embeddedPage ? "已判斷為上方播放器字幕" :
+                    (playerOnlyPass ? "已辨識上方影片字幕" : "已選取字幕候選"));
         if (chosen == null) {
             if (lastSubtitleObservedMs > 0L &&
                     SystemClock.elapsedRealtime() - lastSubtitleObservedMs > 4300L) {
@@ -540,7 +571,13 @@ public final class SubtitleCaptureService extends Service {
                     }
                     lastTranslationQuality = latin > 6 && han > 0
                             ? "含英文片段：可能是專有名詞或模型漏譯（請對照 OCR 原文）"
-                            : (han == 0 && latin > 0 ? "翻譯未輸出中文，請檢查原文辨識與語言" : "有輸出中文字");
+                            : (han == 0 && latin > 0 ? "翻譯未輸出中文，已停止顯示錯誤字幕" : "有輸出中文字");
+                    // Prevent a failed ML Kit translation from showing the raw
+                    // English search keyword as though it were Chinese.
+                    if ("en".equals(sourceLanguage) && han == 0 && latin >= 5) {
+                        showCaption("等待正確的中文字幕…");
+                        return;
+                    }
                     showCaption(lastTranslation);
                     positionCaptionAbove(translatedCandidate);
                 })
