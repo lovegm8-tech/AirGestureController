@@ -644,6 +644,8 @@ class TransferActivity : ComponentActivity() {
                     if (::voiceFallbackSwitch.isInitialized) {
                         voiceFallbackSwitch.isEnabled = (lang != "ko")
                         if (lang == "ko") {
+                            getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                                .edit().putBoolean("enable_voice_fallback", false).apply()
                             updatingModeControls = true
                             voiceFallbackSwitch.isChecked = false
                             updatingModeControls = false
