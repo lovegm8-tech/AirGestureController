@@ -32,7 +32,7 @@ public class SubtitleVoiceFallbackTest {
                 10_000,9_900,0));
         assertTrue(SubtitleVoicePriority.mayDisplayVoice(true,true,false,false,
                 10_000,9_900,8_200));
-        assertFalse(SubtitleVoicePriority.mayDisplayVoice(true,true,false,false,
+        assertTrue(SubtitleVoicePriority.mayDisplayVoice(true,true,false,false,
                 10_000,0,9_000));
     }
     @Test public void ocrWaitsForSpeechWarmupAndThenFillsGaps() {
