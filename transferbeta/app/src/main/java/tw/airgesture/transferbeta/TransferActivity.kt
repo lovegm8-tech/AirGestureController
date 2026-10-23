@@ -32,6 +32,7 @@ import android.view.Gravity
 import android.widget.Button
 import android.widget.Switch
 import android.widget.Spinner
+import android.widget.SeekBar
 import android.widget.ArrayAdapter
 import android.widget.AdapterView
 import android.media.projection.MediaProjectionManager
@@ -83,6 +84,8 @@ class TransferActivity : ComponentActivity() {
     private lateinit var transferSwitch: Switch
     private lateinit var subtitleSwitch: Switch
     private lateinit var subtitleLanguage: Spinner
+    private lateinit var subtitleArea: Spinner
+    private lateinit var subtitleCustomAreaControls: LinearLayout
     private var subtitlePendingPermission = false
     private var subtitleNeedsOverlay = false
     private lateinit var modeDescription: TextView
@@ -411,6 +414,11 @@ class TransferActivity : ComponentActivity() {
             if (::subtitleSwitch.isInitialized) {
                 subtitleSwitch.isChecked = SubtitleCaptureService.running || subtitlePendingPermission
                 subtitleLanguage.isEnabled = !SubtitleCaptureService.running && !subtitlePendingPermission
+                if (::subtitleArea.isInitialized) {
+                    subtitleArea.isEnabled = !SubtitleCaptureService.running && !subtitlePendingPermission
+                    subtitleCustomAreaControls.alpha =
+                        if (subtitleArea.isEnabled) 1f else 0.55f
+                }
             }
             updatingModeControls = false
             modeDescription.text = modeLabel() +
@@ -617,6 +625,66 @@ class TransferActivity : ComponentActivity() {
             }
         }
         modePanel.addView(subtitleLanguage)
+        modePanel.addView(text("字幕辨識位置（變更後關閉再重新啟動翻譯）", 13f))
+        subtitleCustomAreaControls = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        val areaPreferences = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+        val topAreaText = text("自訂起點", 12f)
+        val bottomAreaText = text("自訂終點", 12f)
+        fun areaSeekBar(preference: String, maxProgress: Int,
+                        defaultPercent: Int, label: TextView,
+                        prefix: String): SeekBar =
+            SeekBar(this).apply {
+                max = maxProgress
+                progress = areaPreferences.getInt(preference, defaultPercent).coerceIn(0, maxProgress)
+                label.text = "$prefix：${progress}% 螢幕高度"
+                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
+                        if (!fromUser) return
+                        label.text = "$prefix：${value}% 螢幕高度"
+                        areaPreferences.edit().putInt(preference, value).apply()
+                    }
+                    override fun onStartTrackingTouch(bar: SeekBar?) = Unit
+                    override fun onStopTrackingTouch(bar: SeekBar?) = Unit
+                })
+            }
+        subtitleCustomAreaControls.addView(topAreaText)
+        subtitleCustomAreaControls.addView(areaSeekBar(
+            "subtitle_area_top_pct", 85, 20, topAreaText, "上方開始"))
+        subtitleCustomAreaControls.addView(bottomAreaText)
+        subtitleCustomAreaControls.addView(areaSeekBar(
+            "subtitle_area_bottom_pct", 100, 85, bottomAreaText, "下方結束"))
+        subtitleArea = Spinner(this).apply {
+            adapter = ArrayAdapter(this@TransferActivity,
+                android.R.layout.simple_spinner_dropdown_item,
+                listOf(
+                    "智慧（一般影片直式上方／橫式下方）",
+                    "一般影片 · 上半部",
+                    "短影音 · 畫面中央偏下",
+                    "畫面下半部",
+                    "整個螢幕（可能誤抓標題）",
+                    "自訂位置（下方兩個滑桿）"
+                ))
+            setSelection(areaPreferences.getInt("subtitle_area_mode", 0).coerceIn(0, 5))
+            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+                override fun onItemSelected(parent: AdapterView<*>?, view: View?,
+                    position: Int, id: Long) {
+                    if (SubtitleCaptureService.running || subtitlePendingPermission) return
+                    areaPreferences.edit().putInt("subtitle_area_mode", position).apply()
+                    subtitleCustomAreaControls.visibility =
+                        if (position == 5) View.VISIBLE else View.GONE
+                }
+            }
+        }
+        modePanel.addView(subtitleArea)
+        subtitleCustomAreaControls.visibility =
+            if (areaPreferences.getInt("subtitle_area_mode", 0) == 5) View.VISIBLE
+            else View.GONE
+        modePanel.addView(subtitleCustomAreaControls)
+        modePanel.addView(text(
+            "測試建議：YouTube 橫向全螢幕選「智慧」；如果翻譯抓到標題或其他文字，改「自訂位置」縮小字幕範圍。翻譯框可拖到不遮住字幕的地方。", 12f))
         modeDescription = text(modeLabel(), 14f)
         modePanel.addView(modeDescription)
         root.addView(modePanel)
