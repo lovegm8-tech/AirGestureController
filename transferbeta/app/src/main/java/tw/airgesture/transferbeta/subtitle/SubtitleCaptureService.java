@@ -231,6 +231,8 @@ public final class SubtitleCaptureService extends Service {
             voiceUnavailable = false;
             voiceStartedAtMs = SystemClock.elapsedRealtime();
             lastVoiceUtteranceMs = 0L;
+            lastCropStatus = "自動尋找影片字幕；也可點譯小球手動框選";
+            lastSelectionStatus = "優先讀取影片聲音，無聲音時才使用 OCR";
             createCaption();
             initializeRecognizer();
             MediaProjectionManager manager =
@@ -762,10 +764,12 @@ public final class SubtitleCaptureService extends Service {
                 // Run OCR even when the translation model is not ready:
                 // diagnosis should distinguish recognition from model download.
                 long now = SystemClock.elapsedRealtime();
-                if (recognizer != null && SubtitleVoicePriority.mayScanOcr(
+                boolean fallbackOcr = recognizer != null && SubtitleVoicePriority.mayScanOcr(
                         voiceFallbackEnabled, voiceUnavailable, calibrating,
-                        pausedByUser, now, voiceStartedAtMs, lastVoiceUtteranceMs) &&
-                        ocrBusy.compareAndSet(false, true)) captureFrame();
+                        pausedByUser, now, voiceStartedAtMs, lastVoiceUtteranceMs);
+                if (fallbackOcr && voiceFallbackEnabled && !voiceUnavailable)
+                    lastSelectionStatus = "語音暫無台詞，正在以 OCR 補充";
+                if (fallbackOcr && ocrBusy.compareAndSet(false, true)) captureFrame();
                 adaptRotation();
             } catch (Exception ignored) {
                 ocrBusy.set(false);
@@ -796,6 +800,7 @@ public final class SubtitleCaptureService extends Service {
             // use automatic OCR until the user asks to recalibrate.
             activeRoi = null;
             calibrating = false;
+            lastCropStatus = "畫面旋轉，已切回自動字幕搜尋；可再框選";
             lastSource = "";
             lastTranslation = "";
             previousCandidate = null;
