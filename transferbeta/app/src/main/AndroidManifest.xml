@@ -4,8 +4,11 @@
     <uses-permission android:name="android.permission.NFC"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"/>
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
@@ -37,6 +40,9 @@
         android:allowBackup="false"
         android:usesCleartextTraffic="false"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <!-- LiteRT-LM CPU by default; optional system GPU native dependencies. -->
+        <uses-native-library android:name="libvndksupport.so" android:required="false"/>
+        <uses-native-library android:name="libOpenCL.so" android:required="false"/>
         <activity
             android:name=".TransferActivity"
             android:exported="true"
@@ -97,6 +103,12 @@
                 <data android:mimeType="*/*"/>
             </intent-filter>
         </activity>
+        <!-- Screen-capture-based OCR runs independently of NFC, Nearby and hand gestures. -->
+        <service
+            android:name=".subtitle.SubtitleCaptureService"
+            android:exported="false"
+            android:stopWithTask="false"
+            android:foregroundServiceType="mediaProjection|microphone" />
         <service
             android:name=".GlobalGestureService"
             android:exported="false"
