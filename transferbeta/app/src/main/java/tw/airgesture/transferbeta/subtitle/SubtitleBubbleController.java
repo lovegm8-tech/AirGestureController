@@ -20,6 +20,7 @@ import android.widget.TextView;
 public final class SubtitleBubbleController {
     public interface Actions {
         void onRecalibrate();
+        void onShowDiagnostics();
         void onTogglePaused();
         void onStop();
     }
@@ -172,6 +173,7 @@ public final class SubtitleBubbleController {
         menu.setBackground(background(Color.argb(244, 22, 32, 46), 16));
         menu.setElevation(dp(9));
         menu.addView(item("框選字幕位置", actions::onRecalibrate));
+        menu.addView(item("檢查字幕畫面", actions::onShowDiagnostics));
         pauseAction = item(paused ? "▶ 恢復翻譯" : "Ⅱ 暫停翻譯", actions::onTogglePaused);
         menu.addView(pauseAction);
         menu.addView(item("停止懸浮翻譯", actions::onStop));
@@ -189,7 +191,7 @@ public final class SubtitleBubbleController {
         if (menuParams == null || ballParams == null) return;
         DisplayMetrics size = metrics();
         int menuWidth = dp(190);
-        int menuHeight = dp(158);
+        int menuHeight = dp(214);
         int gap = dp(7);
         int proposedX = ballParams.x - menuWidth - gap;
         if (proposedX < 0) proposedX = ballParams.x + ballSize + gap;
