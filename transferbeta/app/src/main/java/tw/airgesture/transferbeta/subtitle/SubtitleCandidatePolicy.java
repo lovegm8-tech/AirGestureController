@@ -23,19 +23,19 @@ public final class SubtitleCandidatePolicy {
     }
 
     public static Candidate best(List<Candidate> candidates, int screenWidth,
-                                 int screenHeight, Candidate previous) {
+                                 int screenHeight, Candidate previous, int stableFrames) {
         if (candidates == null || candidates.isEmpty() || screenWidth < 1 || screenHeight < 1)
             return null;
         Candidate selected = null;
         double bestScore = Double.NEGATIVE_INFINITY;
         for (Candidate candidate : candidates) {
-            double score = score(candidate, screenWidth, screenHeight, previous);
+            double score = score(candidate, screenWidth, screenHeight, previous, stableFrames);
             if (score > bestScore) { bestScore = score; selected = candidate; }
         }
         return selected;
     }
 
-    public static double score(Candidate c, int width, int height, Candidate previous) {
+    public static double score(Candidate c, int width, int height, Candidate previous, int stableFrames) {
         if (c == null || c.text.length() < 3 || c.text.length() > 280) {
             return Double.NEGATIVE_INFINITY;
         }
@@ -64,6 +64,11 @@ public final class SubtitleCandidatePolicy {
             else if (distance < 0.24) score += 10.0;
             // Prefer updates to currently tracked dialogue over static labels.
             if (distance < 0.20 && !c.text.equals(previous.text)) score += 10.0;
+            // Static headings/subscriptions are often mistaken for dialogue.
+            // Once one OCR string stays unchanged for several frames, compare
+            // other dynamic candidates again rather than locking on the title.
+            if (distance < 0.13 && c.text.equals(previous.text) && stableFrames >= 3)
+                score -= Math.min(44.0, 15.0 + stableFrames * 4.5);
         }
         return score;
     }
