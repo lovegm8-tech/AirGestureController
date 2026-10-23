@@ -28,8 +28,8 @@ import java.util.zip.ZipInputStream;
 
 /**
  * Explicit opt-in: captures only permitted MEDIA/GAME playback from other apps,
- * NEVER the microphone, then runs offline English Vosk recognition.
- * The 40 MB Apache-2.0 speech model downloads once from its public publisher
+ * NEVER the microphone, then runs offline English/Japanese Vosk recognition.
+ * The English ~40 MB or Japanese ~48 MB Apache-2.0 speech model downloads once from its publisher
  * into the app's private files and is never uploaded.
  */
 public final class SubtitlePlaybackSpeech {
@@ -38,9 +38,11 @@ public final class SubtitlePlaybackSpeech {
         void onUtterance(String english);
     }
 
-    private static final String MODEL_URL =
-            "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip";
-    private static final String MODEL_FOLDER = "vosk-model-small-en-us-0.15";
+    private static final String ENGLISH_MODEL = "vosk-model-small-en-us-0.15";
+    private static final String JAPANESE_MODEL = "vosk-model-small-ja-0.22";
+    private static final String MODEL_HOST = "https://alphacephei.com/vosk/models/";
+    private final String modelFolder;
+    private final String language;
     private static final int SAMPLE_RATE = 16000;
     private final Context context;
     private final MediaProjection projection;
@@ -49,10 +51,15 @@ public final class SubtitlePlaybackSpeech {
     private ExecutorService executor;
     private volatile AudioRecord capture;
 
-    public SubtitlePlaybackSpeech(Context context, MediaProjection projection, Callback callback) {
+    public SubtitlePlaybackSpeech(Context context, MediaProjection projection,
+                                  String requestedLanguage, Callback callback) {
         this.context = context.getApplicationContext();
         this.projection = projection;
         this.callback = callback;
+        if (!"en".equals(requestedLanguage) && !"ja".equals(requestedLanguage))
+            throw new IllegalArgumentException("Unsupported speech source language");
+        this.language = requestedLanguage;
+        this.modelFolder = "ja".equals(language) ? JAPANESE_MODEL : ENGLISH_MODEL;
     }
 
     public void start() {
@@ -82,16 +89,19 @@ public final class SubtitlePlaybackSpeech {
     }
 
     private File prepareModel() throws Exception {
-        File dir = new File(context.getFilesDir(), MODEL_FOLDER);
+        File dir = new File(context.getFilesDir(), modelFolder);
         File ready = new File(dir, ".ready");
         if (ready.isFile() && new File(dir, "am").isDirectory()
                 && new File(dir, "conf").isDirectory()) return dir;
         if (!alive.get()) throw new InterruptedException("cancelled");
-        callback.onStatus("第一次啟用：下載英文離線語音模型約 40 MB");
-        File download = new File(context.getCacheDir(), "vosk-en-download.partial");
+        callback.onStatus("第一次啟用：下載" +
+                ("ja".equals(language) ? "日文（約48 MB）" : "英文（約40 MB）") +
+                "離線語音模型");
+        File download = new File(context.getCacheDir(),
+                "vosk-" + language + "-download.partial");
         HttpURLConnection conn = null;
         try {
-            conn = (HttpURLConnection) new URL(MODEL_URL).openConnection();
+            conn = (HttpURLConnection) new URL(MODEL_HOST + modelFolder + ".zip").openConnection();
             conn.setConnectTimeout(20000);
             conn.setReadTimeout(60000);
             conn.setInstanceFollowRedirects(true);
@@ -113,7 +123,7 @@ public final class SubtitlePlaybackSpeech {
             if (!alive.get()) throw new InterruptedException("cancelled");
             if (bytes < 10_000_000) throw new java.io.IOException("model archive incomplete");
             callback.onStatus("正在安裝英文離線語音模型");
-            File tmpDir = new File(context.getFilesDir(), MODEL_FOLDER + "-installing");
+            File tmpDir = new File(context.getFilesDir(), modelFolder + "-installing");
             deleteRecursive(tmpDir);
             if (!tmpDir.mkdirs()) throw new java.io.IOException("cannot create model directory");
             int count = 0;
@@ -124,7 +134,7 @@ public final class SubtitlePlaybackSpeech {
                 ZipEntry entry;
                 while (alive.get() && (entry = zip.getNextEntry()) != null) {
                     String name = entry.getName().replace('\\', '/');
-                    String prefix = MODEL_FOLDER + "/";
+                    String prefix = modelFolder + "/";
                     if (!name.startsWith(prefix)) throw new java.io.IOException("unknown model layout");
                     String relative = name.substring(prefix.length());
                     if (relative.isEmpty()) continue;
@@ -184,7 +194,7 @@ public final class SubtitlePlaybackSpeech {
         try {
             File modelDir = prepareModel();
             if (!alive.get()) return;
-            callback.onStatus("英文語音模型載入中");
+            callback.onStatus(("ja".equals(language) ? "日文" : "英文") + "語音模型載入中");
             try (Model model = new Model(modelDir.getAbsolutePath());
                  Recognizer recognizer = new Recognizer(model, SAMPLE_RATE)) {
                 AudioPlaybackCaptureConfiguration config =
@@ -208,7 +218,8 @@ public final class SubtitlePlaybackSpeech {
                 record.startRecording();
                 if (record.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING)
                     throw new IllegalStateException("audio capture not started");
-                callback.onStatus("英文語音補位已啟動（只聽允許擷取的播放聲音）");
+                callback.onStatus(("ja".equals(language) ? "日文" : "英文") +
+                        "語音補位已啟動（只聽允許擷取的播放聲音）");
                 byte[] pcm = new byte[3200]; // 100 ms of 16 kHz mono PCM 16-bit
                 long lastPartialAt = 0;
                 String lastCandidate = "";
@@ -226,7 +237,8 @@ public final class SubtitlePlaybackSpeech {
                     }
                     if (recognizer.acceptWaveForm(pcm, n)) {
                         String sentence = recognizeText(recognizer.getResult(), "text");
-                        if (sentence.length() >= 7 && !sentence.equalsIgnoreCase(lastCandidate)) {
+                        if (sentence.length() >= ("ja".equals(language) ? 3 : 7)
+                                && !sentence.equalsIgnoreCase(lastCandidate)) {
                             lastCandidate = sentence;
                             callback.onUtterance(sentence);
                         }
@@ -234,7 +246,8 @@ public final class SubtitlePlaybackSpeech {
                         long now = android.os.SystemClock.elapsedRealtime();
                         if (now - lastPartialAt >= 2900) {
                             String partial = recognizeText(recognizer.getPartialResult(), "partial");
-                            if (partial.length() >= 19 && !partial.equalsIgnoreCase(lastCandidate)) {
+                            if (partial.length() >= ("ja".equals(language) ? 7 : 19)
+                                    && !partial.equalsIgnoreCase(lastCandidate)) {
                                 lastCandidate = partial;
                                 callback.onUtterance(partial);
                             }
