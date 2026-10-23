@@ -31,6 +31,12 @@ import android.provider.OpenableColumns
 import android.view.Gravity
 import android.widget.Button
 import android.widget.Switch
+import android.widget.Spinner
+import android.widget.SeekBar
+import android.widget.ArrayAdapter
+import android.widget.AdapterView
+import android.media.projection.MediaProjectionManager
+import tw.airgesture.transferbeta.subtitle.SubtitleCaptureService
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import tw.airgesture.transferbeta.core.FloatingSettings
@@ -76,6 +82,11 @@ class TransferActivity : ComponentActivity() {
     private lateinit var primaryAction: Button
     private lateinit var gestureSwitch: Switch
     private lateinit var transferSwitch: Switch
+    private lateinit var subtitleSwitch: Switch
+    private lateinit var subtitleLanguage: Spinner
+    private lateinit var voiceFallbackSwitch: Switch
+    private var subtitlePendingPermission = false
+    private var subtitleNeedsOverlay = false
     private lateinit var modeDescription: TextView
     private var updatingModeControls = false
     private lateinit var advanced: LinearLayout
@@ -87,9 +98,7 @@ class TransferActivity : ComponentActivity() {
     private lateinit var overlayStep: Button
     private lateinit var notificationStep: Button
     private var advancedOpen = false
-    private var normalLauncherEntry = false
     private var homePromptVisible = false
-    private var queuedAutoHome = false
     private val homePrefs by lazy { getSharedPreferences("airgrab_home", MODE_PRIVATE) }
     private lateinit var chosen: TextView
     private lateinit var hand: TextView
@@ -126,6 +135,53 @@ class TransferActivity : ComponentActivity() {
         if (!granted) flash("通知權限未開；接收端背景收到網址時，可能無法顯示開啟連結的通知")
     }
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        refreshHome()
+    }
+    private var audioPermissionRequestedForSubtitleStart = false
+    private val voiceAudioPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val startingSubtitle = audioPermissionRequestedForSubtitleStart
+        audioPermissionRequestedForSubtitleStart = false
+        val selectedLanguage = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+            .getString("source_language", "en")
+        val allowed = granted && (selectedLanguage == "en" || selectedLanguage == "ja")
+        getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+            .edit().putBoolean("enable_voice_fallback", allowed).apply()
+        if (::voiceFallbackSwitch.isInitialized) {
+            updatingModeControls = true
+            voiceFallbackSwitch.isChecked = allowed
+            updatingModeControls = false
+        }
+        if (startingSubtitle) {
+            if (!allowed) flash("沒有音訊授權，本次改用畫面 OCR 翻譯")
+            beginSubtitleCapture()
+        } else {
+            flash(if (allowed) "已授權英文／日文播放音訊辨識"
+                  else "未取得音訊權限，仍可使用畫面 OCR")
+        }
+    }
+    private val subtitleCaptureLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        subtitlePendingPermission = false
+        if (result.resultCode == RESULT_OK && result.data != null) {
+            try {
+                val command = Intent(this, SubtitleCaptureService::class.java)
+                    .setAction(SubtitleCaptureService.ACTION_START)
+                    .putExtra(SubtitleCaptureService.EXTRA_RESULT, result.resultCode)
+                    .putExtra(SubtitleCaptureService.EXTRA_DATA, result.data)
+                ContextCompat.startForegroundService(this, command)
+                // Do NOT auto-minimize after permission approval.
+                // The user will tap "返回桌面 · 開始使用" explicitly.
+                flash("翻譯已啟用。按「返回桌面 · 開始使用」看影片；語音會自動辨識，OCR 可用「譯」小球框選")
+                main.postDelayed({ refreshHome() }, 350)
+            } catch (exception: Exception) {
+                flash("無法啟動 OCR 懸浮翻譯：" + exception.javaClass.simpleName)
+            }
+        } else {
+            flash("未允許擷取畫面，懸浮翻譯維持關閉")
+        }
         refreshHome()
     }
 
@@ -165,11 +221,11 @@ class TransferActivity : ComponentActivity() {
         manager.onStatus = { text ->
             show(text)
             refreshHome()
-            maybeReturnHome()
+
         }
         manager.onConnectionState = { _ ->
             refreshHome()
-            maybeReturnHome()
+
         }
         manager.onPairing = { code ->
             if (shownPairCode != code && !isFinishing) {
@@ -184,7 +240,7 @@ class TransferActivity : ComponentActivity() {
                     shownPairCode = null
                     homePromptVisible = false
                     refreshHome()
-                    maybeReturnHome()
+
                 }
                 .setNegativeButton("拒絕") { _, _ ->
                     manager.acceptPairing(false)
@@ -198,35 +254,50 @@ class TransferActivity : ComponentActivity() {
         }
     }
 
-    private fun maybeReturnHome() {
-        if (queuedAutoHome) return
-        val mayClose = tw.airgesture.transferbeta.core.HomeScreenPolicy.shouldAutoBackground(
-            homePrefs.getBoolean("auto_run", false),
-            normalLauncherEntry,
-            GlobalGestureService.isActive,
-            GlobalGestureService.transfer?.isConnected == true,
-            homePromptVisible,
-            advancedOpen
-        )
-        // Camera-free transfer is allowed to background without overlay
-        // permission; share intents still reach ShareReceiverActivity.
-        if (!mayClose || (FloatingSettings.gestureCamera(this) &&
-                !Settings.canDrawOverlays(this))) return
-        queuedAutoHome = true
-        main.postDelayed({
-            queuedAutoHome = false
-            if (tw.airgesture.transferbeta.core.HomeScreenPolicy.shouldAutoBackground(
-                    homePrefs.getBoolean("auto_run", false),
-                    normalLauncherEntry,
-                    GlobalGestureService.isActive,
-                    GlobalGestureService.transfer?.isConnected == true,
-                    homePromptVisible,
-                    advancedOpen
-                ) && (!FloatingSettings.gestureCamera(this) ||
-                    Settings.canDrawOverlays(this))) {
-                moveTaskToBack(true)
-            }
-        }, 900)
+    // Only a deliberate tap on the home-screen button may background this
+    // Activity. Service state, pairing events and permission results never do.
+    private fun returnToDesktopOnUserTap() {
+        moveTaskToBack(true)
+    }
+
+    private fun beginSubtitleCapture() {
+        if (SubtitleCaptureService.running || subtitlePendingPermission) return
+        val prefs = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+        val language = prefs.getString("source_language", "en")
+        if ((language == "en" || language == "ja") &&
+            prefs.getBoolean("enable_voice_fallback", true) &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) !=
+                PackageManager.PERMISSION_GRANTED) {
+            audioPermissionRequestedForSubtitleStart = true
+            voiceAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            return
+        }
+        subtitlePendingPermission = true
+        if (!Settings.canDrawOverlays(this)) {
+            subtitleNeedsOverlay = true
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:" + packageName)))
+        } else {
+            requestSubtitleScreenCapture()
+        }
+    }
+
+    private fun requestSubtitleScreenCapture() {
+        try {
+            val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            subtitleCaptureLauncher.launch(manager.createScreenCaptureIntent())
+        } catch (exception: Exception) {
+            subtitlePendingPermission = false
+            flash("無法要求畫面擷取：" + exception.javaClass.simpleName)
+            refreshHome()
+        }
+    }
+
+    private fun stopSubtitleCapture() {
+        subtitlePendingPermission = false
+        subtitleNeedsOverlay = false
+        stopService(Intent(this, SubtitleCaptureService::class.java))
+        main.postDelayed({ refreshHome() }, 300)
     }
 
     private fun startGlobalMode() {
@@ -264,7 +335,7 @@ class TransferActivity : ComponentActivity() {
             if (!isFinishing) {
                 attachBackgroundSession()
                 refreshHome()
-                maybeReturnHome()
+
             }
         }, 700)
     }
@@ -349,9 +420,19 @@ class TransferActivity : ComponentActivity() {
             updatingModeControls = true
             gestureSwitch.isChecked = FloatingSettings.gestureCamera(this)
             transferSwitch.isChecked = FloatingSettings.nearby(this)
+            if (::subtitleSwitch.isInitialized) {
+                subtitleSwitch.isChecked = SubtitleCaptureService.running || subtitlePendingPermission
+                subtitleLanguage.isEnabled = !SubtitleCaptureService.running && !subtitlePendingPermission
+            }
             updatingModeControls = false
+            if (::voiceFallbackSwitch.isInitialized) {
+                voiceFallbackSwitch.isEnabled =
+                    getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                        .getString("source_language", "en") != "ko"
+            }
             modeDescription.text = modeLabel() +
-                if (GlobalGestureService.isActive) " · 背景服務執行中" else " · 尚未啟動"
+                (if (GlobalGestureService.isActive) " · 背景服務執行中" else " · 尚未啟動") +
+                (if (SubtitleCaptureService.running) " · 語音優先翻譯中" else "")
         }
         refreshSetupGuide()
         val d = tw.airgesture.transferbeta.core.HomeScreenPolicy.decide(
@@ -362,7 +443,8 @@ class TransferActivity : ComponentActivity() {
         val overlayMissing = FloatingSettings.gestureCamera(this) &&
             hasModePermissions() && hasModeAccessibility() &&
             !Settings.canDrawOverlays(this)
-        val label = if (overlayMissing) "開啟手勢與接收提示權限" else when (d.action) {
+        val label = if (SubtitleCaptureService.running) "返回桌面 · 開始使用"
+        else if (overlayMissing) "開啟手勢與接收提示權限" else when (d.action) {
             tw.airgesture.transferbeta.core.HomeAction.GRANT_PERMISSION -> "開始設定 · 允許必要權限"
             tw.airgesture.transferbeta.core.HomeAction.ENABLE_ACCESSIBILITY -> "繼續設定 · 啟用懸浮操作"
             tw.airgesture.transferbeta.core.HomeAction.START -> "啟用懸浮操作"
@@ -400,13 +482,22 @@ class TransferActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (subtitleNeedsOverlay) {
+            subtitleNeedsOverlay = false
+            if (Settings.canDrawOverlays(this)) {
+                main.post { requestSubtitleScreenCapture() }
+            } else {
+                subtitlePendingPermission = false
+                flash("需要懸浮顯示權限才能顯示翻譯字幕")
+            }
+        }
         refreshHome()
         if (homePrefs.getBoolean("auto_run", false) &&
             hasModePermissions() && hasModeAccessibility() && !GlobalGestureService.isActive) {
             startGlobalMode()
         }
         attachBackgroundSession()
-        maybeReturnHome()
+
     }
 
     override fun onPause() {
@@ -421,6 +512,14 @@ class TransferActivity : ComponentActivity() {
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         LegacyUpdateCleanup.run(this)
+        // One-time upgrade from OCR-first to opt-in audio-first: enable by
+        // default for English/Japanese, while user can turn it off at any time.
+        getSharedPreferences("floating_subtitle", MODE_PRIVATE).let { prefs ->
+            if (!prefs.getBoolean("voice_first_migrated_v135", false)) {
+                prefs.edit().putBoolean("voice_first_migrated_v135", true)
+                    .putBoolean("enable_voice_fallback", true).apply()
+            }
+        }
         if (intent?.action == Intent.ACTION_SEND) {
             // Legacy pinned Sharesheet targets may explicitly launch this Activity.
             // Forward straight to the UI-free intake rather than showing the home.
@@ -428,8 +527,6 @@ class TransferActivity : ComponentActivity() {
             finish()
             return
         }
-        normalLauncherEntry = intent?.action == Intent.ACTION_MAIN &&
-            intent?.getBooleanExtra("airgrab_show_settings", false) != true
         val scroll = ScrollView(this)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -512,6 +609,121 @@ class TransferActivity : ComponentActivity() {
         }
         modePanel.addView(modeRow("附近裝置傳檔",
             "亮屏搜尋、傳送和接收；熄屏暫停搜尋", transferSwitch))
+        subtitleSwitch = Switch(this).apply {
+            isChecked = SubtitleCaptureService.running
+            contentDescription = "懸浮翻譯開關"
+            setOnCheckedChangeListener { _, checked ->
+                if (updatingModeControls) return@setOnCheckedChangeListener
+                if (checked) beginSubtitleCapture() else stopSubtitleCapture()
+                refreshHome()
+            }
+        }
+        modePanel.addView(modeRow("懸浮翻譯",
+            "OCR 翻譯影片現有外語字幕；無字幕語音翻譯將在後續版本加入",
+            subtitleSwitch))
+        modePanel.addView(text("字幕來源語言（切換語言需先關閉翻譯）", 13f))
+        subtitleLanguage = Spinner(this).apply {
+            adapter = ArrayAdapter(this@TransferActivity,
+                android.R.layout.simple_spinner_dropdown_item,
+                listOf("英文字幕", "日文字幕", "韓文字幕"))
+            val selected = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                .getString("source_language", "en")
+            setSelection(when (selected) { "ja" -> 1; "ko" -> 2; else -> 0 })
+            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+                override fun onItemSelected(parent: AdapterView<*>?, view: View?,
+                    position: Int, id: Long) {
+                    if (SubtitleCaptureService.running || subtitlePendingPermission) return
+                    val lang = arrayOf("en", "ja", "ko")[position.coerceIn(0, 2)]
+                    getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                        .edit().putString("source_language", lang).apply()
+                    if (::voiceFallbackSwitch.isInitialized) {
+                        voiceFallbackSwitch.isEnabled = (lang != "ko")
+                        val allowedVoice = lang != "ko" &&
+                            getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                                .getBoolean("enable_voice_fallback", true)
+                        updatingModeControls = true
+                        voiceFallbackSwitch.isChecked = allowedVoice
+                        updatingModeControls = false
+                    }
+                }
+            }
+        }
+        modePanel.addView(subtitleLanguage)
+        voiceFallbackSwitch = Switch(this).apply {
+            isChecked = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                .getBoolean("enable_voice_fallback", true) &&
+                    getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                        .getString("source_language", "en") != "ko"
+            contentDescription = "英文及日文語音優先翻譯開關"
+            setOnCheckedChangeListener { _, checked ->
+                if (updatingModeControls) return@setOnCheckedChangeListener
+                val prefs = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                if (checked && prefs.getString("source_language", "en") == "ko") {
+                    updatingModeControls = true
+                    isChecked = false
+                    updatingModeControls = false
+                    flash("目前語音補位支援英文與日文，韓文仍使用 OCR")
+                    return@setOnCheckedChangeListener
+                }
+                if (checked && ContextCompat.checkSelfPermission(
+                        this@TransferActivity, Manifest.permission.RECORD_AUDIO)
+                    != PackageManager.PERMISSION_GRANTED) {
+                    updatingModeControls = true
+                    isChecked = false
+                    updatingModeControls = false
+                    voiceAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    return@setOnCheckedChangeListener
+                }
+                prefs.edit().putBoolean("enable_voice_fallback", checked).apply()
+                if (SubtitleCaptureService.running)
+                    flash("請先關閉再重新開啟翻譯，套用語音補位設定")
+            }
+        }
+        modePanel.addView(modeRow(
+            "語音優先翻譯（英文／日文）",
+            "開啟翻譯就先辨識允許擷取的影片聲音，不必框選字幕；沒有語音結果時自動嘗試 OCR。首次使用各語言需下載離線模型，耗電可能增加。",
+            voiceFallbackSwitch))
+        modePanel.addView(text("OCR 備用：語音不支援或辨識不到時可點「譯」小球→「框選字幕位置」，手動定位畫面文字。", 13f))
+        modePanel.addView(Button(this).apply {
+            text = "重新框選字幕範圍"
+            isAllCaps = false
+            setOnClickListener {
+                if (SubtitleCaptureService.running) {
+                    startService(Intent(this@TransferActivity, SubtitleCaptureService::class.java)
+                        .setAction(SubtitleCaptureService.ACTION_EDIT))
+                    // The editor has a manual「切換影片」dismiss action.
+                    // Do not put the Activity in the background here.
+                } else {
+                    flash("請先開啟懸浮翻譯，再到影片上框選字幕")
+                }
+            }
+        })
+        modePanel.addView(Button(this).apply {
+            text = "查看字幕辨識診斷（原文／翻譯）"
+            isAllCaps = false
+            setOnClickListener {
+                AlertDialog.Builder(this@TransferActivity)
+                    .setTitle("本機字幕辨識診斷")
+                    .setMessage(
+                        "畫面擷取：${SubtitleCaptureService.lastCaptureStatus}" +
+                        "\n\n框選座標：${SubtitleCaptureService.lastCropStatus}" +
+                        "\n\n掃描方式：${SubtitleCaptureService.lastScanMode}" +
+                        "\n\nOCR 狀態：${SubtitleCaptureService.lastOcrStatus}" +
+                        "\n\nOCR 次數：成功 ${SubtitleCaptureService.ocrRunsSucceeded}、失敗 ${SubtitleCaptureService.ocrRunsFailed}" +
+                        "\n\n原始文字行 ${SubtitleCaptureService.lastRawOcrLines}、有效文字行 ${SubtitleCaptureService.lastAcceptedOcrLines}" +
+                        "\n\n翻譯模型：${SubtitleCaptureService.lastModelStatus}" +
+                        "\n\n字幕選取：${SubtitleCaptureService.lastSelectionStatus}" +
+                        "\n\nOCR 原文：${SubtitleCaptureService.lastRecognizedSource}" +
+                        "\n\n翻譯結果：${SubtitleCaptureService.lastTranslationResult}" +
+                        "\n\n語音補位：${SubtitleCaptureService.lastVoiceStatus}" +
+                        "\n\n語音翻譯耗時：${SubtitleCaptureService.lastVoiceLatencyStatus}" +
+                        "\n\n語音原文：${SubtitleCaptureService.lastSpokenOriginal}" +
+                        "\n\n診斷僅存在手機記憶體，沒有上傳畫面。"
+                    )
+                    .setPositiveButton("關閉", null).show()
+            }
+        })
         modeDescription = text(modeLabel(), 14f)
         modePanel.addView(modeDescription)
         root.addView(modePanel)
@@ -567,6 +779,10 @@ class TransferActivity : ComponentActivity() {
             text = "開始設定"
             minHeight = (resources.displayMetrics.density * 64).toInt()
             setOnClickListener {
+                if (SubtitleCaptureService.running) {
+                    returnToDesktopOnUserTap()
+                    return@setOnClickListener
+                }
                 if (FloatingSettings.gestureCamera(this@TransferActivity) &&
                     hasModePermissions() && hasModeAccessibility() &&
                     !Settings.canDrawOverlays(this@TransferActivity)) {
@@ -584,10 +800,12 @@ class TransferActivity : ComponentActivity() {
                     tw.airgesture.transferbeta.core.HomeAction.ENABLE_ACCESSIBILITY ->
                         startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                     tw.airgesture.transferbeta.core.HomeAction.START -> startGlobalMode()
-                    tw.airgesture.transferbeta.core.HomeAction.WAIT ->
+                    tw.airgesture.transferbeta.core.HomeAction.WAIT -> {
                         GlobalGestureService.transfer?.refresh()
+                        returnToDesktopOnUserTap()
+                    }
                     tw.airgesture.transferbeta.core.HomeAction.BACKGROUND ->
-                        moveTaskToBack(true)
+                        returnToDesktopOnUserTap()
                 }
             }
         }
@@ -860,8 +1078,6 @@ class TransferActivity : ComponentActivity() {
             finish()
             return
         }
-        normalLauncherEntry = intent.action == Intent.ACTION_MAIN &&
-            !intent.getBooleanExtra("airgrab_show_settings", false)
     }
 
     private fun forwardLegacyShare(shared: Intent) {

@@ -24,11 +24,6 @@ object HomeScreenPolicy {
         else -> HomeDecision(HomeState.READY,
             HomeAction.BACKGROUND, "隔空操作與傳檔均已就緒")
     }
-    /** Never send a pairing prompt into the background. */
-    fun shouldAutoBackground(
-        userEnabledAutoRun: Boolean, normalLauncherEntry: Boolean,
-        serviceRunning: Boolean, connected: Boolean,
-        pairingPromptOpen: Boolean, advancedOpen: Boolean
-    ): Boolean = userEnabledAutoRun && normalLauncherEntry && serviceRunning &&
-        connected && !pairingPromptOpen && !advancedOpen
+    // The Activity now backgrounds only through an explicit button click.
+    // No automatic home/connected/status callback policy remains.
 }
