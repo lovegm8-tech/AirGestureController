@@ -663,10 +663,10 @@ class TransferActivity : ComponentActivity() {
                     "一般影片 · 上半部",
                     "短影音 · 畫面中央偏下",
                     "畫面下半部",
-                    "整個螢幕（可能誤抓標題）",
+                    "整個螢幕（自動尋找字幕，預設）",
                     "自訂位置（下方兩個滑桿）"
                 ))
-            setSelection(areaPreferences.getInt("subtitle_area_mode", 0).coerceIn(0, 5))
+            setSelection(areaPreferences.getInt("subtitle_area_mode", 4).coerceIn(0, 5))
             onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
                 override fun onNothingSelected(parent: AdapterView<*>?) = Unit
                 override fun onItemSelected(parent: AdapterView<*>?, view: View?,
@@ -680,11 +680,11 @@ class TransferActivity : ComponentActivity() {
         }
         modePanel.addView(subtitleArea)
         subtitleCustomAreaControls.visibility =
-            if (areaPreferences.getInt("subtitle_area_mode", 0) == 5) View.VISIBLE
+            if (areaPreferences.getInt("subtitle_area_mode", 4) == 5) View.VISIBLE
             else View.GONE
         modePanel.addView(subtitleCustomAreaControls)
         modePanel.addView(text(
-            "測試建議：YouTube 橫向全螢幕選「智慧」；如果翻譯抓到標題或其他文字，改「自訂位置」縮小字幕範圍。翻譯框可拖到不遮住字幕的地方。", 12f))
+            "預設全螢幕找字幕，中文字幕自動顯示在原字幕上方；手動拖曳後會停止自動跟隨，直到重新開啟翻譯。若抓到影片標題，可使用自訂位置縮小範圍。", 12f))
         modeDescription = text(modeLabel(), 14f)
         modePanel.addView(modeDescription)
         root.addView(modePanel)
