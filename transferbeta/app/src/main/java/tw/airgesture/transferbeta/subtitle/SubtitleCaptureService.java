@@ -13,6 +13,7 @@ import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.drawable.GradientDrawable;
 import android.hardware.display.DisplayManager;
 import android.hardware.display.VirtualDisplay;
@@ -32,6 +33,11 @@ import android.util.DisplayMetrics;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.WindowManager;
+import android.view.View;
+import android.widget.Button;
+import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.content.SharedPreferences;
 import android.widget.TextView;
 
 import com.google.mlkit.common.model.DownloadConditions;
@@ -62,6 +68,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class SubtitleCaptureService extends Service {
     public static final String ACTION_START = "tw.airgesture.transferbeta.subtitle.START";
     public static final String ACTION_STOP = "tw.airgesture.transferbeta.subtitle.STOP";
+    public static final String ACTION_EDIT = "tw.airgesture.transferbeta.subtitle.EDIT_ROI";
     public static final String EXTRA_RESULT = "screen_capture_result";
     public static final String EXTRA_DATA = "screen_capture_data";
     private static final String CHANNEL_ID = "floating_subtitle_capture";
@@ -77,6 +84,12 @@ public final class SubtitleCaptureService extends Service {
     private Handler worker;
     private WindowManager windowManager;
     private TextView captionView;
+    private FrameLayout editorRoot;
+    private SubtitleRoiEditor roiEditor;
+    private TextView reopenEditorView;
+    private volatile Rect activeRoi;
+    private volatile boolean calibrating = true;
+    private volatile boolean manuallySelecting = false;
     private WindowManager.LayoutParams captionParams;
     private MediaProjection mediaProjection;
     private MediaProjection.Callback projectionCallback;
@@ -125,6 +138,10 @@ public final class SubtitleCaptureService extends Service {
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent != null && ACTION_EDIT.equals(intent.getAction())) {
+            if (running) main.post(this::openSelectionEditor);
+            return START_NOT_STICKY;
+        }
         if (intent == null || ACTION_STOP.equals(intent.getAction())) {
             stopSelf();
             return START_NOT_STICKY;
@@ -166,6 +183,8 @@ public final class SubtitleCaptureService extends Service {
                     DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                     imageReader.getSurface(), null, main);
             worker.post(frameLoop);
+            // Let the user return to the video after MediaProjection consent.
+            main.postDelayed(this::openSelectionEditor, 1250L);
         } catch (Exception exception) {
             stopSelf();
         }
@@ -198,7 +217,7 @@ public final class SubtitleCaptureService extends Service {
                 .addOnSuccessListener(ignored -> {
                     if (!running) return;
                     modelReady = true;
-                    showCaption("翻譯已開啟，等待外語字幕…");
+                    if (!calibrating) showCaption("翻譯已開啟，等待外語字幕…");
                 })
                 .addOnFailureListener(error -> {
                     modelReady = false;
@@ -275,6 +294,173 @@ public final class SubtitleCaptureService extends Service {
         windowManager.addView(captionView, captionParams);
     }
 
+
+    private int unitDp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
+
+    private String roiKey() {
+        return width > height ? "landscape" : "portrait";
+    }
+
+    private RectF readNormalizedRoi() {
+        SharedPreferences pref = getSharedPreferences("floating_subtitle", MODE_PRIVATE);
+        String p = "ocr_roi_" + roiKey();
+        if (!pref.getBoolean(p + "_saved", false)) {
+            return width > height
+                    ? new RectF(0.12f, 0.76f, 0.88f, 0.92f)
+                    : new RectF(0.12f, 0.255f, 0.88f, 0.37f);
+        }
+        return new RectF(pref.getFloat(p + "_l", 0.12f),
+                pref.getFloat(p + "_t", 0.25f),
+                pref.getFloat(p + "_r", 0.88f),
+                pref.getFloat(p + "_b", 0.37f));
+    }
+
+    private Rect normalizeToPixels(RectF fractions) {
+        int l = Math.max(0, Math.min(width - 1, Math.round(fractions.left * width)));
+        int t = Math.max(0, Math.min(height - 1, Math.round(fractions.top * height)));
+        int r = Math.max(l + 1, Math.min(width, Math.round(fractions.right * width)));
+        int b = Math.max(t + 1, Math.min(height, Math.round(fractions.bottom * height)));
+        return new Rect(l, t, r, b);
+    }
+
+    private void closeSelectionEditor() {
+        if (editorRoot != null) {
+            try { windowManager.removeView(editorRoot); }
+            catch (IllegalArgumentException ignored) { }
+            editorRoot = null;
+            roiEditor = null;
+        }
+    }
+
+    private void hideReopenButton() {
+        if (reopenEditorView != null) {
+            try { windowManager.removeView(reopenEditorView); }
+            catch (IllegalArgumentException ignored) { }
+            reopenEditorView = null;
+        }
+    }
+
+    /** A tiny, nonblocking launcher so the user can navigate to a video first. */
+    private void showReopenButton() {
+        hideReopenButton();
+        reopenEditorView = new TextView(this);
+        reopenEditorView.setText("框選字幕");
+        reopenEditorView.setTextColor(Color.WHITE);
+        reopenEditorView.setTextSize(15f);
+        reopenEditorView.setPadding(unitDp(14), unitDp(11), unitDp(14), unitDp(11));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(Color.rgb(18, 102, 142));
+        bg.setCornerRadius(unitDp(26));
+        reopenEditorView.setBackground(bg);
+        WindowManager.LayoutParams p = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN |
+                        WindowManager.LayoutParams.FLAG_SECURE,
+                PixelFormat.TRANSLUCENT);
+        p.gravity = Gravity.RIGHT | Gravity.CENTER_VERTICAL;
+        p.x = unitDp(12);
+        reopenEditorView.setOnClickListener(v -> openSelectionEditor());
+        try { windowManager.addView(reopenEditorView, p); }
+        catch (Exception ignored) { reopenEditorView = null; }
+    }
+
+    /** Editable overlay is never included in the recorded OCR screenshot. */
+    private void openSelectionEditor() {
+        if (!running || !Settings.canDrawOverlays(this)) return;
+        calibrating = true;
+        manuallySelecting = true;
+        hideReopenButton();
+        closeSelectionEditor();
+        if (captionView != null) captionView.setVisibility(View.INVISIBLE);
+        try {
+            editorRoot = new FrameLayout(this);
+            roiEditor = new SubtitleRoiEditor(this, readNormalizedRoi());
+            editorRoot.addView(roiEditor, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT));
+            LinearLayout controls = new LinearLayout(this);
+            controls.setOrientation(LinearLayout.VERTICAL);
+            controls.setPadding(unitDp(8), unitDp(7), unitDp(8), unitDp(7));
+            GradientDrawable surface = new GradientDrawable();
+            surface.setColor(Color.argb(238, 19, 28, 40));
+            surface.setCornerRadius(unitDp(14));
+            controls.setBackground(surface);
+            TextView tip = new TextView(this);
+            tip.setText("把綠框移到原文字幕上，拉四角調整大小");
+            tip.setTextColor(Color.WHITE);
+            tip.setTextSize(13f);
+            tip.setGravity(Gravity.CENTER);
+            controls.addView(tip);
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            Button later = new Button(this);
+            later.setText("切換影片");
+            later.setAllCaps(false);
+            later.setOnClickListener(v -> {
+                closeSelectionEditor();
+                showReopenButton();
+            });
+            Button cancel = new Button(this);
+            cancel.setText("停止翻譯");
+            cancel.setAllCaps(false);
+            cancel.setOnClickListener(v -> stopSelf());
+            Button done = new Button(this);
+            done.setText("完成框選");
+            done.setAllCaps(false);
+            done.setOnClickListener(v -> {
+                if (roiEditor == null) return;
+                RectF selected = roiEditor.normalizedRect();
+                Rect region = normalizeToPixels(selected);
+                if (region.width() < unitDp(78) || region.height() < unitDp(24)) {
+                    tip.setText("框太小，請放大後再完成");
+                    return;
+                }
+                String key = "ocr_roi_" + roiKey();
+                getSharedPreferences("floating_subtitle", MODE_PRIVATE).edit()
+                        .putBoolean(key + "_saved", true)
+                        .putFloat(key + "_l", selected.left)
+                        .putFloat(key + "_t", selected.top)
+                        .putFloat(key + "_r", selected.right)
+                        .putFloat(key + "_b", selected.bottom).apply();
+                activeRoi = region;
+                manuallySelecting = false;
+                closeSelectionEditor();
+                hideReopenButton();
+                lastSource = "";
+                previousCandidate = null;
+                stableSubtitleFrames = 0;
+                if (captionView != null) captionView.setVisibility(View.VISIBLE);
+                calibrating = false;
+                showCaption(modelReady ? "等待框內字幕…" : "正在準備翻譯模型…");
+            });
+            row.addView(later, new LinearLayout.LayoutParams(0, unitDp(50), 1f));
+            row.addView(cancel, new LinearLayout.LayoutParams(0, unitDp(50), 1f));
+            row.addView(done, new LinearLayout.LayoutParams(0, unitDp(50), 1f));
+            controls.addView(row);
+            FrameLayout.LayoutParams bar = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.TOP);
+            bar.setMargins(unitDp(12), unitDp(34), unitDp(12), 0);
+            editorRoot.addView(controls, bar);
+            WindowManager.LayoutParams p = new WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
+                            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN |
+                            WindowManager.LayoutParams.FLAG_SECURE,
+                    PixelFormat.TRANSLUCENT);
+            p.gravity = Gravity.TOP | Gravity.LEFT;
+            windowManager.addView(editorRoot, p);
+        } catch (Exception ignored) {
+            closeSelectionEditor();
+            showReopenButton();
+        }
+    }
+
     private void showCaption(String text) {
         main.post(() -> {
             if (running && captionView != null) captionView.setText(text);
@@ -319,7 +505,7 @@ public final class SubtitleCaptureService extends Service {
         @Override public void run() {
             if (!running) return;
             try {
-                if (modelReady && ocrBusy.compareAndSet(false, true)) captureFrame();
+                if (!calibrating && modelReady && ocrBusy.compareAndSet(false, true)) captureFrame();
                 adaptRotation();
             } catch (Exception ignored) {
                 ocrBusy.set(false);
@@ -345,8 +531,15 @@ public final class SubtitleCaptureService extends Service {
             width = metrics.widthPixels;
             height = metrics.heightPixels;
             densityDpi = metrics.densityDpi;
+            calibrating = true;
+            activeRoi = null;
+            lastSource = "";
+            lastTranslation = "";
+            previousCandidate = null;
             if (old != null) old.close();
             main.post(() -> {
+                closeSelectionEditor();
+                openSelectionEditor();
                 if (captionView == null || captionParams == null) return;
                 captionParams.width = Math.round(width * 0.86f);
                 captionParams.x = Math.min(captionParams.x, Math.round(width * 0.14f));
@@ -611,6 +804,9 @@ public final class SubtitleCaptureService extends Service {
         Intent stopIntent = new Intent(this, SubtitleCaptureService.class).setAction(ACTION_STOP);
         PendingIntent stop = PendingIntent.getService(this, 341,
                 stopIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        Intent editIntent = new Intent(this, SubtitleCaptureService.class).setAction(ACTION_EDIT);
+        PendingIntent edit = PendingIntent.getService(this, 343,
+                editIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Intent openIntent = new Intent(this, tw.airgesture.transferbeta.TransferActivity.class)
                 .putExtra("airgrab_show_settings", true);
         PendingIntent open = PendingIntent.getActivity(this, 342, openIntent,
@@ -621,6 +817,8 @@ public final class SubtitleCaptureService extends Service {
                 .setContentText("只辨識影片畫面文字；點此回到設定")
                 .setContentIntent(open)
                 .setOngoing(true)
+                .addAction(new Notification.Action.Builder(
+                        android.R.drawable.ic_menu_crop, "框選字幕", edit).build())
                 .addAction(new Notification.Action.Builder(
                         android.R.drawable.ic_menu_close_clear_cancel, "停止翻譯", stop).build())
                 .build();
@@ -639,6 +837,8 @@ public final class SubtitleCaptureService extends Service {
         }
         if (recognizer != null) recognizer.close();
         if (translator != null) translator.close();
+        closeSelectionEditor();
+        hideReopenButton();
         if (captionView != null) {
             try { windowManager.removeView(captionView); }
             catch (IllegalArgumentException ignored) { }
