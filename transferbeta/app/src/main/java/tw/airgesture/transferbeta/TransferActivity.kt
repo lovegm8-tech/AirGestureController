@@ -717,6 +717,7 @@ class TransferActivity : ComponentActivity() {
                         "\n\nOCR 原文：${SubtitleCaptureService.lastRecognizedSource}" +
                         "\n\n翻譯結果：${SubtitleCaptureService.lastTranslationResult}" +
                         "\n\n語音補位：${SubtitleCaptureService.lastVoiceStatus}" +
+                        "\n\n語音翻譯耗時：${SubtitleCaptureService.lastVoiceLatencyStatus}" +
                         "\n\n語音原文：${SubtitleCaptureService.lastSpokenOriginal}" +
                         "\n\n診斷僅存在手機記憶體，沒有上傳畫面。"
                     )
