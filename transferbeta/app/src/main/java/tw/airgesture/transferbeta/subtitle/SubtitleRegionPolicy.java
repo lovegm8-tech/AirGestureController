@@ -33,7 +33,7 @@ public final class SubtitleRegionPolicy {
             case BOTTOM:
                 top = 50; bottom = 98; break;
             case FULL_SCREEN:
-                top = 4; bottom = 97; break;
+                top = 0; bottom = 100; break;
             case CUSTOM:
                 top = Math.max(0, Math.min(customTopPercent, 85));
                 bottom = Math.max(top + 12, Math.min(customBottomPercent, 100));
