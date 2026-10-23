@@ -621,7 +621,9 @@ public final class SubtitleCaptureService extends Service {
         @Override public void run() {
             if (!running) return;
             try {
-                if (!calibrating && !pausedByUser && modelReady &&
+                // Run OCR even when the translation model is not ready:
+                // diagnosis should distinguish recognition from model download.
+                if (!calibrating && !pausedByUser && recognizer != null &&
                         ocrBusy.compareAndSet(false, true)) captureFrame();
                 adaptRotation();
             } catch (Exception ignored) {
@@ -822,7 +824,7 @@ public final class SubtitleCaptureService extends Service {
 
     private void translateRecognizedLines(Text result, int frameCropX, int frameCropY,
                                           float imageScale, boolean manualRoiActive) {
-        if (!running || calibrating || pausedByUser || !modelReady || translator == null) return;
+        if (!running || calibrating || pausedByUser) return;
         List<SubtitleCandidatePolicy.Candidate> candidates = new ArrayList<>();
         List<SubtitleCandidatePolicy.Candidate> pageLines = new ArrayList<>();
         for (Text.TextBlock block : result.getTextBlocks()) {
@@ -947,6 +949,10 @@ public final class SubtitleCaptureService extends Service {
                 ? Math.min(30, stableSubtitleFrames + 1) : 0;
         previousCandidate = chosen;
         if (source.length() < 3) return;
+        if (!modelReady || translator == null) {
+            lastSelectionStatus = "已辨識字幕，但翻譯模型尚未就緒：" + lastModelStatus;
+            return;
+        }
         if (source.equals(lastSource)) {
             positionCaptionAbove(chosen);
             return;
