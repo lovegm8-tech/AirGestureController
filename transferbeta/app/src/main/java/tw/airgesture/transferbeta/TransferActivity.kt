@@ -708,15 +708,19 @@ class TransferActivity : ComponentActivity() {
                 AlertDialog.Builder(this@TransferActivity)
                     .setTitle("本機字幕辨識診斷")
                     .setMessage(
-                        "掃描方式：${SubtitleCaptureService.lastScanMode}" +
-                        "\\n\\nOCR 原文：\\n${SubtitleCaptureService.lastRecognizedSource}" +
-                        "\\n\\n翻譯結果：\\n${SubtitleCaptureService.lastTranslationResult}" +
-                        "\\n\\n翻譯品質：${SubtitleCaptureService.lastTranslationQuality}" +
-                        "\\n\\n字幕選取：${SubtitleCaptureService.lastSelectionStatus}" +
-                        "\\n\\nOCR 候選：${SubtitleCaptureService.lastCandidateSummary}" +
-                        "\\n\\n語音補位：${SubtitleCaptureService.lastVoiceStatus}" +
-                        "\\n\\n語音原文：${SubtitleCaptureService.lastSpokenOriginal}" +
-                        "\\n\\n只保存在記憶體中，沒有上傳畫面。"
+                        "畫面擷取：${SubtitleCaptureService.lastCaptureStatus}" +
+                        "\n\n框選座標：${SubtitleCaptureService.lastCropStatus}" +
+                        "\n\n掃描方式：${SubtitleCaptureService.lastScanMode}" +
+                        "\n\nOCR 狀態：${SubtitleCaptureService.lastOcrStatus}" +
+                        "\n\nOCR 次數：成功 ${SubtitleCaptureService.ocrRunsSucceeded}、失敗 ${SubtitleCaptureService.ocrRunsFailed}" +
+                        "\n\n原始文字行 ${SubtitleCaptureService.lastRawOcrLines}、有效文字行 ${SubtitleCaptureService.lastAcceptedOcrLines}" +
+                        "\n\n翻譯模型：${SubtitleCaptureService.lastModelStatus}" +
+                        "\n\n字幕選取：${SubtitleCaptureService.lastSelectionStatus}" +
+                        "\n\nOCR 原文：${SubtitleCaptureService.lastRecognizedSource}" +
+                        "\n\n翻譯結果：${SubtitleCaptureService.lastTranslationResult}" +
+                        "\n\n語音補位：${SubtitleCaptureService.lastVoiceStatus}" +
+                        "\n\n語音原文：${SubtitleCaptureService.lastSpokenOriginal}" +
+                        "\n\n診斷僅存在手機記憶體，沒有上傳畫面。"
                     )
                     .setPositiveButton("關閉", null).show()
             }
