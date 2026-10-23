@@ -85,6 +85,8 @@ class TransferActivity : ComponentActivity() {
     private lateinit var subtitleSwitch: Switch
     private lateinit var subtitleLanguage: Spinner
     private lateinit var voiceFallbackSwitch: Switch
+    private lateinit var aiLocalSwitch: Switch
+    private lateinit var aiModelStatus: TextView
     private var subtitlePendingPermission = false
     private var subtitleNeedsOverlay = false
     private lateinit var modeDescription: TextView
@@ -430,6 +432,10 @@ class TransferActivity : ComponentActivity() {
                     getSharedPreferences("floating_subtitle", MODE_PRIVATE)
                         .getString("source_language", "en") != "ko"
             }
+            if (::aiModelStatus.isInitialized)
+                aiModelStatus.text = "本地 AI：" +
+                    tw.airgesture.transferbeta.subtitle.SubtitleLocalAi.status(this) +
+                    (if (SubtitleCaptureService.running) " · " + SubtitleCaptureService.lastAiStatus else "")
             modeDescription.text = modeLabel() +
                 (if (GlobalGestureService.isActive) " · 背景服務執行中" else " · 尚未啟動") +
                 (if (SubtitleCaptureService.running) " · 語音優先翻譯中" else "")
@@ -619,7 +625,7 @@ class TransferActivity : ComponentActivity() {
             }
         }
         modePanel.addView(modeRow("懸浮翻譯",
-            "OCR 翻譯影片現有外語字幕；無字幕語音翻譯將在後續版本加入",
+            "語音優先＋OCR 備用；安裝 Qwen 後會於手機本地修正完整中文字幕，固定兩行",
             subtitleSwitch))
         modePanel.addView(text("字幕來源語言（切換語言需先關閉翻譯）", 13f))
         subtitleLanguage = Spinner(this).apply {
@@ -684,6 +690,32 @@ class TransferActivity : ComponentActivity() {
             "語音優先翻譯（英文／日文）",
             "開啟翻譯就先辨識允許擷取的影片聲音，不必框選字幕；沒有語音結果時自動嘗試 OCR。首次使用各語言需下載離線模型，耗電可能增加。",
             voiceFallbackSwitch))
+        aiLocalSwitch = Switch(this).apply {
+            isChecked = tw.airgesture.transferbeta.subtitle.SubtitleLocalAi.enabled(this@TransferActivity)
+            contentDescription = "Qwen 手機本地 AI 中文潤飾"
+            setOnCheckedChangeListener { _, enabled ->
+                if (updatingModeControls) return@setOnCheckedChangeListener
+                getSharedPreferences("floating_subtitle", MODE_PRIVATE).edit()
+                    .putBoolean("ai_local_enabled", enabled).apply()
+                if (SubtitleCaptureService.running)
+                    flash("本地 AI 開關已修改，重新開啟懸浮翻譯後生效")
+                refreshHome()
+            }
+        }
+        modePanel.addView(modeRow("本地 Qwen AI 中文潤飾（可關閉）",
+            "直接整合懸浮翻譯：快速中文字幕先顯示，完整句子由本機 AI 再修正同一行。模型約 347 MB，首次需 Wi-Fi 下載；可能增加記憶體與發熱，不使用付費雲端 API。",
+            aiLocalSwitch))
+        aiModelStatus = text("檢查 AI 模型…", 13f)
+        modePanel.addView(aiModelStatus)
+        modePanel.addView(Button(this).apply {
+            text = "下載／重新下載本地 AI 模型（約 347 MB）"
+            isAllCaps = false
+            setOnClickListener {
+                val state = tw.airgesture.transferbeta.subtitle.SubtitleLocalAi.download(this@TransferActivity)
+                flash(state)
+                refreshHome()
+            }
+        })
         modePanel.addView(text("OCR 備用：語音不支援或辨識不到時可點「譯」小球→「框選字幕位置」，手動定位畫面文字。", 13f))
         modePanel.addView(Button(this).apply {
             text = "重新框選字幕範圍"
@@ -719,6 +751,8 @@ class TransferActivity : ComponentActivity() {
                         "\n\n語音補位：${SubtitleCaptureService.lastVoiceStatus}" +
                         "\n\n語音翻譯耗時：${SubtitleCaptureService.lastVoiceLatencyStatus}" +
                         "\n\n語音原文：${SubtitleCaptureService.lastSpokenOriginal}" +
+                        "\n\n本地 AI：${tw.airgesture.transferbeta.subtitle.SubtitleLocalAi.status(this@TransferActivity)}" +
+                        "\n\nAI 字幕狀態：${SubtitleCaptureService.lastAiStatus}" +
                         "\n\n診斷僅存在手機記憶體，沒有上傳畫面。"
                     )
                     .setPositiveButton("關閉", null).show()
