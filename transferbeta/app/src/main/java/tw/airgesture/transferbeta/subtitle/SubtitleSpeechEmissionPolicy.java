@@ -23,7 +23,8 @@ public final class SubtitleSpeechEmissionPolicy {
         if (common < current.length() && common > 0
                 && Character.isLowSurrogate(current.charAt(common))) common--;
         String stable = current.substring(0, common).trim();
-        if ("en".equals(language)) {
+        boolean sameHypothesisTwice = previous.equals(current);
+        if ("en".equals(language) && !sameHypothesisTwice) {
             // Only translate completed words, not a half-recognized syllable.
             int lastSpace = stable.lastIndexOf(' ');
             if (lastSpace < 0) return "";
