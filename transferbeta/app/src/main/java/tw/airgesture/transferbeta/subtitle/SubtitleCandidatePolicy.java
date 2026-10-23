@@ -80,13 +80,16 @@ public final class SubtitleCandidatePolicy {
         else if (width > height) {
             if (y >= 0.57 && y <= 0.91) score += 18.0;
         } else {
-            // Standard portrait players occupy roughly the upper 40% of a
-            // tall screen. Video captions belong there; title/metadata below
-            // the player must not win just because their words are longer.
-            if (y >= 0.11 && y <= 0.42) score += 28.0;
-            else if (y >= 0.47 && y <= 0.60) score -= 16.0;
-            else if (y >= 0.64 && y <= 0.88) score += 3.0; // Shorts captions
+            // Normal portrait YouTube player's video ends around 36–38% of
+            // the display. In the supplied S26 Ultra recordings the video
+            // captions are at ~33%, and title/recommendation UI starts ~38%.
+            // Prior versions accidentally treated that UI as subtitles.
+            if (y >= 0.12 && y <= 0.365) score += 58.0;
+            else if (y >= 0.37 && y <= 0.63) score -= 58.0;
+            else if (y >= 0.64 && y <= 0.89) score += 9.0; // Shorts
             if (x < 0.22 || x > 0.78) score -= 9.0;
+            if (previous != null && previous.centerY() < height * 0.365 &&
+                    y >= 0.37) score -= 22.0;
         }
         String lower = c.text.toLowerCase(java.util.Locale.ROOT);
         if (lower.contains("http") || lower.contains("@") ||
