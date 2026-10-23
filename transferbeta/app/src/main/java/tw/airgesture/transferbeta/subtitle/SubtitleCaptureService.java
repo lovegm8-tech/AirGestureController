@@ -90,6 +90,7 @@ public final class SubtitleCaptureService extends Service {
     private String lastSource = "";
     private String lastTranslation = "";
     private SubtitleCandidatePolicy.Candidate previousCandidate;
+    private int stableSubtitleFrames = 0;
     private boolean captionDraggedByUser = false;
     private volatile long lastSubtitleObservedMs = 0L;
     private int captureCropY = 0;
@@ -428,7 +429,7 @@ public final class SubtitleCaptureService extends Service {
             }
         }
         SubtitleCandidatePolicy.Candidate chosen =
-                SubtitleCandidatePolicy.best(candidates, width, height, previousCandidate);
+                SubtitleCandidatePolicy.best(candidates, width, height, previousCandidate, stableSubtitleFrames);
         if (chosen == null) {
             if (lastSubtitleObservedMs > 0L &&
                     SystemClock.elapsedRealtime() - lastSubtitleObservedMs > 4300L) {
@@ -436,6 +437,7 @@ public final class SubtitleCaptureService extends Service {
                 lastSource = "";
                 lastTranslation = "";
                 previousCandidate = null;
+                stableSubtitleFrames = 0;
                 showCaption("等待外語字幕…");
             }
             return;
@@ -443,6 +445,10 @@ public final class SubtitleCaptureService extends Service {
         lastSubtitleObservedMs = SystemClock.elapsedRealtime();
         // Tracking is based on OCR coordinates, not a fixed screen crop.
         String source = chosen.text.replaceAll("\\s+", " ").trim();
+        stableSubtitleFrames = previousCandidate != null
+                && source.equals(previousCandidate.text)
+                ? Math.min(30, stableSubtitleFrames + 1) : 0;
+        previousCandidate = chosen;
         if (source.length() < 3) return;
         if (source.equals(lastSource)) {
             positionCaptionAbove(chosen);
@@ -451,7 +457,6 @@ public final class SubtitleCaptureService extends Service {
         if (!translateBusy.compareAndSet(false, true)) return;
         final SubtitleCandidatePolicy.Candidate translatedCandidate = chosen;
         lastSource = source;
-        previousCandidate = chosen;
         translator.translate(source)
                 .addOnSuccessListener(translated -> {
                     if (!running || !source.equals(lastSource)) return;
