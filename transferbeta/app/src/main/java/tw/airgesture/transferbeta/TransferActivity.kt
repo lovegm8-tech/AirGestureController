@@ -142,11 +142,11 @@ class TransferActivity : ComponentActivity() {
     private val voiceAudioPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        val allowed = granted &&
-            getSharedPreferences("floating_subtitle", MODE_PRIVATE)
-                .getString("source_language", "en") == "en"
+        val selectedLanguage = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+            .getString("source_language", "en")
+        val allowed = granted && (selectedLanguage == "en" || selectedLanguage == "ja")
         getSharedPreferences("floating_subtitle", MODE_PRIVATE)
-            .edit().putBoolean("enable_voice_fallback_en", allowed).apply()
+            .edit().putBoolean("enable_voice_fallback", allowed).apply()
         if (::voiceFallbackSwitch.isInitialized) {
             updatingModeControls = true
             voiceFallbackSwitch.isChecked = allowed
@@ -439,7 +439,7 @@ class TransferActivity : ComponentActivity() {
             if (::voiceFallbackSwitch.isInitialized) {
                 voiceFallbackSwitch.isEnabled =
                     getSharedPreferences("floating_subtitle", MODE_PRIVATE)
-                        .getString("source_language", "en") == "en"
+                        .getString("source_language", "en") != "ko"
             }
             modeDescription.text = modeLabel() +
                 (if (GlobalGestureService.isActive) " · 背景服務執行中" else " · 尚未啟動") +
@@ -642,8 +642,8 @@ class TransferActivity : ComponentActivity() {
                     getSharedPreferences("floating_subtitle", MODE_PRIVATE)
                         .edit().putString("source_language", lang).apply()
                     if (::voiceFallbackSwitch.isInitialized) {
-                        voiceFallbackSwitch.isEnabled = (lang == "en")
-                        if (lang != "en") {
+                        voiceFallbackSwitch.isEnabled = (lang != "ko")
+                        if (lang == "ko") {
                             updatingModeControls = true
                             voiceFallbackSwitch.isChecked = false
                             updatingModeControls = false
@@ -655,16 +655,16 @@ class TransferActivity : ComponentActivity() {
         modePanel.addView(subtitleLanguage)
         voiceFallbackSwitch = Switch(this).apply {
             isChecked = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
-                .getBoolean("enable_voice_fallback_en", false)
-            contentDescription = "英文語音補位開關"
+                .getBoolean("enable_voice_fallback", false)
+            contentDescription = "英文與日文語音補位開關"
             setOnCheckedChangeListener { _, checked ->
                 if (updatingModeControls) return@setOnCheckedChangeListener
                 val prefs = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
-                if (checked && prefs.getString("source_language", "en") != "en") {
+                if (checked && prefs.getString("source_language", "en") == "ko") {
                     updatingModeControls = true
                     isChecked = false
                     updatingModeControls = false
-                    flash("語音補位第一版只支援英文；日韓文繼續用 OCR")
+                    flash("目前語音補位支援英文與日文，韓文仍使用 OCR")
                     return@setOnCheckedChangeListener
                 }
                 if (checked && ContextCompat.checkSelfPermission(
@@ -676,14 +676,14 @@ class TransferActivity : ComponentActivity() {
                     voiceAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                     return@setOnCheckedChangeListener
                 }
-                prefs.edit().putBoolean("enable_voice_fallback_en", checked).apply()
+                prefs.edit().putBoolean("enable_voice_fallback", checked).apply()
                 if (SubtitleCaptureService.running)
                     flash("請先關閉再重新開啟翻譯，套用語音補位設定")
             }
         }
         modePanel.addView(modeRow(
-            "英文語音補位（實驗版）",
-            "OCR 來不及更新時以影片播放聲音補充。首次下載約40MB英文模型，會增加耗電；若播放器禁止內部音訊擷取則無法使用。",
+            "英文／日文語音補位（實驗版）",
+            "字幕 OCR 追不上時用影片播放聲音補充。英文模型約 40 MB，日文模型約 48 MB，首次使用各下載一次；需要播放音訊授權，會增加耗電。",
             voiceFallbackSwitch))
         modePanel.addView(text("字幕辨識位置：啟動後直接在影片上拖曳綠框、拉四角調整大小。直向、橫向分別記住上次的位置。", 13f))
         modePanel.addView(Button(this).apply {
