@@ -699,7 +699,9 @@ class TransferActivity : ComponentActivity() {
                         "掃描方式：${SubtitleCaptureService.lastScanMode}" +
                         "\n\nOCR 原文：\n${SubtitleCaptureService.lastRecognizedSource}" +
                         "\n\n翻譯結果：\n${SubtitleCaptureService.lastTranslationResult}" +
-                        "\n\n本頁僅顯示記憶體中的最近一筆，不上傳影片或字幕。"
+                        "\n\n翻譯品質：${SubtitleCaptureService.lastTranslationQuality}" +
+                        "\n\nOCR 候選排名：${SubtitleCaptureService.lastCandidateSummary}" +
+                        "\n\n此診斷僅保留記憶體中的最近一筆，不會上傳影像或文字。"
                     )
                     .setPositiveButton("關閉", null).show()
             }
