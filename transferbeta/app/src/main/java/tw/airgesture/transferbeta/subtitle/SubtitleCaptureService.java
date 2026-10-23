@@ -796,8 +796,17 @@ public final class SubtitleCaptureService extends Service {
                         lastOcrStatus = "OCR 已完成 " + ocrRunsSucceeded + " 次，原始文字行 " + rawLines;
                         if (rawLines == 0) ocrEmptyFrameStreak++;
                         else ocrEmptyFrameStreak = 0;
-                        if (!calibrating) translateRecognizedLines(text, frameCropX, frameCropY,
-                                frameScale, manualRoiActive);
+                        if (!calibrating) {
+                            try {
+                                translateRecognizedLines(text, frameCropX, frameCropY,
+                                        frameScale, manualRoiActive);
+                            } catch (RuntimeException parseError) {
+                                lastOcrStatus = "OCR 文字解析失敗：" +
+                                        parseError.getClass().getSimpleName() + " " +
+                                        parseError.getMessage();
+                                ocrRunsFailed++;
+                            }
+                        }
                     })
                     .addOnFailureListener(error -> {
                         ocrRunsFailed++;
