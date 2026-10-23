@@ -483,8 +483,16 @@ public final class SubtitleCaptureService extends Service {
             later.setText("切換影片");
             later.setAllCaps(false);
             later.setOnClickListener(v -> {
+                // The user is leaving the ROI editor for another video,
+                // not pausing voice translation. The old code accidentally
+                // kept calibrating=true and blocked BOTH engines forever.
                 closeSelectionEditor();
+                manuallySelecting = false;
+                calibrating = false;
+                if (captionView != null) captionView.setVisibility(View.VISIBLE);
                 showReopenButton();
+                showCaption(voiceFallbackEnabled ? "正在辨識影片聲音…" :
+                        "OCR 正在自動尋找字幕…");
             });
             Button cancel = new Button(this);
             cancel.setText("停止翻譯");
