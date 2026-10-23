@@ -251,7 +251,9 @@ class TransferActivity : ComponentActivity() {
     }
 
     private fun maybeReturnHome() {
-        if (queuedAutoHome || subtitlePendingPermission) return
+        // The user opened the main app to adjust subtitles or read diagnosis.
+        // Never auto-minimize it while subtitle capture is active.
+        if (queuedAutoHome || subtitlePendingPermission || SubtitleCaptureService.running) return
         val mayClose = tw.airgesture.transferbeta.core.HomeScreenPolicy.shouldAutoBackground(
             homePrefs.getBoolean("auto_run", false),
             normalLauncherEntry,
@@ -267,7 +269,9 @@ class TransferActivity : ComponentActivity() {
         queuedAutoHome = true
         main.postDelayed({
             queuedAutoHome = false
-            if (tw.airgesture.transferbeta.core.HomeScreenPolicy.shouldAutoBackground(
+            if (!SubtitleCaptureService.running &&
+                !subtitlePendingPermission &&
+                tw.airgesture.transferbeta.core.HomeScreenPolicy.shouldAutoBackground(
                     homePrefs.getBoolean("auto_run", false),
                     normalLauncherEntry,
                     GlobalGestureService.isActive,
