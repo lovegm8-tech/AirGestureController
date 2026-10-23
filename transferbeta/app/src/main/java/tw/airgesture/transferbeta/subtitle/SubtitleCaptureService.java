@@ -662,7 +662,7 @@ public final class SubtitleCaptureService extends Service {
 
             WindowManager.LayoutParams p = new WindowManager.LayoutParams(
                     Math.max(dp(300), Math.min(width - dp(24), dp(440))),
-                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    Math.max(dp(260), Math.min(height - dp(110), dp(630))),
                     WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
                             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
@@ -901,8 +901,10 @@ public final class SubtitleCaptureService extends Service {
             final int previewWidth = Math.min(650, owned.getWidth());
             final int previewHeight = Math.max(1, Math.round(
                     owned.getHeight() * (previewWidth / (float) owned.getWidth())));
-            Bitmap nextPreview = Bitmap.createScaledBitmap(
-                    owned, previewWidth, previewHeight, false);
+            Bitmap nextPreview = (owned.getWidth() == previewWidth &&
+                    owned.getHeight() == previewHeight)
+                    ? owned.copy(Bitmap.Config.ARGB_8888, false)
+                    : Bitmap.createScaledBitmap(owned, previewWidth, previewHeight, false);
             Bitmap previousPreview = latestOcrCropPreview;
             latestOcrCropPreview = nextPreview;
             // Diagnostic panel pauses scanning, so this bitmap won't be swapped
