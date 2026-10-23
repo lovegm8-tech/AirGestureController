@@ -82,6 +82,8 @@ public final class SubtitleCaptureService extends Service {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final AtomicBoolean ocrBusy = new AtomicBoolean(false);
     private final AtomicBoolean translateBusy = new AtomicBoolean(false);
+    // Voice translation must not block an OCR translation. OCR always wins.
+    private final AtomicBoolean voiceTranslateBusy = new AtomicBoolean(false);
     private HandlerThread workerThread;
     private Handler worker;
     private WindowManager windowManager;
@@ -507,7 +509,7 @@ public final class SubtitleCaptureService extends Service {
         long now = SystemClock.elapsedRealtime();
         if (!SubtitleVoicePriority.mayDisplayVoice(voiceFallbackEnabled, modelReady,
                 calibrating, pausedByUser, now, lastOcrCaptionMs, lastVoiceCaptionMs)) return;
-        if (translator == null || !translateBusy.compareAndSet(false, true)) return;
+        if (translator == null || !voiceTranslateBusy.compareAndSet(false, true)) return;
         lastSpokenSource = source;
         translator.translate(source)
                 .addOnSuccessListener(translated -> {
@@ -533,7 +535,7 @@ public final class SubtitleCaptureService extends Service {
                     lastVoiceStatus = ("ja".equals(sourceLanguage) ? "日文" : "英文") +
                             "語音翻譯失敗：" + error.getClass().getSimpleName();
                 })
-                .addOnCompleteListener(done -> translateBusy.set(false));
+                .addOnCompleteListener(done -> voiceTranslateBusy.set(false));
     }
 
     private void positionVoiceCaption() {
