@@ -84,7 +84,7 @@ public final class SubtitleCaptureService extends Service {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final AtomicBoolean ocrBusy = new AtomicBoolean(false);
     private final AtomicBoolean translateBusy = new AtomicBoolean(false);
-    // Voice translation must not block an OCR translation. OCR always wins.
+    // Voice translation is primary; concurrent OCR only fills audio gaps.
     private final AtomicBoolean voiceTranslateBusy = new AtomicBoolean(false);
     private HandlerThread workerThread;
     private Handler worker;
@@ -101,7 +101,10 @@ public final class SubtitleCaptureService extends Service {
     private SubtitleRoiEditor roiEditor;
     private SubtitleBubbleController translationBubble;
     private SubtitlePlaybackSpeech playbackSpeech;
-    private boolean voiceFallbackEnabled = false;
+    private volatile boolean voiceFallbackEnabled = false;
+    private volatile boolean voiceUnavailable = false;
+    private volatile long voiceStartedAtMs = 0L;
+    private volatile long lastVoiceUtteranceMs = 0L;
     private long lastOcrCaptionMs = 0L;
     private long lastVoiceCaptionMs = 0L;
     private String lastSpokenSource = "";
@@ -210,7 +213,7 @@ public final class SubtitleCaptureService extends Service {
         try {
             createNotificationChannel();
             voiceFallbackEnabled = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
-                    .getBoolean("enable_voice_fallback", false)
+                    .getBoolean("enable_voice_fallback", true)
                     && ("en".equals(getSharedPreferences("floating_subtitle", MODE_PRIVATE)
                             .getString("source_language", "en")) ||
                         "ja".equals(getSharedPreferences("floating_subtitle", MODE_PRIVATE)
@@ -222,6 +225,12 @@ public final class SubtitleCaptureService extends Service {
                 foregroundTypes |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
             startForeground(NOTIFICATION_ID, makeNotification(), foregroundTypes);
             running = true;
+            // Voice-first starts immediately; picking an OCR rectangle is
+            // optional and must never gate AudioPlaybackCapture callbacks.
+            calibrating = false;
+            voiceUnavailable = false;
+            voiceStartedAtMs = SystemClock.elapsedRealtime();
+            lastVoiceUtteranceMs = 0L;
             createCaption();
             initializeRecognizer();
             MediaProjectionManager manager =
@@ -239,7 +248,14 @@ public final class SubtitleCaptureService extends Service {
                     DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                     imageReader.getSurface(), null, main);
             worker.post(frameLoop);
-            if (voiceFallbackEnabled) startPlaybackSpeech();
+            if (voiceFallbackEnabled) {
+                lastVoiceStatus = "語音優先：準備讀取影片聲音";
+                startPlaybackSpeech();
+            } else {
+                lastVoiceStatus = "語音未啟用或未獲授權，使用畫面 OCR";
+            }
+            showCaption(voiceFallbackEnabled ? "正在啟動影片語音翻譯…" :
+                    "正在搜尋畫面文字（可點譯小球框選）");
             // Do not cover the Activity with the fullscreen editor after
             // consent: the user must be able to tap "返回桌面 · 開始使用".
             // Once at a video, tap the persistent "譯" ball to select its
@@ -424,7 +440,9 @@ public final class SubtitleCaptureService extends Service {
             lastSource = "";
             previousCandidate = null;
             stableSubtitleFrames = 0;
-            showCaption(modelReady ? "等待框內字幕…" : "正在準備翻譯模型…");
+            showCaption(modelReady ? (voiceFallbackEnabled ?
+                    "正在辨識影片聲音…" : "等待畫面字幕…") :
+                    "正在準備翻譯模型…");
         }
         if (translationBubble != null) translationBubble.updatePaused(pausedByUser);
     }
@@ -536,8 +554,17 @@ public final class SubtitleCaptureService extends Service {
                 new SubtitlePlaybackSpeech.Callback() {
                     @Override public void onStatus(String status) {
                         lastVoiceStatus = status;
+                        if (status.contains("無法啟動") ||
+                                status.contains("未取得可辨識") ||
+                                status.contains("讀取失敗") ||
+                                status.contains("無法擷取") ||
+                                status.contains("未授權")) {
+                            voiceUnavailable = true;
+                        }
                     }
                     @Override public void onUtterance(String original) {
+                        lastVoiceUtteranceMs = SystemClock.elapsedRealtime();
+                        voiceUnavailable = false;
                         translateVoiceFallback(original);
                     }
                 });
@@ -734,7 +761,10 @@ public final class SubtitleCaptureService extends Service {
             try {
                 // Run OCR even when the translation model is not ready:
                 // diagnosis should distinguish recognition from model download.
-                if (!calibrating && !pausedByUser && recognizer != null &&
+                long now = SystemClock.elapsedRealtime();
+                if (recognizer != null && SubtitleVoicePriority.mayScanOcr(
+                        voiceFallbackEnabled, voiceUnavailable, calibrating,
+                        pausedByUser, now, voiceStartedAtMs, lastVoiceUtteranceMs) &&
                         ocrBusy.compareAndSet(false, true)) captureFrame();
                 adaptRotation();
             } catch (Exception ignored) {
@@ -761,15 +791,18 @@ public final class SubtitleCaptureService extends Service {
             width = metrics.widthPixels;
             height = metrics.heightPixels;
             densityDpi = metrics.densityDpi;
-            calibrating = true;
+            // Orientation must not open a fullscreen editor over videos.
+            // The saved rectangle has a different orientation; discard it and
+            // use automatic OCR until the user asks to recalibrate.
             activeRoi = null;
+            calibrating = false;
             lastSource = "";
             lastTranslation = "";
             previousCandidate = null;
             if (old != null) old.close();
             main.post(() -> {
                 closeSelectionEditor();
-                openSelectionEditor();
+                if (translationBubble != null) translationBubble.onDisplayChanged();
                 if (captionView == null || captionParams == null) return;
                 captionParams.width = Math.round(width * 0.86f);
                 captionParams.x = Math.min(captionParams.x, Math.round(width * 0.14f));
@@ -1091,7 +1124,10 @@ public final class SubtitleCaptureService extends Service {
                 lastTranslation = "";
                 previousCandidate = null;
                 stableSubtitleFrames = 0;
-                showCaption("等待外語字幕…");
+                if (SubtitleVoicePriority.mayDisplayOcr(voiceFallbackEnabled,
+                        SystemClock.elapsedRealtime(), lastVoiceCaptionMs))
+                    showCaption(voiceFallbackEnabled ? "語音無台詞，等待畫面字幕…" :
+                            "等待外語字幕…");
             }
             return;
         }
@@ -1112,6 +1148,8 @@ public final class SubtitleCaptureService extends Service {
             positionCaptionAbove(chosen);
             return;
         }
+        if (!SubtitleVoicePriority.mayDisplayOcr(voiceFallbackEnabled,
+                SystemClock.elapsedRealtime(), lastVoiceCaptionMs)) return;
         if (!translateBusy.compareAndSet(false, true)) return;
         final SubtitleCandidatePolicy.Candidate translatedCandidate = chosen;
         lastSource = source;
@@ -1139,6 +1177,8 @@ public final class SubtitleCaptureService extends Service {
                         showCaption("等待正確的中文字幕…");
                         return;
                     }
+                    if (!SubtitleVoicePriority.mayDisplayOcr(voiceFallbackEnabled,
+                            SystemClock.elapsedRealtime(), lastVoiceCaptionMs)) return;
                     lastOcrCaptionMs = SystemClock.elapsedRealtime();
                     showCaption(lastTranslation);
                     positionCaptionAbove(translatedCandidate);
