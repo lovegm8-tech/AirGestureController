@@ -84,8 +84,6 @@ class TransferActivity : ComponentActivity() {
     private lateinit var transferSwitch: Switch
     private lateinit var subtitleSwitch: Switch
     private lateinit var subtitleLanguage: Spinner
-    private lateinit var subtitleArea: Spinner
-    private lateinit var subtitleCustomAreaControls: LinearLayout
     private var subtitlePendingPermission = false
     private var subtitleNeedsOverlay = false
     private lateinit var modeDescription: TextView
@@ -151,7 +149,12 @@ class TransferActivity : ComponentActivity() {
                     .putExtra(SubtitleCaptureService.EXTRA_RESULT, result.resultCode)
                     .putExtra(SubtitleCaptureService.EXTRA_DATA, result.data)
                 ContextCompat.startForegroundService(this, command)
-                main.postDelayed({ refreshHome() }, 900)
+                // Show the calibration rectangle over the previous video app,
+                // not on top of Floating Control's settings page.
+                main.postDelayed({
+                    moveTaskToBack(true)
+                    refreshHome()
+                }, 350)
             } catch (exception: Exception) {
                 flash("無法啟動 OCR 懸浮翻譯：" + exception.javaClass.simpleName)
             }
@@ -414,11 +417,6 @@ class TransferActivity : ComponentActivity() {
             if (::subtitleSwitch.isInitialized) {
                 subtitleSwitch.isChecked = SubtitleCaptureService.running || subtitlePendingPermission
                 subtitleLanguage.isEnabled = !SubtitleCaptureService.running && !subtitlePendingPermission
-                if (::subtitleArea.isInitialized) {
-                    subtitleArea.isEnabled = !SubtitleCaptureService.running && !subtitlePendingPermission
-                    subtitleCustomAreaControls.alpha =
-                        if (subtitleArea.isEnabled) 1f else 0.55f
-                }
             }
             updatingModeControls = false
             modeDescription.text = modeLabel() +
@@ -625,70 +623,20 @@ class TransferActivity : ComponentActivity() {
             }
         }
         modePanel.addView(subtitleLanguage)
-        modePanel.addView(text("字幕辨識位置（變更後關閉再重新啟動翻譯）", 13f))
-        subtitleCustomAreaControls = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        val areaPreferences = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
-        // Existing v1.0.24 installations often persisted AUTO (0) by default.
-        // Migrate that old default once so v1.0.25 really scans the whole
-        // display without asking the user to find a hidden setting.
-        if (!areaPreferences.getBoolean("full_scan_v125_migrated", false)) {
-            val prior = areaPreferences.getInt("subtitle_area_mode", 0)
-            val change = areaPreferences.edit()
-                .putBoolean("full_scan_v125_migrated", true)
-            if (prior == 0) change.putInt("subtitle_area_mode", 4)
-            change.apply()
-        }
-        val topAreaText = text("自訂起點", 12f)
-        val bottomAreaText = text("自訂終點", 12f)
-        fun areaSeekBar(preference: String, maxProgress: Int,
-                        defaultPercent: Int, label: TextView,
-                        prefix: String): SeekBar =
-            SeekBar(this).apply {
-                max = maxProgress
-                progress = areaPreferences.getInt(preference, defaultPercent).coerceIn(0, maxProgress)
-                label.text = "$prefix：${progress}% 螢幕高度"
-                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                    override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
-                        if (!fromUser) return
-                        label.text = "$prefix：${value}% 螢幕高度"
-                        areaPreferences.edit().putInt(preference, value).apply()
-                    }
-                    override fun onStartTrackingTouch(bar: SeekBar?) = Unit
-                    override fun onStopTrackingTouch(bar: SeekBar?) = Unit
-                })
-            }
-        subtitleCustomAreaControls.addView(topAreaText)
-        subtitleCustomAreaControls.addView(areaSeekBar(
-            "subtitle_area_top_pct", 85, 20, topAreaText, "上方開始"))
-        subtitleCustomAreaControls.addView(bottomAreaText)
-        subtitleCustomAreaControls.addView(areaSeekBar(
-            "subtitle_area_bottom_pct", 100, 85, bottomAreaText, "下方結束"))
-        subtitleArea = Spinner(this).apply {
-            adapter = ArrayAdapter(this@TransferActivity,
-                android.R.layout.simple_spinner_dropdown_item,
-                listOf(
-                    "智慧（一般影片直式上方／橫式下方）",
-                    "一般影片 · 上半部",
-                    "短影音 · 畫面中央偏下",
-                    "畫面下半部",
-                    "整個螢幕（自動尋找字幕，預設）",
-                    "自訂位置（下方兩個滑桿）"
-                ))
-            setSelection(areaPreferences.getInt("subtitle_area_mode", 4).coerceIn(0, 5))
-            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-                override fun onNothingSelected(parent: AdapterView<*>?) = Unit
-                override fun onItemSelected(parent: AdapterView<*>?, view: View?,
-                    position: Int, id: Long) {
-                    if (SubtitleCaptureService.running || subtitlePendingPermission) return
-                    areaPreferences.edit().putInt("subtitle_area_mode", position).apply()
-                    subtitleCustomAreaControls.visibility =
-                        if (position == 5) View.VISIBLE else View.GONE
+        modePanel.addView(text("字幕辨識位置：啟動後直接在影片上拖曳綠框、拉四角調整大小。直向、橫向分別記住上次的位置。", 13f))
+        modePanel.addView(Button(this).apply {
+            text = "重新框選字幕範圍"
+            isAllCaps = false
+            setOnClickListener {
+                if (SubtitleCaptureService.running) {
+                    startService(Intent(this@TransferActivity, SubtitleCaptureService::class.java)
+                        .setAction(SubtitleCaptureService.ACTION_EDIT))
+                    main.postDelayed({ moveTaskToBack(true) }, 280L)
+                } else {
+                    flash("請先開啟懸浮翻譯，再到影片上框選字幕")
                 }
             }
-        }
-        modePanel.addView(subtitleArea)
+        })
         modePanel.addView(Button(this).apply {
             text = "查看字幕辨識診斷（原文／翻譯）"
             isAllCaps = false
@@ -697,22 +645,16 @@ class TransferActivity : ComponentActivity() {
                     .setTitle("本機字幕辨識診斷")
                     .setMessage(
                         "掃描方式：${SubtitleCaptureService.lastScanMode}" +
-                        "\n\nOCR 原文：\n${SubtitleCaptureService.lastRecognizedSource}" +
-                        "\n\n翻譯結果：\n${SubtitleCaptureService.lastTranslationResult}" +
-                        "\n\n翻譯品質：${SubtitleCaptureService.lastTranslationQuality}" +
-                        "\n\n字幕選取：${SubtitleCaptureService.lastSelectionStatus}" +
-                        "\n\nOCR 候選排名：${SubtitleCaptureService.lastCandidateSummary}" +
-                        "\n\n此診斷僅保留記憶體中的最近一筆，不會上傳影像或文字。"
+                        "\\n\\nOCR 原文：\\n${SubtitleCaptureService.lastRecognizedSource}" +
+                        "\\n\\n翻譯結果：\\n${SubtitleCaptureService.lastTranslationResult}" +
+                        "\\n\\n翻譯品質：${SubtitleCaptureService.lastTranslationQuality}" +
+                        "\\n\\n字幕選取：${SubtitleCaptureService.lastSelectionStatus}" +
+                        "\\n\\nOCR 候選：${SubtitleCaptureService.lastCandidateSummary}" +
+                        "\\n\\n只保存在記憶體中，沒有上傳畫面。"
                     )
                     .setPositiveButton("關閉", null).show()
             }
         })
-        subtitleCustomAreaControls.visibility =
-            if (areaPreferences.getInt("subtitle_area_mode", 4) == 5) View.VISIBLE
-            else View.GONE
-        modePanel.addView(subtitleCustomAreaControls)
-        modePanel.addView(text(
-            "預設全螢幕找字幕，中文字幕自動顯示在原字幕上方；手動拖曳後會停止自動跟隨，直到重新開啟翻譯。若抓到影片標題，可使用自訂位置縮小範圍。", 12f))
         modeDescription = text(modeLabel(), 14f)
         modePanel.addView(modeDescription)
         root.addView(modePanel)
