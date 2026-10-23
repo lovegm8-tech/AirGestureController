@@ -75,7 +75,7 @@ public final class SubtitleCaptureService extends Service {
     public static final String EXTRA_DATA = "screen_capture_data";
     private static final String CHANNEL_ID = "floating_subtitle_capture";
     private static final int NOTIFICATION_ID = 34122;
-    private static final long SCAN_INTERVAL_MS = 1000L;
+    private static final long SCAN_INTERVAL_MS = 650L;
     @SuppressWarnings("FieldMayBeFinal")
     public static volatile boolean running = false;
 
@@ -97,6 +97,17 @@ public final class SubtitleCaptureService extends Service {
     private long lastVoiceCaptionMs = 0L;
     private String lastSpokenSource = "";
     public static volatile String lastVoiceStatus = "語音補位未啟用";
+    public static volatile String lastCaptureStatus = "尚未取得畫面";
+    public static volatile String lastOcrStatus = "OCR 尚未啟動";
+    public static volatile String lastModelStatus = "翻譯模型尚未初始化";
+    public static volatile String lastCropStatus = "未選取字幕範圍";
+    public static volatile int framesCaptured = 0;
+    public static volatile int ocrRunsSucceeded = 0;
+    public static volatile int ocrRunsFailed = 0;
+    public static volatile int lastRawOcrLines = 0;
+    public static volatile int lastAcceptedOcrLines = 0;
+    private long lastFrameAvailableMs = 0L;
+    private int ocrEmptyFrameStreak = 0;
     public static volatile String lastSpokenOriginal = "尚無語音辨識結果";
     private volatile boolean pausedByUser = false;
     private volatile Rect activeRoi;
@@ -140,6 +151,15 @@ public final class SubtitleCaptureService extends Service {
         lastTranslationQuality = "尚無翻譯結果";
         lastSelectionStatus = "等待 OCR 擷取畫面";
         lastVoiceStatus = "語音補位未啟用";
+        lastCaptureStatus = "尚未取得畫面";
+        lastOcrStatus = "OCR 尚未啟動";
+        lastModelStatus = "翻譯模型尚未初始化";
+        lastCropStatus = "未選取字幕範圍";
+        framesCaptured = 0;
+        ocrRunsSucceeded = 0;
+        ocrRunsFailed = 0;
+        lastRawOcrLines = 0;
+        lastAcceptedOcrLines = 0;
         lastSpokenOriginal = "尚無語音辨識結果";
         workerThread = new HandlerThread("floating-subtitle-ocr");
         workerThread.start();
@@ -236,16 +256,20 @@ public final class SubtitleCaptureService extends Service {
         translator = Translation.getClient(new TranslatorOptions.Builder()
                 .setSourceLanguage(translateFrom)
                 .setTargetLanguage(TranslateLanguage.CHINESE).build());
+        lastModelStatus = "下載或載入離線翻譯模型";
         showCaption("正在準備翻譯模型…");
         // The model downloads only if needed; subsequent use can be entirely offline.
         translator.downloadModelIfNeeded(new DownloadConditions.Builder().requireWifi().build())
                 .addOnSuccessListener(ignored -> {
                     if (!running) return;
                     modelReady = true;
+                    lastModelStatus = "翻譯模型已就緒";
                     if (!calibrating) showCaption("翻譯已開啟，等待外語字幕…");
                 })
                 .addOnFailureListener(error -> {
                     modelReady = false;
+                    lastModelStatus = "翻譯模型載入失敗：" +
+                            error.getClass().getSimpleName() + " " + error.getMessage();
                     showCaption("無法載入翻譯模型，請連接 Wi-Fi 後重新啟動翻譯");
                 });
     }
@@ -448,6 +472,9 @@ public final class SubtitleCaptureService extends Service {
                         .putFloat(key + "_r", selected.right)
                         .putFloat(key + "_b", selected.bottom).apply();
                 activeRoi = region;
+                lastCropStatus = "已確認原始框：" + region.left + "," + region.top +
+                        " 至 " + region.right + "," + region.bottom;
+                lastOcrStatus = "框選完成，等待第一張 OCR 擷取畫面";
                 manuallySelecting = false;
                 closeSelectionEditor();
                 pausedByUser = false;
@@ -650,7 +677,14 @@ public final class SubtitleCaptureService extends Service {
         try {
             if (imageReader == null) return;
             image = imageReader.acquireLatestImage();
-            if (image == null) return;
+            if (image == null) {
+                if (SystemClock.elapsedRealtime() - lastFrameAvailableMs > 3500L)
+                    lastCaptureStatus = "畫面擷取暫無影格（播放器可能禁止擷取或暫停）";
+                return;
+            }
+            lastFrameAvailableMs = SystemClock.elapsedRealtime();
+            framesCaptured++;
+            lastCaptureStatus = "畫面擷取正常（已取得 " + framesCaptured + " 張影格）";
             Image.Plane plane = image.getPlanes()[0];
             int pixelStride = plane.getPixelStride();
             if (pixelStride <= 0 || plane.getRowStride() / pixelStride < width) return;
@@ -674,15 +708,29 @@ public final class SubtitleCaptureService extends Service {
             if (manualRoiActive) {
                 Rect roi = new Rect(selectedRoi);
                 if (!roi.intersect(0, 0, width, height) ||
-                        roi.width() < 2 || roi.height() < 2) return;
+                        roi.width() < 2 || roi.height() < 2) {
+                    lastCropStatus = "框選區域不在畫面內，請重新框選";
+                    return;
+                }
+                // OCR often misses dialogue clipped to its pixel bounds.
+                // Slightly expand the user-specified strip without scanning
+                // the unrelated recommendations further down the page.
+                int marginX = Math.min(dp(11), Math.max(2, roi.width() / 30));
+                int marginY = Math.min(dp(8), Math.max(2, roi.height() / 6));
+                roi.left = Math.max(0, roi.left - marginX);
+                roi.right = Math.min(width, roi.right + marginX);
+                roi.top = Math.max(0, roi.top - marginY);
+                roi.bottom = Math.min(height, roi.bottom + marginY);
                 cropX = roi.left;
                 rawCropY = roi.top;
                 crop = Bitmap.createBitmap(screen,
                         roi.left, roi.top, roi.width(), roi.height());
                 // Subtitle font in small selected regions needs more pixels,
                 // especially on portrait YouTube and low-resolution streams.
-                float scale = Math.min(2.15f,
-                        Math.max(1.0f, 1500f / Math.max(1, roi.width())));
+                float scale = Math.min(2.7f,
+                        Math.max(2.25f, 2300f / Math.max(1, roi.width())));
+                lastCropStatus = "手動框 OCR：" + roi.left + "," + roi.top + " → " +
+                        roi.right + "," + roi.bottom + "，放大 " + scale + " 倍";
                 if (scale > 1.05f) {
                     enlarged = Bitmap.createScaledBitmap(crop,
                             Math.max(1, Math.round(roi.width() * scale)),
@@ -734,18 +782,34 @@ public final class SubtitleCaptureService extends Service {
                     (height > width ? "直向全螢幕" : "橫向全螢幕")));
             Bitmap owned = crop;
             crop = null;
+            lastOcrStatus = "正在執行 OCR（掃描中）";
             recognizer.process(InputImage.fromBitmap(owned, 0))
                     .addOnSuccessListener(text -> {
+                        ocrRunsSucceeded++;
+                        int rawLines = 0;
+                        for (Text.TextBlock block : text.getTextBlocks()) {
+                            rawLines += block.getLines().size();
+                        }
+                        lastRawOcrLines = rawLines;
+                        lastOcrStatus = "OCR 已完成 " + ocrRunsSucceeded + " 次，原始文字行 " + rawLines;
+                        if (rawLines == 0) ocrEmptyFrameStreak++;
+                        else ocrEmptyFrameStreak = 0;
                         if (!calibrating) translateRecognizedLines(text, frameCropX, frameCropY,
                                 frameScale, manualRoiActive);
+                    })
+                    .addOnFailureListener(error -> {
+                        ocrRunsFailed++;
+                        lastOcrStatus = "OCR 失敗：" + error.getClass().getSimpleName() +
+                                " " + error.getMessage() + "（" + ocrRunsFailed + " 次）";
                     })
                     .addOnCompleteListener(task -> {
                         owned.recycle();
                         ocrBusy.set(false);
                     });
             acceptedByRecognizer = true;
-        } catch (Exception ignored) {
-            // Nonfatal: next frame retries.
+        } catch (Exception captureError) {
+            lastCaptureStatus = "擷取影格失敗：" + captureError.getClass().getSimpleName() +
+                    " " + captureError.getMessage();
         } finally {
             if (image != null) image.close();
             if (screen != null) screen.recycle();
@@ -805,6 +869,14 @@ public final class SubtitleCaptureService extends Service {
                             Math.round(bottom / imageScale) + frameCropY));
                 }
             }
+        }
+        lastAcceptedOcrLines = candidates.size();
+        if (candidates.isEmpty()) {
+            lastOcrStatus = "OCR 完成：原始 " + lastRawOcrLines + " 行，來源語言有效 0 行" +
+                    (manualRoiActive ? "；請確認字幕完整落在框內" : "");
+        } else {
+            lastOcrStatus = "OCR 完成：原始 " + lastRawOcrLines +
+                    " 行，有效字幕 " + candidates.size() + " 行";
         }
         java.util.List<SubtitleCandidatePolicy.Candidate> originals = new ArrayList<>(candidates);
         candidates.addAll(SubtitleCandidatePolicy.joinNearbyLines(originals, width));
