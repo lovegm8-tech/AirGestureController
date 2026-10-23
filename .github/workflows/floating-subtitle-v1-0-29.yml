@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   signed-release:
-    if: github.ref == 'refs/heads/feature/floating-subtitle-ocr-v1-0-29' && github.event.repository.full_name == 'lovegm8-tech/AirGestureController'
+    if: github.ref == 'refs/heads/feature/floating-subtitle-manual-roi-v1-0-29' && github.event.repository.full_name == 'lovegm8-tech/AirGestureController'
     runs-on: ubuntu-latest
     timeout-minutes: 50
     defaults:
