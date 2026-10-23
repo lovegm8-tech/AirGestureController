@@ -220,6 +220,7 @@ public final class SubtitlePlaybackSpeech {
                         "語音補位已啟動（只聽允許擷取的播放聲音）");
                 byte[] pcm = new byte[3200]; // 100 ms of 16 kHz mono PCM 16-bit
                 long lastPartialAt = 0;
+                String previousPartial = "";
                 String lastCandidate = "";
                 long lastReportAt = android.os.SystemClock.elapsedRealtime();
                 long audibleSamples = 0;
@@ -234,20 +235,27 @@ public final class SubtitlePlaybackSpeech {
                         if (pcm[i] != 0 || pcm[i+1] != 0) { audibleSamples++; break; }
                     }
                     if (recognizer.acceptWaveForm(pcm, n)) {
+                        // Vosk final sentences still take priority for accuracy.
+                        // Partial text below is only an early subtitle preview.
                         String sentence = recognizeText(recognizer.getResult(), "text");
+                        previousPartial = "";
                         if (sentence.length() >= SubtitleSpeechModels.minFinalLength(language)
-                                && !sentence.equalsIgnoreCase(lastCandidate)) {
+                                && SubtitleSpeechEmissionPolicy.meaningfulChange(
+                                        lastCandidate, sentence, language)) {
                             lastCandidate = sentence;
                             callback.onUtterance(sentence);
                         }
                     } else {
                         long now = android.os.SystemClock.elapsedRealtime();
-                        if (now - lastPartialAt >= 2900) {
+                        if (now - lastPartialAt >= SubtitleSpeechEmissionPolicy.PARTIAL_POLL_MS) {
                             String partial = recognizeText(recognizer.getPartialResult(), "partial");
-                            if (partial.length() >= SubtitleSpeechModels.minPartialLength(language)
-                                    && !partial.equalsIgnoreCase(lastCandidate)) {
-                                lastCandidate = partial;
-                                callback.onUtterance(partial);
+                            String stable = SubtitleSpeechEmissionPolicy.stablePartial(
+                                    previousPartial, partial, language);
+                            previousPartial = partial;
+                            if (SubtitleSpeechEmissionPolicy.meaningfulChange(
+                                    lastCandidate, stable, language)) {
+                                lastCandidate = stable;
+                                callback.onUtterance(stable);
                             }
                             lastPartialAt = now;
                         }
