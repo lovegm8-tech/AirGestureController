@@ -22,6 +22,35 @@ public final class SubtitleCandidatePolicy {
         public int centerY() { return (top + bottom) / 2; }
     }
 
+
+    /**
+     * OCR often puts two lines of dialogue in separate blocks. Combine only
+     * adjacent, similarly centered lines, not paragraphs or scattered UI.
+     */
+    public static java.util.List<Candidate> joinNearbyLines(java.util.List<Candidate> lines, int width) {
+        java.util.List<Candidate> pairs = new java.util.ArrayList<>();
+        if (lines == null) return pairs;
+        for (int i = 0; i < lines.size(); i++) {
+            Candidate a = lines.get(i);
+            int ah = Math.max(1, a.bottom - a.top);
+            if (a.text.length() < 3 || a.text.length() > 135) continue;
+            for (int j = 0; j < lines.size(); j++) {
+                if (j == i) continue;
+                Candidate b = lines.get(j);
+                int bh = Math.max(1, b.bottom - b.top);
+                int gap = b.top - a.bottom;
+                if (gap < -Math.min(ah, bh) / 4 || gap > Math.max(ah, bh) * 2) continue;
+                if (Math.abs(a.centerX() - b.centerX()) > width * 0.19f) continue;
+                if (ah > bh * 2.0f || bh > ah * 2.0f) continue;
+                if (a.text.length() + b.text.length() > 190) continue;
+                pairs.add(new Candidate(a.text + " " + b.text,
+                        Math.min(a.left, b.left), a.top,
+                        Math.max(a.right, b.right), b.bottom));
+            }
+        }
+        return pairs;
+    }
+
     public static Candidate best(List<Candidate> candidates, int screenWidth,
                                  int screenHeight, Candidate previous, int stableFrames) {
         if (candidates == null || candidates.isEmpty() || screenWidth < 1 || screenHeight < 1)
