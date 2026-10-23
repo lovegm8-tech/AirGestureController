@@ -176,9 +176,11 @@ public final class SubtitleCaptureService extends Service {
         try {
             createNotificationChannel();
             voiceFallbackEnabled = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
-                    .getBoolean("enable_voice_fallback_en", false)
-                    && "en".equals(getSharedPreferences("floating_subtitle", MODE_PRIVATE)
-                            .getString("source_language", "en"))
+                    .getBoolean("enable_voice_fallback", false)
+                    && ("en".equals(getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                            .getString("source_language", "en")) ||
+                        "ja".equals(getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                            .getString("source_language", "en")))
                     && checkSelfPermission(Manifest.permission.RECORD_AUDIO)
                             == PackageManager.PERMISSION_GRANTED;
             int foregroundTypes = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION;
@@ -483,23 +485,24 @@ public final class SubtitleCaptureService extends Service {
 
 
     private void startPlaybackSpeech() {
-        lastVoiceStatus = "正在準備英文離線語音補位";
-        playbackSpeech = new SubtitlePlaybackSpeech(this, mediaProjection,
+        lastVoiceStatus = "正在準備" + ("ja".equals(sourceLanguage) ? "日文" : "英文") + "離線語音補位";
+        playbackSpeech = new SubtitlePlaybackSpeech(this, mediaProjection, sourceLanguage,
                 new SubtitlePlaybackSpeech.Callback() {
                     @Override public void onStatus(String status) {
                         lastVoiceStatus = status;
                     }
-                    @Override public void onUtterance(String english) {
-                        translateVoiceFallback(english);
+                    @Override public void onUtterance(String original) {
+                        translateVoiceFallback(original);
                     }
                 });
         playbackSpeech.start();
     }
 
-    private void translateVoiceFallback(String english) {
-        if (english == null) return;
-        String source = english.replaceAll("\\s+", " ").trim();
-        if (source.length() < 9 || source.equalsIgnoreCase(lastSpokenSource)) return;
+    private void translateVoiceFallback(String original) {
+        if (original == null) return;
+        String source = original.replaceAll("\\s+", " ").trim();
+        int minLength = "ja".equals(sourceLanguage) ? 3 : 9;
+        if (source.length() < minLength || source.equalsIgnoreCase(lastSpokenSource)) return;
         lastSpokenOriginal = source;
         long now = SystemClock.elapsedRealtime();
         if (!SubtitleVoicePriority.mayDisplayVoice(voiceFallbackEnabled, modelReady,
@@ -527,7 +530,8 @@ public final class SubtitleCaptureService extends Service {
                 })
                 .addOnFailureListener(error -> {
                     if (source.equals(lastSpokenSource)) lastSpokenSource = "";
-                    lastVoiceStatus = "英文語音翻譯失敗：" + error.getClass().getSimpleName();
+                    lastVoiceStatus = ("ja".equals(sourceLanguage) ? "日文" : "英文") +
+                            "語音翻譯失敗：" + error.getClass().getSimpleName();
                 })
                 .addOnCompleteListener(done -> translateBusy.set(false));
     }
