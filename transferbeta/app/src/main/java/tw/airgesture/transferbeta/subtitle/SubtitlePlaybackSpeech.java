@@ -35,7 +35,7 @@ import java.util.zip.ZipInputStream;
 public final class SubtitlePlaybackSpeech {
     public interface Callback {
         void onStatus(String status);
-        void onUtterance(String english);
+        void onUtterance(String words, long utteranceId, boolean isFinal);
     }
 
     private final String modelFolder;
@@ -222,6 +222,7 @@ public final class SubtitlePlaybackSpeech {
                 long lastPartialAt = 0;
                 String previousPartial = "";
                 String lastCandidate = "";
+                long utteranceId = 1L;
                 long lastReportAt = android.os.SystemClock.elapsedRealtime();
                 long audibleSamples = 0;
                 while (alive.get() && !Thread.currentThread().isInterrupted()) {
@@ -244,8 +245,12 @@ public final class SubtitlePlaybackSpeech {
                         if (sentence.length() >= SubtitleSpeechModels.minFinalLength(language)
                                 && !sentence.equalsIgnoreCase(lastCandidate)) {
                             lastCandidate = sentence;
-                            callback.onUtterance(sentence);
+                            callback.onUtterance(sentence, utteranceId, true);
                         }
+                        // Even an empty Vosk final segment ends the speech
+                        // group: the next words must occupy a NEW subtitle row.
+                        utteranceId++;
+                        lastCandidate = "";
                     } else {
                         long now = android.os.SystemClock.elapsedRealtime();
                         if (now - lastPartialAt >= SubtitleSpeechEmissionPolicy.PARTIAL_POLL_MS) {
@@ -256,7 +261,7 @@ public final class SubtitlePlaybackSpeech {
                             if (SubtitleSpeechEmissionPolicy.meaningfulChange(
                                     lastCandidate, stable, language)) {
                                 lastCandidate = stable;
-                                callback.onUtterance(stable);
+                                callback.onUtterance(stable, utteranceId, false);
                             }
                             lastPartialAt = now;
                         }
