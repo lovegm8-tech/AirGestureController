@@ -41,6 +41,8 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.content.SharedPreferences;
 import android.widget.TextView;
+import android.widget.ImageView;
+import android.widget.ScrollView;
 
 import com.google.mlkit.common.model.DownloadConditions;
 import com.google.mlkit.nl.translate.TranslateLanguage;
@@ -89,6 +91,13 @@ public final class SubtitleCaptureService extends Service {
     private WindowManager windowManager;
     private TextView captionView;
     private FrameLayout editorRoot;
+    private ScrollView diagnosticView;
+    private volatile Bitmap latestOcrCropPreview;
+    private volatile long lastPreviewUpdatedMs = 0L;
+    private volatile String lastNonemptyRawOcrText = "近期尚未辨識到文字";
+    private volatile long lastNonemptyRawOcrAtMs = 0L;
+    private volatile String latestRawOcrText = "尚無原始 OCR 文字";
+    private boolean diagnosisWasCalibrating = false;
     private SubtitleRoiEditor roiEditor;
     private SubtitleBubbleController translationBubble;
     private SubtitlePlaybackSpeech playbackSpeech;
@@ -153,6 +162,9 @@ public final class SubtitleCaptureService extends Service {
         lastVoiceStatus = "語音補位未啟用";
         lastCaptureStatus = "尚未取得畫面";
         lastOcrStatus = "OCR 尚未啟動";
+        latestRawOcrText = "尚無原始 OCR 文字";
+        lastNonemptyRawOcrText = "近期尚未辨識到文字";
+        lastNonemptyRawOcrAtMs = 0L;
         lastModelStatus = "翻譯模型尚未初始化";
         lastCropStatus = "未選取字幕範圍";
         framesCaptured = 0;
@@ -392,6 +404,7 @@ public final class SubtitleCaptureService extends Service {
             translationBubble = new SubtitleBubbleController(
                     this, windowManager, new SubtitleBubbleController.Actions() {
                 @Override public void onRecalibrate() { openSelectionEditor(); }
+                @Override public void onShowDiagnostics() { openLiveDiagnostics(); }
                 @Override public void onTogglePaused() { togglePausedTranslation(); }
                 @Override public void onStop() { stopSelf(); }
             });
@@ -416,6 +429,7 @@ public final class SubtitleCaptureService extends Service {
     /** Editable overlay is never included in the recorded OCR screenshot. */
     private void openSelectionEditor() {
         if (!running || !Settings.canDrawOverlays(this)) return;
+        closeLiveDiagnostics();
         calibrating = true;
         manuallySelecting = true;
         hideReopenButton();
@@ -575,6 +589,100 @@ public final class SubtitleCaptureService extends Service {
             try { windowManager.updateViewLayout(captionView, captionParams); }
             catch (IllegalArgumentException ignored) { }
         });
+    }
+
+
+    /** View the actual OCR pixels without leaving the current video player.
+     * This is created only after an explicit bubble tap, remains on the device,
+     * and is not sent to any server or persisted to media storage.
+     */
+    private void openLiveDiagnostics() {
+        if (!running || diagnosticView != null) return;
+        diagnosisWasCalibrating = calibrating;
+        calibrating = true; // pause scanning before showing non-SECURE inspector
+        try {
+            diagnosticView = new ScrollView(this);
+            diagnosticView.setFillViewport(false);
+            GradientDrawable bg = new GradientDrawable();
+            bg.setColor(Color.argb(248, 17, 24, 36));
+            bg.setCornerRadius(dp(15));
+            diagnosticView.setBackground(bg);
+            LinearLayout contents = new LinearLayout(this);
+            contents.setOrientation(LinearLayout.VERTICAL);
+            contents.setPadding(dp(14), dp(12), dp(14), dp(12));
+            diagnosticView.addView(contents);
+
+            TextView title = new TextView(this);
+            title.setText("字幕 OCR 現場診斷");
+            title.setTextColor(Color.WHITE);
+            title.setTextSize(20f);
+            contents.addView(title);
+
+            TextView explain = new TextView(this);
+            explain.setText("下方影像就是 OCR 真正讀取的裁切畫面。此面板開啟期間辨識暫停；可直接截圖傳送，關閉後恢復。");
+            explain.setTextColor(Color.LTGRAY);
+            explain.setPadding(0, dp(8), 0, dp(8));
+            contents.addView(explain);
+
+            Bitmap preview = latestOcrCropPreview;
+            if (preview != null && !preview.isRecycled()) {
+                ImageView image = new ImageView(this);
+                image.setImageBitmap(preview);
+                image.setBackgroundColor(Color.DKGRAY);
+                image.setAdjustViewBounds(true);
+                image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                contents.addView(image, new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        Math.min(dp(220), Math.max(dp(86), preview.getHeight()))));
+            }
+
+            String when = lastNonemptyRawOcrAtMs == 0L
+                    ? "最近沒有成功辨識到文字"
+                    : "距最近一次非空原文 " + ((SystemClock.elapsedRealtime()
+                        - lastNonemptyRawOcrAtMs) / 1000L) + " 秒";
+            TextView details = new TextView(this);
+            details.setTextColor(Color.WHITE);
+            details.setTextSize(14f);
+            details.setPadding(0, dp(9), 0, dp(9));
+            details.setText("影格：" + framesCaptured + "；OCR 成功：" + ocrRunsSucceeded +
+                    "，錯誤：" + ocrRunsFailed +
+                    "\n範圍：" + lastCropStatus +
+                    "\n最近一次 OCR：" + latestRawOcrText +
+                    "\n最後非空原文：" + lastNonemptyRawOcrText +
+                    "\n" + when +
+                    "\n模型：" + lastModelStatus +
+                    "\n選取：" + lastSelectionStatus +
+                    "\n語音：" + lastVoiceStatus);
+            contents.addView(details);
+
+            Button dismiss = new Button(this);
+            dismiss.setText("關閉診斷，繼續翻譯");
+            dismiss.setOnClickListener(v -> closeLiveDiagnostics());
+            contents.addView(dismiss);
+
+            WindowManager.LayoutParams p = new WindowManager.LayoutParams(
+                    Math.max(dp(300), Math.min(width - dp(24), dp(440))),
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
+                            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                    PixelFormat.TRANSLUCENT);
+            p.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+            p.y = dp(55);
+            windowManager.addView(diagnosticView, p);
+        } catch (Exception error) {
+            closeLiveDiagnostics();
+            lastOcrStatus = "診斷視窗失敗：" + error.getClass().getSimpleName();
+        }
+    }
+
+    private void closeLiveDiagnostics() {
+        if (diagnosticView != null) {
+            try { windowManager.removeView(diagnosticView); }
+            catch (IllegalArgumentException ignored) { }
+            diagnosticView = null;
+            if (running) calibrating = diagnosisWasCalibrating;
+        }
     }
 
     private void showCaption(String text) {
@@ -784,6 +892,25 @@ public final class SubtitleCaptureService extends Service {
                     (height > width ? "直向全螢幕" : "橫向全螢幕")));
             Bitmap owned = crop;
             crop = null;
+            // Keep a reduced, memory-only preview of exactly what ML Kit sees.
+            // The user can inspect it from the floating ball while still on
+            // the video; returning to the app changes captured screen content.
+            final long previewAt = SystemClock.elapsedRealtime();
+            if (previewAt - lastPreviewUpdatedMs > 2500L || latestOcrCropPreview == null) {
+            lastPreviewUpdatedMs = previewAt;
+            final int previewWidth = Math.min(650, owned.getWidth());
+            final int previewHeight = Math.max(1, Math.round(
+                    owned.getHeight() * (previewWidth / (float) owned.getWidth())));
+            Bitmap nextPreview = Bitmap.createScaledBitmap(
+                    owned, previewWidth, previewHeight, false);
+            Bitmap previousPreview = latestOcrCropPreview;
+            latestOcrCropPreview = nextPreview;
+            // Diagnostic panel pauses scanning, so this bitmap won't be swapped
+            // while an inspector is open.
+            if (previousPreview != null && !previousPreview.isRecycled()) {
+                previousPreview.recycle();
+            }
+            }
             lastOcrStatus = "正在執行 OCR（掃描中）";
             recognizer.process(InputImage.fromBitmap(owned, 0))
                     .addOnSuccessListener(text -> {
@@ -793,6 +920,20 @@ public final class SubtitleCaptureService extends Service {
                             rawLines += block.getLines().size();
                         }
                         lastRawOcrLines = rawLines;
+                        StringBuilder rawText = new StringBuilder();
+                        for (Text.TextBlock block : text.getTextBlocks()) {
+                            for (Text.Line line : block.getLines()) {
+                                if (rawText.length() > 0) rawText.append(" | ");
+                                if (rawText.length() > 600) break;
+                                rawText.append(line.getText());
+                            }
+                        }
+                        latestRawOcrText = rawText.length() == 0
+                                ? "這一張影格沒有辨識到任何文字" : rawText.toString();
+                        if (rawText.length() > 0) {
+                            lastNonemptyRawOcrText = latestRawOcrText;
+                            lastNonemptyRawOcrAtMs = SystemClock.elapsedRealtime();
+                        }
                         lastOcrStatus = "OCR 已完成 " + ocrRunsSucceeded + " 次，原始文字行 " + rawLines;
                         if (rawLines == 0) ocrEmptyFrameStreak++;
                         else ocrEmptyFrameStreak = 0;
@@ -1044,6 +1185,10 @@ public final class SubtitleCaptureService extends Service {
         running = false;
         modelReady = false;
         if (worker != null) worker.removeCallbacksAndMessages(null);
+        closeLiveDiagnostics();
+        Bitmap stalePreview = latestOcrCropPreview;
+        latestOcrCropPreview = null;
+        if (stalePreview != null && !stalePreview.isRecycled()) stalePreview.recycle();
         if (playbackSpeech != null) {
             playbackSpeech.stop();
             playbackSpeech = null;
