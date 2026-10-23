@@ -94,11 +94,19 @@ public final class SubtitleCaptureService extends Service {
     private boolean captionDraggedByUser = false;
     private volatile long lastSubtitleObservedMs = 0L;
     private int captureCropY = 0;
+    private int scanCounter = 0;
+    private static final float PORTRAIT_ZOOM = 1.6f;
+    public static volatile String lastRecognizedSource = "尚未辨識到原文";
+    public static volatile String lastTranslationResult = "尚未翻譯";
+    public static volatile String lastScanMode = "尚未開始掃描";
     private String sourceLanguage = "en";
 
     @Override public void onCreate() {
         super.onCreate();
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
+        lastRecognizedSource = "尚未辨識到原文";
+        lastTranslationResult = "尚未翻譯";
+        lastScanMode = "初始化";
         workerThread = new HandlerThread("floating-subtitle-ocr");
         workerThread.start();
         worker = new Handler(workerThread.getLooper());
@@ -347,6 +355,7 @@ public final class SubtitleCaptureService extends Service {
         Image image = null;
         Bitmap screen = null;
         Bitmap crop = null;
+        Bitmap enlarged = null;
         boolean acceptedByRecognizer = false;
         try {
             if (imageReader == null) return;
@@ -368,13 +377,41 @@ public final class SubtitleCaptureService extends Service {
             final int[] region = SubtitleRegionPolicy.verticalBounds(
                     width, height, mode, topPercent, bottomPercent);
             captureCropY = region[0];
-            final int frameCropY = region[0];
+            int rawCropY = region[0];
             crop = Bitmap.createBitmap(screen, 0, region[0], width,
                     region[1] - region[0]);
+            float imageScale = 1.0f;
+            final boolean portraitZoom =
+                    height > width * 1.25f
+                    && mode == SubtitleRegionPolicy.FULL_SCREEN
+                    && (++scanCounter % 3 == 1);
+            // Full display is still scanned on the other 2/3 frames.
+            // On every third frame, magnify the upper portrait video player.
+            // This restores readability for 12px subtitles which are too small
+            // for ML Kit in a 1080x2400 screenshot.
+            if (portraitZoom) {
+                Bitmap videoRegion = Bitmap.createBitmap(
+                        screen, 0, 0, width, Math.max(1, Math.round(height * 0.47f)));
+                try {
+                    enlarged = Bitmap.createScaledBitmap(videoRegion,
+                            Math.max(1, Math.round(width * PORTRAIT_ZOOM)),
+                            Math.max(1, Math.round(videoRegion.getHeight() * PORTRAIT_ZOOM)),
+                            true);
+                } finally { videoRegion.recycle(); }
+                crop.recycle();
+                crop = enlarged;
+                enlarged = null;
+                rawCropY = 0;
+                imageScale = PORTRAIT_ZOOM;
+            }
+            final int frameCropY = rawCropY;
+            final float frameScale = imageScale;
+            lastScanMode = portraitZoom ? "直向播放器文字放大掃描" :
+                    (height > width ? "直向全螢幕" : "橫向全螢幕");
             Bitmap owned = crop;
             crop = null;
             recognizer.process(InputImage.fromBitmap(owned, 0))
-                    .addOnSuccessListener(text -> translateRecognizedLines(text, frameCropY))
+                    .addOnSuccessListener(text -> translateRecognizedLines(text, frameCropY, frameScale))
                     .addOnCompleteListener(task -> {
                         owned.recycle();
                         ocrBusy.set(false);
@@ -386,12 +423,13 @@ public final class SubtitleCaptureService extends Service {
             if (image != null) image.close();
             if (screen != null) screen.recycle();
             if (crop != null) crop.recycle();
+            if (enlarged != null) enlarged.recycle();
             if (!acceptedByRecognizer) ocrBusy.set(false);
         }
     }
 
 
-    private void translateRecognizedLines(Text result, int frameCropY) {
+    private void translateRecognizedLines(Text result, int frameCropY, float imageScale) {
         if (!running || !modelReady || translator == null) return;
         List<SubtitleCandidatePolicy.Candidate> candidates = new ArrayList<>();
         for (Text.TextBlock block : result.getTextBlocks()) {
@@ -403,8 +441,10 @@ public final class SubtitleCaptureService extends Service {
                     continue;
                 valid.add(line);
                 candidates.add(new SubtitleCandidatePolicy.Candidate(raw,
-                        rect.left, rect.top + frameCropY,
-                        rect.right, rect.bottom + frameCropY));
+                        Math.round(rect.left / imageScale),
+                        Math.round(rect.top / imageScale) + frameCropY,
+                        Math.round(rect.right / imageScale),
+                        Math.round(rect.bottom / imageScale) + frameCropY));
             }
             // Keep a complete two-line subtitle together when ML Kit grouped it.
             // A long paragraph or a metadata panel is not a normal caption.
@@ -421,13 +461,17 @@ public final class SubtitleCaptureService extends Service {
                     top = Math.min(top, rect.top);
                     bottom = Math.max(bottom, rect.bottom);
                 }
-                if (bottom - top < height * 0.13f && combined.length() <= 280) {
+                if ((bottom - top) / imageScale < height * 0.13f && combined.length() <= 280) {
                     candidates.add(new SubtitleCandidatePolicy.Candidate(
-                            combined.toString(), left, top + frameCropY,
-                            right, bottom + frameCropY));
+                            combined.toString(), Math.round(left / imageScale),
+                            Math.round(top / imageScale) + frameCropY,
+                            Math.round(right / imageScale),
+                            Math.round(bottom / imageScale) + frameCropY));
                 }
             }
         }
+        java.util.List<SubtitleCandidatePolicy.Candidate> originals = new ArrayList<>(candidates);
+        candidates.addAll(SubtitleCandidatePolicy.joinNearbyLines(originals, width));
         SubtitleCandidatePolicy.Candidate chosen =
                 SubtitleCandidatePolicy.best(candidates, width, height, previousCandidate, stableSubtitleFrames);
         if (chosen == null) {
@@ -445,6 +489,7 @@ public final class SubtitleCaptureService extends Service {
         lastSubtitleObservedMs = SystemClock.elapsedRealtime();
         // Tracking is based on OCR coordinates, not a fixed screen crop.
         String source = chosen.text.replaceAll("\\s+", " ").trim();
+        lastRecognizedSource = source;
         stableSubtitleFrames = previousCandidate != null
                 && source.equals(previousCandidate.text)
                 ? Math.min(30, stableSubtitleFrames + 1) : 0;
@@ -461,6 +506,7 @@ public final class SubtitleCaptureService extends Service {
                 .addOnSuccessListener(translated -> {
                     if (!running || !source.equals(lastSource)) return;
                     lastTranslation = traditionalize(translated);
+                    lastTranslationResult = lastTranslation;
                     showCaption(lastTranslation);
                     positionCaptionAbove(translatedCandidate);
                 })
