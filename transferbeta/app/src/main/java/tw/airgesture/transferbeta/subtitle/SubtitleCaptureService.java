@@ -33,7 +33,7 @@ import android.view.MotionEvent;
 import android.view.WindowManager;
 import android.widget.TextView;
 
-import com.google.mlkit.nl.translate.DownloadConditions;
+import com.google.mlkit.common.model.DownloadConditions;
 import com.google.mlkit.nl.translate.TranslateLanguage;
 import com.google.mlkit.nl.translate.Translation;
 import com.google.mlkit.nl.translate.Translator;
