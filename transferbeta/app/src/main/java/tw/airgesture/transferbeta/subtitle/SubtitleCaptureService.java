@@ -509,18 +509,25 @@ public final class SubtitleCaptureService extends Service {
         }
         lastCandidateSummary = candidateSummary.length() == 0
                 ? "此影格沒有符合來源語言的候選文字" : candidateSummary.toString();
-        boolean playerOnlyPass = height > width * 1.25f && imageScale > 1f;
-        boolean portraitFullScan = height > width * 1.25f && !playerOnlyPass;
+        boolean fullScreenSetting = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                .getInt("subtitle_area_mode", SubtitleRegionPolicy.FULL_SCREEN)
+                == SubtitleRegionPolicy.FULL_SCREEN;
+        boolean playerOnlyPass = fullScreenSetting
+                && height > width * 1.25f && imageScale > 1f;
+        boolean portraitFullScan = fullScreenSetting
+                && height > width * 1.25f && !playerOnlyPass;
         if (portraitFullScan &&
                 SubtitleSelectionPolicy.isEmbeddedPlayerPage(pageLines, width, height)) {
             embeddedPageObservedMs = SystemClock.elapsedRealtime();
         }
         boolean embeddedPage = portraitFullScan
                 && SystemClock.elapsedRealtime() - embeddedPageObservedMs < 12000L;
-        SubtitleCandidatePolicy.Candidate chosen =
-                SubtitleSelectionPolicy.select(candidates, width, height,
+        SubtitleCandidatePolicy.Candidate chosen = fullScreenSetting
+                ? SubtitleSelectionPolicy.select(candidates, width, height,
                         previousCandidate, stableSubtitleFrames,
-                        embeddedPage, playerOnlyPass);
+                        embeddedPage, playerOnlyPass)
+                : SubtitleCandidatePolicy.best(candidates, width, height,
+                        previousCandidate, stableSubtitleFrames);
         lastSelectionStatus = chosen == null
                 ? (embeddedPage || playerOnlyPass
                     ? "無可信影片字幕：已跳過搜尋標題與推薦內容"
