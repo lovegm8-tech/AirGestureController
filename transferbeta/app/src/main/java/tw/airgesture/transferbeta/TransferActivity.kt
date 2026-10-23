@@ -700,6 +700,7 @@ class TransferActivity : ComponentActivity() {
                         "\n\nOCR 原文：\n${SubtitleCaptureService.lastRecognizedSource}" +
                         "\n\n翻譯結果：\n${SubtitleCaptureService.lastTranslationResult}" +
                         "\n\n翻譯品質：${SubtitleCaptureService.lastTranslationQuality}" +
+                        "\n\n字幕選取：${SubtitleCaptureService.lastSelectionStatus}" +
                         "\n\nOCR 候選排名：${SubtitleCaptureService.lastCandidateSummary}" +
                         "\n\n此診斷僅保留記憶體中的最近一筆，不會上傳影像或文字。"
                     )
