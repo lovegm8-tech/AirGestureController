@@ -487,7 +487,7 @@ public final class SubtitleCaptureService extends Service {
         StringBuilder candidateSummary = new StringBuilder();
         for (int idx = 0; idx < Math.min(5, ranking.size()); idx++) {
             SubtitleCandidatePolicy.Candidate item = ranking.get(idx);
-            if (candidateSummary.length() > 0) candidateSummary.append("\\n");
+            if (candidateSummary.length() > 0) candidateSummary.append(" | ");
             candidateSummary.append(idx + 1).append(". [")
                     .append(Math.round(item.centerY() * 100f / height)).append("%] ")
                     .append(item.text.substring(0, Math.min(90, item.text.length())));
