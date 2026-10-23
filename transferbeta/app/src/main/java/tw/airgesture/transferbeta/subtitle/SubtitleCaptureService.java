@@ -298,6 +298,7 @@ public final class SubtitleCaptureService extends Service {
         Image image = null;
         Bitmap screen = null;
         Bitmap crop = null;
+        boolean acceptedByRecognizer = false;
         try {
             if (imageReader == null) return;
             image = imageReader.acquireLatestImage();
@@ -319,14 +320,14 @@ public final class SubtitleCaptureService extends Service {
                         owned.recycle();
                         ocrBusy.set(false);
                     });
+            acceptedByRecognizer = true;
         } catch (Exception ignored) {
             // Nonfatal: next frame retries.
         } finally {
             if (image != null) image.close();
             if (screen != null) screen.recycle();
             if (crop != null) crop.recycle();
-            // Async completion owns ocrBusy only when ML Kit accepted the Bitmap.
-            if (crop == null && !ocrBusy.get()) return;
+            if (!acceptedByRecognizer) ocrBusy.set(false);
         }
     }
 
