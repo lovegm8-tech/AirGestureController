@@ -167,6 +167,7 @@ public final class SubtitleCaptureService extends Service {
         lastTranslationQuality = "尚無翻譯結果";
         lastSelectionStatus = "等待 OCR 擷取畫面";
         lastVoiceStatus = "語音補位未啟用";
+        lastVoiceLatencyStatus = "尚無語音翻譯耗時";
         lastCaptureStatus = "尚未取得畫面";
         lastOcrStatus = "OCR 尚未啟動";
         latestRawOcrText = "尚無原始 OCR 文字";
@@ -745,7 +746,8 @@ public final class SubtitleCaptureService extends Service {
                     "\n" + when +
                     "\n模型：" + lastModelStatus +
                     "\n選取：" + lastSelectionStatus +
-                    "\n語音：" + lastVoiceStatus);
+                    "\n語音：" + lastVoiceStatus +
+                    "\n翻譯延遲診斷：" + lastVoiceLatencyStatus);
             contents.addView(details);
 
             Button dismiss = new Button(this);
