@@ -98,9 +98,7 @@ class TransferActivity : ComponentActivity() {
     private lateinit var overlayStep: Button
     private lateinit var notificationStep: Button
     private var advancedOpen = false
-    private var normalLauncherEntry = false
     private var homePromptVisible = false
-    private var queuedAutoHome = false
     private val homePrefs by lazy { getSharedPreferences("airgrab_home", MODE_PRIVATE) }
     private lateinit var chosen: TextView
     private lateinit var hand: TextView
@@ -166,12 +164,10 @@ class TransferActivity : ComponentActivity() {
                     .putExtra(SubtitleCaptureService.EXTRA_RESULT, result.resultCode)
                     .putExtra(SubtitleCaptureService.EXTRA_DATA, result.data)
                 ContextCompat.startForegroundService(this, command)
-                // Show the calibration rectangle over the previous video app,
-                // not on top of Floating Control's settings page.
-                main.postDelayed({
-                    moveTaskToBack(true)
-                    refreshHome()
-                }, 350)
+                // Do NOT auto-minimize after permission approval.
+                // The user will tap "返回桌面 · 開始使用" explicitly.
+                flash("翻譯已啟用。按「返回桌面 · 開始使用」，進入影片後點「譯」來框選字幕")
+                main.postDelayed({ refreshHome() }, 350)
             } catch (exception: Exception) {
                 flash("無法啟動 OCR 懸浮翻譯：" + exception.javaClass.simpleName)
             }
@@ -217,11 +213,11 @@ class TransferActivity : ComponentActivity() {
         manager.onStatus = { text ->
             show(text)
             refreshHome()
-            maybeReturnHome()
+
         }
         manager.onConnectionState = { _ ->
             refreshHome()
-            maybeReturnHome()
+
         }
         manager.onPairing = { code ->
             if (shownPairCode != code && !isFinishing) {
@@ -236,7 +232,7 @@ class TransferActivity : ComponentActivity() {
                     shownPairCode = null
                     homePromptVisible = false
                     refreshHome()
-                    maybeReturnHome()
+
                 }
                 .setNegativeButton("拒絕") { _, _ ->
                     manager.acceptPairing(false)
@@ -250,39 +246,10 @@ class TransferActivity : ComponentActivity() {
         }
     }
 
-    private fun maybeReturnHome() {
-        // The user opened the main app to adjust subtitles or read diagnosis.
-        // Never auto-minimize it while subtitle capture is active.
-        if (queuedAutoHome || subtitlePendingPermission || SubtitleCaptureService.running) return
-        val mayClose = tw.airgesture.transferbeta.core.HomeScreenPolicy.shouldAutoBackground(
-            homePrefs.getBoolean("auto_run", false),
-            normalLauncherEntry,
-            GlobalGestureService.isActive,
-            GlobalGestureService.transfer?.isConnected == true,
-            homePromptVisible,
-            advancedOpen
-        )
-        // Camera-free transfer is allowed to background without overlay
-        // permission; share intents still reach ShareReceiverActivity.
-        if (!mayClose || (FloatingSettings.gestureCamera(this) &&
-                !Settings.canDrawOverlays(this))) return
-        queuedAutoHome = true
-        main.postDelayed({
-            queuedAutoHome = false
-            if (!SubtitleCaptureService.running &&
-                !subtitlePendingPermission &&
-                tw.airgesture.transferbeta.core.HomeScreenPolicy.shouldAutoBackground(
-                    homePrefs.getBoolean("auto_run", false),
-                    normalLauncherEntry,
-                    GlobalGestureService.isActive,
-                    GlobalGestureService.transfer?.isConnected == true,
-                    homePromptVisible,
-                    advancedOpen
-                ) && (!FloatingSettings.gestureCamera(this) ||
-                    Settings.canDrawOverlays(this))) {
-                moveTaskToBack(true)
-            }
-        }, 900)
+    // Only a deliberate tap on the home-screen button may background this
+    // Activity. Service state, pairing events and permission results never do.
+    private fun returnToDesktopOnUserTap() {
+        moveTaskToBack(true)
     }
 
     private fun beginSubtitleCapture() {
@@ -350,7 +317,7 @@ class TransferActivity : ComponentActivity() {
             if (!isFinishing) {
                 attachBackgroundSession()
                 refreshHome()
-                maybeReturnHome()
+
             }
         }, 700)
     }
@@ -458,7 +425,8 @@ class TransferActivity : ComponentActivity() {
         val overlayMissing = FloatingSettings.gestureCamera(this) &&
             hasModePermissions() && hasModeAccessibility() &&
             !Settings.canDrawOverlays(this)
-        val label = if (overlayMissing) "開啟手勢與接收提示權限" else when (d.action) {
+        val label = if (SubtitleCaptureService.running) "返回桌面 · 開始使用"
+        else if (overlayMissing) "開啟手勢與接收提示權限" else when (d.action) {
             tw.airgesture.transferbeta.core.HomeAction.GRANT_PERMISSION -> "開始設定 · 允許必要權限"
             tw.airgesture.transferbeta.core.HomeAction.ENABLE_ACCESSIBILITY -> "繼續設定 · 啟用懸浮操作"
             tw.airgesture.transferbeta.core.HomeAction.START -> "啟用懸浮操作"
@@ -511,7 +479,7 @@ class TransferActivity : ComponentActivity() {
             startGlobalMode()
         }
         attachBackgroundSession()
-        maybeReturnHome()
+
     }
 
     override fun onPause() {
@@ -533,8 +501,6 @@ class TransferActivity : ComponentActivity() {
             finish()
             return
         }
-        normalLauncherEntry = intent?.action == Intent.ACTION_MAIN &&
-            intent?.getBooleanExtra("airgrab_show_settings", false) != true
         val scroll = ScrollView(this)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -699,7 +665,8 @@ class TransferActivity : ComponentActivity() {
                 if (SubtitleCaptureService.running) {
                     startService(Intent(this@TransferActivity, SubtitleCaptureService::class.java)
                         .setAction(SubtitleCaptureService.ACTION_EDIT))
-                    main.postDelayed({ moveTaskToBack(true) }, 280L)
+                    // The editor can be closed with「切換影片」,
+                    // but the main app is never automatically minimized.)
                 } else {
                     flash("請先開啟懸浮翻譯，再到影片上框選字幕")
                 }
@@ -784,6 +751,10 @@ class TransferActivity : ComponentActivity() {
             text = "開始設定"
             minHeight = (resources.displayMetrics.density * 64).toInt()
             setOnClickListener {
+                if (SubtitleCaptureService.running) {
+                    returnToDesktopOnUserTap()
+                    return@setOnClickListener
+                }
                 if (FloatingSettings.gestureCamera(this@TransferActivity) &&
                     hasModePermissions() && hasModeAccessibility() &&
                     !Settings.canDrawOverlays(this@TransferActivity)) {
@@ -801,10 +772,12 @@ class TransferActivity : ComponentActivity() {
                     tw.airgesture.transferbeta.core.HomeAction.ENABLE_ACCESSIBILITY ->
                         startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                     tw.airgesture.transferbeta.core.HomeAction.START -> startGlobalMode()
-                    tw.airgesture.transferbeta.core.HomeAction.WAIT ->
+                    tw.airgesture.transferbeta.core.HomeAction.WAIT -> {
                         GlobalGestureService.transfer?.refresh()
+                        returnToDesktopOnUserTap()
+                    }
                     tw.airgesture.transferbeta.core.HomeAction.BACKGROUND ->
-                        moveTaskToBack(true)
+                        returnToDesktopOnUserTap()
                 }
             }
         }
@@ -1077,8 +1050,6 @@ class TransferActivity : ComponentActivity() {
             finish()
             return
         }
-        normalLauncherEntry = intent.action == Intent.ACTION_MAIN &&
-            !intent.getBooleanExtra("airgrab_show_settings", false)
     }
 
     private fun forwardLegacyShare(shared: Intent) {
