@@ -596,7 +596,7 @@ public final class SubtitleCaptureService extends Service {
     private void translateVoiceFallback(String original) {
         if (original == null || !running) return;
         String source = original.replaceAll("\\s+", " ").trim();
-        int minLength = "ja".equals(sourceLanguage) ? 3 : 7;
+        int minLength = "ja".equals(sourceLanguage) ? 3 : 5;
         if (source.length() < minLength) return;
         lastSpokenOriginal = source;
         long now = SystemClock.elapsedRealtime();
