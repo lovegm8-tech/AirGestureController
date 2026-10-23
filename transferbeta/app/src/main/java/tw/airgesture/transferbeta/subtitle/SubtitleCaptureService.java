@@ -240,8 +240,11 @@ public final class SubtitleCaptureService extends Service {
                     imageReader.getSurface(), null, main);
             worker.post(frameLoop);
             if (voiceFallbackEnabled) startPlaybackSpeech();
-            // Let the user return to the video after MediaProjection consent.
-            main.postDelayed(this::openSelectionEditor, 1250L);
+            // Do not cover the Activity with the fullscreen editor after
+            // consent: the user must be able to tap "返回桌面 · 開始使用".
+            // Once at a video, tap the persistent "譯" ball to select its
+            // subtitle strip and begin scanning.
+            main.postDelayed(this::showReopenButton, 900L);
         } catch (Exception exception) {
             stopSelf();
         }
