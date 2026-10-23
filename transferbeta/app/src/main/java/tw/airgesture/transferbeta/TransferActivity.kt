@@ -137,9 +137,12 @@ class TransferActivity : ComponentActivity() {
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         refreshHome()
     }
+    private var audioPermissionRequestedForSubtitleStart = false
     private val voiceAudioPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
+        val startingSubtitle = audioPermissionRequestedForSubtitleStart
+        audioPermissionRequestedForSubtitleStart = false
         val selectedLanguage = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
             .getString("source_language", "en")
         val allowed = granted && (selectedLanguage == "en" || selectedLanguage == "ja")
@@ -150,8 +153,13 @@ class TransferActivity : ComponentActivity() {
             voiceFallbackSwitch.isChecked = allowed
             updatingModeControls = false
         }
-        flash(if (allowed) "已授權音訊擷取；重新開啟翻譯後啟用語音補位"
-              else "未取得音訊權限；仍可使用 OCR")
+        if (startingSubtitle) {
+            if (!allowed) flash("沒有音訊授權，本次改用畫面 OCR 翻譯")
+            beginSubtitleCapture()
+        } else {
+            flash(if (allowed) "已授權英文／日文播放音訊辨識"
+                  else "未取得音訊權限，仍可使用畫面 OCR")
+        }
     }
     private val subtitleCaptureLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -166,7 +174,7 @@ class TransferActivity : ComponentActivity() {
                 ContextCompat.startForegroundService(this, command)
                 // Do NOT auto-minimize after permission approval.
                 // The user will tap "返回桌面 · 開始使用" explicitly.
-                flash("翻譯已啟用。按「返回桌面 · 開始使用」，進入影片後點「譯」來框選字幕")
+                flash("翻譯已啟用。按「返回桌面 · 開始使用」看影片；語音會自動辨識，OCR 可用「譯」小球框選")
                 main.postDelayed({ refreshHome() }, 350)
             } catch (exception: Exception) {
                 flash("無法啟動 OCR 懸浮翻譯：" + exception.javaClass.simpleName)
@@ -254,6 +262,16 @@ class TransferActivity : ComponentActivity() {
 
     private fun beginSubtitleCapture() {
         if (SubtitleCaptureService.running || subtitlePendingPermission) return
+        val prefs = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+        val language = prefs.getString("source_language", "en")
+        if ((language == "en" || language == "ja") &&
+            prefs.getBoolean("enable_voice_fallback", true) &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) !=
+                PackageManager.PERMISSION_GRANTED) {
+            audioPermissionRequestedForSubtitleStart = true
+            voiceAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            return
+        }
         subtitlePendingPermission = true
         if (!Settings.canDrawOverlays(this)) {
             subtitleNeedsOverlay = true
@@ -414,7 +432,7 @@ class TransferActivity : ComponentActivity() {
             }
             modeDescription.text = modeLabel() +
                 (if (GlobalGestureService.isActive) " · 背景服務執行中" else " · 尚未啟動") +
-                (if (SubtitleCaptureService.running) " · OCR 翻譯中" else "")
+                (if (SubtitleCaptureService.running) " · 語音優先翻譯中" else "")
         }
         refreshSetupGuide()
         val d = tw.airgesture.transferbeta.core.HomeScreenPolicy.decide(
@@ -494,6 +512,14 @@ class TransferActivity : ComponentActivity() {
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         LegacyUpdateCleanup.run(this)
+        // One-time upgrade from OCR-first to opt-in audio-first: enable by
+        // default for English/Japanese, while user can turn it off at any time.
+        getSharedPreferences("floating_subtitle", MODE_PRIVATE).let { prefs ->
+            if (!prefs.getBoolean("voice_first_migrated_v135", false)) {
+                prefs.edit().putBoolean("voice_first_migrated_v135", true)
+                    .putBoolean("enable_voice_fallback", true).apply()
+            }
+        }
         if (intent?.action == Intent.ACTION_SEND) {
             // Legacy pinned Sharesheet targets may explicitly launch this Activity.
             // Forward straight to the UI-free intake rather than showing the home.
@@ -613,13 +639,12 @@ class TransferActivity : ComponentActivity() {
                         .edit().putString("source_language", lang).apply()
                     if (::voiceFallbackSwitch.isInitialized) {
                         voiceFallbackSwitch.isEnabled = (lang != "ko")
-                        if (lang == "ko") {
+                        val allowedVoice = lang != "ko" &&
                             getSharedPreferences("floating_subtitle", MODE_PRIVATE)
-                                .edit().putBoolean("enable_voice_fallback", false).apply()
-                            updatingModeControls = true
-                            voiceFallbackSwitch.isChecked = false
-                            updatingModeControls = false
-                        }
+                                .getBoolean("enable_voice_fallback", true)
+                        updatingModeControls = true
+                        voiceFallbackSwitch.isChecked = allowedVoice
+                        updatingModeControls = false
                     }
                 }
             }
@@ -627,8 +652,10 @@ class TransferActivity : ComponentActivity() {
         modePanel.addView(subtitleLanguage)
         voiceFallbackSwitch = Switch(this).apply {
             isChecked = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
-                .getBoolean("enable_voice_fallback", false)
-            contentDescription = "英文與日文語音補位開關"
+                .getBoolean("enable_voice_fallback", true) &&
+                    getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                        .getString("source_language", "en") != "ko"
+            contentDescription = "英文及日文語音優先翻譯開關"
             setOnCheckedChangeListener { _, checked ->
                 if (updatingModeControls) return@setOnCheckedChangeListener
                 val prefs = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
@@ -654,10 +681,10 @@ class TransferActivity : ComponentActivity() {
             }
         }
         modePanel.addView(modeRow(
-            "英文／日文語音補位（實驗版）",
-            "字幕 OCR 追不上時用影片播放聲音補充。英文模型約 40 MB，日文模型約 48 MB，首次使用各下載一次；需要播放音訊授權，會增加耗電。",
+            "語音優先翻譯（英文／日文）",
+            "開啟翻譯就先辨識允許擷取的影片聲音，不必框選字幕；沒有語音結果時自動嘗試 OCR。首次使用各語言需下載離線模型，耗電可能增加。",
             voiceFallbackSwitch))
-        modePanel.addView(text("字幕辨識位置：啟動後直接在影片上拖曳綠框、拉四角調整大小。直向、橫向分別記住上次的位置。", 13f))
+        modePanel.addView(text("OCR 備用：語音不支援或辨識不到時可點「譯」小球→「框選字幕位置」，手動定位畫面文字。", 13f))
         modePanel.addView(Button(this).apply {
             text = "重新框選字幕範圍"
             isAllCaps = false
