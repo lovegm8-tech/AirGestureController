@@ -74,7 +74,7 @@ public final class SubtitleRegionPolicy {
             int chinese = 0;
             for (int i = 0; i < t.length(); i++) {
                 char c = t.charAt(i);
-                if (c >= '\\u4e00' && c <= '\\u9fff') chinese++;
+                if (c >= 0x4e00 && c <= 0x9fff) chinese++;
             }
             if (scriptHits < 2) return false;
             return chinese == 0 || scriptHits >= chinese * 1.7f;
