@@ -38,9 +38,6 @@ public final class SubtitlePlaybackSpeech {
         void onUtterance(String english);
     }
 
-    private static final String ENGLISH_MODEL = "vosk-model-small-en-us-0.15";
-    private static final String JAPANESE_MODEL = "vosk-model-small-ja-0.22";
-    private static final String MODEL_HOST = "https://alphacephei.com/vosk/models/";
     private final String modelFolder;
     private final String language;
     private static final int SAMPLE_RATE = 16000;
@@ -56,10 +53,10 @@ public final class SubtitlePlaybackSpeech {
         this.context = context.getApplicationContext();
         this.projection = projection;
         this.callback = callback;
-        if (!"en".equals(requestedLanguage) && !"ja".equals(requestedLanguage))
+        if (!SubtitleSpeechModels.supports(requestedLanguage))
             throw new IllegalArgumentException("Unsupported speech source language");
         this.language = requestedLanguage;
-        this.modelFolder = "ja".equals(language) ? JAPANESE_MODEL : ENGLISH_MODEL;
+        this.modelFolder = SubtitleSpeechModels.folder(language);
     }
 
     public void start() {
@@ -101,7 +98,7 @@ public final class SubtitlePlaybackSpeech {
                 "vosk-" + language + "-download.partial");
         HttpURLConnection conn = null;
         try {
-            conn = (HttpURLConnection) new URL(MODEL_HOST + modelFolder + ".zip").openConnection();
+            conn = (HttpURLConnection) new URL(SubtitleSpeechModels.downloadUrl(language)).openConnection();
             conn.setConnectTimeout(20000);
             conn.setReadTimeout(60000);
             conn.setInstanceFollowRedirects(true);
@@ -237,7 +234,7 @@ public final class SubtitlePlaybackSpeech {
                     }
                     if (recognizer.acceptWaveForm(pcm, n)) {
                         String sentence = recognizeText(recognizer.getResult(), "text");
-                        if (sentence.length() >= ("ja".equals(language) ? 3 : 7)
+                        if (sentence.length() >= SubtitleSpeechModels.minFinalLength(language)
                                 && !sentence.equalsIgnoreCase(lastCandidate)) {
                             lastCandidate = sentence;
                             callback.onUtterance(sentence);
@@ -246,7 +243,7 @@ public final class SubtitlePlaybackSpeech {
                         long now = android.os.SystemClock.elapsedRealtime();
                         if (now - lastPartialAt >= 2900) {
                             String partial = recognizeText(recognizer.getPartialResult(), "partial");
-                            if (partial.length() >= ("ja".equals(language) ? 7 : 19)
+                            if (partial.length() >= SubtitleSpeechModels.minPartialLength(language)
                                     && !partial.equalsIgnoreCase(lastCandidate)) {
                                 lastCandidate = partial;
                                 callback.onUtterance(partial);
