@@ -89,7 +89,10 @@ public final class SubtitleCaptureService extends Service {
     private HandlerThread workerThread;
     private Handler worker;
     private WindowManager windowManager;
-    private TextView captionView;
+    private LinearLayout captionView;
+    private TextView captionFirstLine;
+    private TextView captionSecondLine;
+    private final SubtitleTwoLineBuffer twoLineCaptions = new SubtitleTwoLineBuffer();
     private FrameLayout editorRoot;
     private ScrollView diagnosticView;
     private volatile Bitmap latestOcrCropPreview;
@@ -109,6 +112,9 @@ public final class SubtitleCaptureService extends Service {
     private long lastVoiceCaptionMs = 0L;
     private String lastSpokenSource = "";
     private String pendingVoiceSource = "";
+    private long pendingVoiceUtteranceId = -1L;
+    private boolean pendingVoiceIsFinal = false;
+    private long lastSpokenUtteranceId = -1L;
     private boolean voiceRetryScheduled = false;
     private static final long MIN_VOICE_CAPTION_SPACING_MS = 750L;
     public static volatile String lastVoiceLatencyStatus = "尚無語音翻譯耗時";
@@ -181,6 +187,7 @@ public final class SubtitleCaptureService extends Service {
         lastRawOcrLines = 0;
         lastAcceptedOcrLines = 0;
         lastSpokenOriginal = "尚無語音辨識結果";
+        twoLineCaptions.clear();
         workerThread = new HandlerThread("floating-subtitle-ocr");
         workerThread.start();
         worker = new Handler(workerThread.getLooper());
@@ -325,16 +332,32 @@ public final class SubtitleCaptureService extends Service {
     }
 
     private void createCaption() {
-        captionView = new TextView(this);
-        captionView.setText("準備懸浮字幕…");
-        captionView.setTextColor(Color.WHITE);
-        captionView.setTextSize(18f);
+        // A fixed two-row panel. Each translated sentence has its OWN
+        // single-line TextView, so a long sentence can never wrap into the
+        // space reserved for the next sentence.
+        captionView = new LinearLayout(this);
+        captionView.setOrientation(LinearLayout.VERTICAL);
         captionView.setGravity(Gravity.CENTER);
         captionView.setPadding(dp(10), dp(8), dp(10), dp(8));
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(Color.argb(225, 12, 18, 28));
         bg.setCornerRadius(dp(11));
         captionView.setBackground(bg);
+        captionFirstLine = new TextView(this);
+        captionSecondLine = new TextView(this);
+        for (TextView line : new TextView[] {captionFirstLine, captionSecondLine}) {
+            line.setTextColor(Color.WHITE);
+            line.setTextSize(18f);
+            line.setGravity(Gravity.CENTER);
+            line.setSingleLine(true);
+            line.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            line.setMinHeight(dp(29));
+            captionView.addView(line, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT));
+        }
+        captionFirstLine.setText("準備懸浮字幕…");
+        captionSecondLine.setVisibility(View.GONE);
         DisplayMetrics metrics = new DisplayMetrics();
         windowManager.getDefaultDisplay().getRealMetrics(metrics);
         captionParams = new WindowManager.LayoutParams(
@@ -448,7 +471,8 @@ public final class SubtitleCaptureService extends Service {
             lastSource = "";
             previousCandidate = null;
             stableSubtitleFrames = 0;
-            showCaption(modelReady ? (voiceFallbackEnabled ?
+            if (twoLineCaptions.hasCaptions()) renderTwoLineCaptions();
+            else showCaption(modelReady ? (voiceFallbackEnabled ?
                     "正在辨識影片聲音…" : "等待畫面字幕…") :
                     "正在準備翻譯模型…");
         }
@@ -578,12 +602,13 @@ public final class SubtitleCaptureService extends Service {
                             voiceUnavailable = true;
                         }
                     }
-                    @Override public void onUtterance(String original) {
+                    @Override public void onUtterance(String original, long utteranceId,
+                                                      boolean isFinal) {
                         // Vosk audio runs off the main thread; serialize speech
                         // queue and UI/caption updates on the main looper.
                         lastVoiceUtteranceMs = SystemClock.elapsedRealtime();
                         voiceUnavailable = false;
-                        main.post(() -> translateVoiceFallback(original));
+                        main.post(() -> translateVoiceFallback(original, utteranceId, isFinal));
                     }
                 });
         playbackSpeech.start();
@@ -593,7 +618,8 @@ public final class SubtitleCaptureService extends Service {
      * the next line: while one caption is translating, retain the newest
      * stable ASR hypothesis, then translate it as soon as the engine is free.
      */
-    private void translateVoiceFallback(String original) {
+    private void translateVoiceFallback(String original, long utteranceId,
+                                      boolean isFinal) {
         if (original == null || !running) return;
         String source = original.replaceAll("\\s+", " ").trim();
         int minLength = "ja".equals(sourceLanguage) ? 3 : 5;
@@ -606,8 +632,12 @@ public final class SubtitleCaptureService extends Service {
             if (pausedByUser || calibrating) pendingVoiceSource = "";
             return;
         }
-        if (source.equalsIgnoreCase(lastSpokenSource) ||
+        if (utteranceId == lastSpokenUtteranceId &&
+                source.equalsIgnoreCase(lastSpokenSource)) return;
+        if (utteranceId == pendingVoiceUtteranceId &&
                 source.equalsIgnoreCase(pendingVoiceSource)) return;
+        pendingVoiceUtteranceId = utteranceId;
+        pendingVoiceIsFinal = isFinal;
         pendingVoiceSource = source;
         drainVoiceTranslationQueue();
     }
@@ -633,8 +663,11 @@ public final class SubtitleCaptureService extends Service {
 
         if (!voiceTranslateBusy.compareAndSet(false, true)) return;
         final String source = pendingVoiceSource;
+        final long sourceId = pendingVoiceUtteranceId;
+        final boolean sourceFinal = pendingVoiceIsFinal;
         pendingVoiceSource = "";
         lastSpokenSource = source;
+        lastSpokenUtteranceId = sourceId;
         final long translateStarted = SystemClock.elapsedRealtime();
         translator.translate(source)
                 .addOnSuccessListener(translated -> {
@@ -656,8 +689,8 @@ public final class SubtitleCaptureService extends Service {
                     lastTranslationResult = zh;
                     lastVoiceLatencyStatus = "ASR文字送翻譯→顯示 " +
                             (lastVoiceCaptionMs - translateStarted) + " ms（不含語音辨識）";
-                    lastVoiceStatus = "語音中文字幕已更新";
-                    showCaption(zh);
+                    lastVoiceStatus = sourceFinal ? "完整句修正已更新" : "語音中文字幕已更新";
+                    publishVoiceCaption(sourceId, zh);
                     positionVoiceCaption();
                 })
                 .addOnFailureListener(error -> {
@@ -781,9 +814,38 @@ public final class SubtitleCaptureService extends Service {
     }
 
     private void showCaption(String text) {
+        // This method is for transient model/permission/waiting notices only.
+        // Once translated sentences exist, never overwrite the two-line panel
+        // with a transient "waiting for subtitle" hint.
         main.post(() -> {
-            if (running && captionView != null) captionView.setText(text);
+            if (!running || captionView == null || captionFirstLine == null) return;
+            if (twoLineCaptions.hasCaptions() && !"翻譯已暫停".equals(text)) return;
+            captionFirstLine.setText(text);
+            captionSecondLine.setText("");
+            captionSecondLine.setVisibility(View.GONE);
         });
+    }
+
+    private void renderTwoLineCaptions() {
+        if (!running || captionFirstLine == null || captionSecondLine == null) return;
+        if (twoLineCaptions.count() == 0) return;
+        captionFirstLine.setText(twoLineCaptions.first());
+        captionSecondLine.setText(twoLineCaptions.second());
+        captionSecondLine.setVisibility(twoLineCaptions.count() == 2 ?
+                View.VISIBLE : View.GONE);
+    }
+
+    private void publishVoiceCaption(long utteranceId, String translated) {
+        // All ML Kit callbacks run on main thread. A final ASR result carries
+        // the same utterance ID as its partial hypothesis, so it revises the
+        // same row instead of advancing to the next one.
+        if (twoLineCaptions.putVoice(utteranceId, translated))
+            renderTwoLineCaptions();
+    }
+
+    private void publishOcrCaption(String source, String translated) {
+        if (twoLineCaptions.putOcr(source, translated))
+            renderTwoLineCaptions();
     }
 
 
@@ -1248,7 +1310,7 @@ public final class SubtitleCaptureService extends Service {
                     if (!SubtitleVoicePriority.mayDisplayOcr(voiceFallbackEnabled,
                             SystemClock.elapsedRealtime(), lastVoiceCaptionMs)) return;
                     lastOcrCaptionMs = SystemClock.elapsedRealtime();
-                    showCaption(lastTranslation);
+                    publishOcrCaption(source, lastTranslation);
                     positionCaptionAbove(translatedCandidate);
                 })
                 .addOnFailureListener(error -> {
