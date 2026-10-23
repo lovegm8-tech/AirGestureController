@@ -24,8 +24,8 @@ public final class SubtitleAiOutputPolicy {
             if (text.charAt(i) >= 0x4e00 && text.charAt(i) <= 0x9fff) han++;
         }
         if (han < 2) return false;
-        if (quickTranslation != null && quickTranslation.length() > 8
-                && text.length() > quickTranslation.length() * 2.7) return false;
+        if (quickTranslation != null && quickTranslation.length() >= 3
+                && text.length() > Math.max(16, quickTranslation.length() * 2.7)) return false;
         return true;
     }
 }
