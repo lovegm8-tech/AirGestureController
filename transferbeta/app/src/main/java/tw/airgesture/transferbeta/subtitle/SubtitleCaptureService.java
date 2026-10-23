@@ -350,6 +350,10 @@ public final class SubtitleCaptureService extends Service {
             line.setTextSize(18f);
             line.setGravity(Gravity.CENTER);
             line.setSingleLine(true);
+            // Use the whole available width for one complete translated
+            // sentence, shrinking modestly before ellipsizing very long text.
+            line.setAutoSizeTextTypeUniformWithConfiguration(12, 18, 1,
+                    android.util.TypedValue.COMPLEX_UNIT_SP);
             line.setEllipsize(android.text.TextUtils.TruncateAt.END);
             line.setMinHeight(dp(29));
             captionView.addView(line, new LinearLayout.LayoutParams(
