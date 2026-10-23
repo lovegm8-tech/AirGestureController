@@ -29,7 +29,7 @@ public final class SubtitleSpeechEmissionPolicy {
             if (lastSpace < 0) return "";
             stable = stable.substring(0, lastSpace).trim();
         }
-        int minimum = "ja".equals(language) ? 4 : 10;
+        int minimum = "ja".equals(language) ? 3 : 7;
         return stable.length() >= minimum ? stable : "";
     }
 
