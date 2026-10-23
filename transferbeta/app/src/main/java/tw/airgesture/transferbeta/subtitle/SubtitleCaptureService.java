@@ -26,6 +26,7 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.DisplayMetrics;
 import android.view.Gravity;
@@ -88,6 +89,9 @@ public final class SubtitleCaptureService extends Service {
     private int width, height, densityDpi;
     private String lastSource = "";
     private String lastTranslation = "";
+    private volatile long lastSubtitleObservedMs = 0L;
+    private int captureCropY = 0;
+    private String sourceLanguage = "en";
 
     @Override public void onCreate() {
         super.onCreate();
@@ -153,6 +157,7 @@ public final class SubtitleCaptureService extends Service {
     private void initializeRecognizer() {
         String language = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
                 .getString("source_language", "en");
+        sourceLanguage = language;
         final String translateFrom;
         if ("ja".equals(language)) {
             recognizer = TextRecognition.getClient(
@@ -218,7 +223,8 @@ public final class SubtitleCaptureService extends Service {
                 PixelFormat.TRANSLUCENT);
         captionParams.gravity = Gravity.TOP | Gravity.LEFT;
         captionParams.x = Math.round(metrics.widthPixels * 0.07f);
-        captionParams.y = Math.round(metrics.heightPixels * 0.11f);
+        // Put the Chinese subtitle near the bottom by default; users can drag it.
+        captionParams.y = Math.round(metrics.heightPixels * 0.76f);
         captionView.setOnTouchListener(new android.view.View.OnTouchListener() {
             private float rawX, rawY;
             private int baseX, baseY;
@@ -310,8 +316,17 @@ public final class SubtitleCaptureService extends Service {
             ByteBuffer buffer = plane.getBuffer();
             screen = Bitmap.createBitmap(paddedWidth, height, Bitmap.Config.ARGB_8888);
             screen.copyPixelsFromBuffer(buffer);
-            int cropY = Math.max(0, (int) (height * 0.60f));
-            crop = Bitmap.createBitmap(screen, 0, cropY, width, height - cropY);
+            final int mode = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                    .getInt("subtitle_area_mode", SubtitleRegionPolicy.AUTO);
+            final int topPercent = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                    .getInt("subtitle_area_top_pct", 20);
+            final int bottomPercent = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                    .getInt("subtitle_area_bottom_pct", 85);
+            final int[] region = SubtitleRegionPolicy.verticalBounds(
+                    width, height, mode, topPercent, bottomPercent);
+            captureCropY = region[0];
+            crop = Bitmap.createBitmap(screen, 0, region[0], width,
+                    region[1] - region[0]);
             Bitmap owned = crop;
             crop = null;
             recognizer.process(InputImage.fromBitmap(owned, 0))
@@ -340,13 +355,22 @@ public final class SubtitleCaptureService extends Service {
                 String txt = line.getText().trim();
                 if (rect == null || txt.length() < 3) continue;
                 int center = rect.centerX();
-                if (center < width * 0.16f || center > width * 0.84f) continue;
-                if (txt.matches("[0-9.,:!?% /\\-]+")) continue;
-                if (!lastTranslation.isEmpty() && lastTranslation.contains(txt)) continue;
+                if (center < width * 0.12f || center > width * 0.88f) continue;
+                if (!SubtitleRegionPolicy.isPossibleSubtitle(txt, sourceLanguage)) continue;
                 lines.add(line);
             }
         }
-        if (lines.isEmpty()) return;
+        if (lines.isEmpty()) {
+            if (lastSubtitleObservedMs > 0L &&
+                    SystemClock.elapsedRealtime() - lastSubtitleObservedMs > 4300L) {
+                lastSubtitleObservedMs = 0L;
+                lastSource = "";
+                lastTranslation = "";
+                showCaption("等待外語字幕…");
+            }
+            return;
+        }
+        lastSubtitleObservedMs = SystemClock.elapsedRealtime();
         lines.sort(Comparator.comparingInt(a -> a.getBoundingBox().top));
         List<String> latest = new ArrayList<>();
         for (int i = Math.max(0, lines.size() - 2); i < lines.size(); i++) {
