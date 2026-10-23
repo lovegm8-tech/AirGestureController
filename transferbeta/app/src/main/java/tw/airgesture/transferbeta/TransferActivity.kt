@@ -665,8 +665,8 @@ class TransferActivity : ComponentActivity() {
                 if (SubtitleCaptureService.running) {
                     startService(Intent(this@TransferActivity, SubtitleCaptureService::class.java)
                         .setAction(SubtitleCaptureService.ACTION_EDIT))
-                    // The editor can be closed with「切換影片」,
-                    // but the main app is never automatically minimized.)
+                    // The editor has a manual「切換影片」dismiss action.
+                    // Do not put the Activity in the background here.
                 } else {
                     flash("請先開啟懸浮翻譯，再到影片上框選字幕")
                 }
