@@ -239,9 +239,10 @@ public final class SubtitlePlaybackSpeech {
                         // Partial text below is only an early subtitle preview.
                         String sentence = recognizeText(recognizer.getResult(), "text");
                         previousPartial = "";
+                        // Final hypotheses may correct or shorten earlier
+                        // speculative partial captions; preserve corrections.
                         if (sentence.length() >= SubtitleSpeechModels.minFinalLength(language)
-                                && SubtitleSpeechEmissionPolicy.meaningfulChange(
-                                        lastCandidate, sentence, language)) {
+                                && !sentence.equalsIgnoreCase(lastCandidate)) {
                             lastCandidate = sentence;
                             callback.onUtterance(sentence);
                         }
