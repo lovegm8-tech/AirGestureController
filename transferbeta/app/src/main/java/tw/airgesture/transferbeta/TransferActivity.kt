@@ -31,6 +31,11 @@ import android.provider.OpenableColumns
 import android.view.Gravity
 import android.widget.Button
 import android.widget.Switch
+import android.widget.Spinner
+import android.widget.ArrayAdapter
+import android.widget.AdapterView
+import android.media.projection.MediaProjectionManager
+import tw.airgesture.transferbeta.subtitle.SubtitleCaptureService
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import tw.airgesture.transferbeta.core.FloatingSettings
@@ -76,6 +81,10 @@ class TransferActivity : ComponentActivity() {
     private lateinit var primaryAction: Button
     private lateinit var gestureSwitch: Switch
     private lateinit var transferSwitch: Switch
+    private lateinit var subtitleSwitch: Switch
+    private lateinit var subtitleLanguage: Spinner
+    private var subtitlePendingPermission = false
+    private var subtitleNeedsOverlay = false
     private lateinit var modeDescription: TextView
     private var updatingModeControls = false
     private lateinit var advanced: LinearLayout
@@ -126,6 +135,26 @@ class TransferActivity : ComponentActivity() {
         if (!granted) flash("通知權限未開；接收端背景收到網址時，可能無法顯示開啟連結的通知")
     }
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        refreshHome()
+    }
+    private val subtitleCaptureLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        subtitlePendingPermission = false
+        if (result.resultCode == RESULT_OK && result.data != null) {
+            try {
+                val command = Intent(this, SubtitleCaptureService::class.java)
+                    .setAction(SubtitleCaptureService.ACTION_START)
+                    .putExtra(SubtitleCaptureService.EXTRA_RESULT, result.resultCode)
+                    .putExtra(SubtitleCaptureService.EXTRA_DATA, result.data)
+                ContextCompat.startForegroundService(this, command)
+                main.postDelayed({ refreshHome() }, 900)
+            } catch (exception: Exception) {
+                flash("無法啟動 OCR 懸浮翻譯：" + exception.javaClass.simpleName)
+            }
+        } else {
+            flash("未允許擷取畫面，懸浮翻譯維持關閉")
+        }
         refreshHome()
     }
 
@@ -199,7 +228,7 @@ class TransferActivity : ComponentActivity() {
     }
 
     private fun maybeReturnHome() {
-        if (queuedAutoHome) return
+        if (queuedAutoHome || subtitlePendingPermission) return
         val mayClose = tw.airgesture.transferbeta.core.HomeScreenPolicy.shouldAutoBackground(
             homePrefs.getBoolean("auto_run", false),
             normalLauncherEntry,
@@ -227,6 +256,36 @@ class TransferActivity : ComponentActivity() {
                 moveTaskToBack(true)
             }
         }, 900)
+    }
+
+    private fun beginSubtitleCapture() {
+        if (SubtitleCaptureService.running || subtitlePendingPermission) return
+        subtitlePendingPermission = true
+        if (!Settings.canDrawOverlays(this)) {
+            subtitleNeedsOverlay = true
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:" + packageName)))
+        } else {
+            requestSubtitleScreenCapture()
+        }
+    }
+
+    private fun requestSubtitleScreenCapture() {
+        try {
+            val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            subtitleCaptureLauncher.launch(manager.createScreenCaptureIntent())
+        } catch (exception: Exception) {
+            subtitlePendingPermission = false
+            flash("無法要求畫面擷取：" + exception.javaClass.simpleName)
+            refreshHome()
+        }
+    }
+
+    private fun stopSubtitleCapture() {
+        subtitlePendingPermission = false
+        subtitleNeedsOverlay = false
+        stopService(Intent(this, SubtitleCaptureService::class.java))
+        main.postDelayed({ refreshHome() }, 300)
     }
 
     private fun startGlobalMode() {
@@ -349,9 +408,14 @@ class TransferActivity : ComponentActivity() {
             updatingModeControls = true
             gestureSwitch.isChecked = FloatingSettings.gestureCamera(this)
             transferSwitch.isChecked = FloatingSettings.nearby(this)
+            if (::subtitleSwitch.isInitialized) {
+                subtitleSwitch.isChecked = SubtitleCaptureService.running || subtitlePendingPermission
+                subtitleLanguage.isEnabled = !SubtitleCaptureService.running && !subtitlePendingPermission
+            }
             updatingModeControls = false
             modeDescription.text = modeLabel() +
-                if (GlobalGestureService.isActive) " · 背景服務執行中" else " · 尚未啟動"
+                (if (GlobalGestureService.isActive) " · 背景服務執行中" else " · 尚未啟動") +
+                (if (SubtitleCaptureService.running) " · OCR 翻譯中" else "")
         }
         refreshSetupGuide()
         val d = tw.airgesture.transferbeta.core.HomeScreenPolicy.decide(
@@ -400,6 +464,15 @@ class TransferActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (subtitleNeedsOverlay) {
+            subtitleNeedsOverlay = false
+            if (Settings.canDrawOverlays(this)) {
+                main.post { requestSubtitleScreenCapture() }
+            } else {
+                subtitlePendingPermission = false
+                flash("需要懸浮顯示權限才能顯示翻譯字幕")
+            }
+        }
         refreshHome()
         if (homePrefs.getBoolean("auto_run", false) &&
             hasModePermissions() && hasModeAccessibility() && !GlobalGestureService.isActive) {
@@ -512,6 +585,38 @@ class TransferActivity : ComponentActivity() {
         }
         modePanel.addView(modeRow("附近裝置傳檔",
             "亮屏搜尋、傳送和接收；熄屏暫停搜尋", transferSwitch))
+        subtitleSwitch = Switch(this).apply {
+            isChecked = SubtitleCaptureService.running
+            contentDescription = "懸浮翻譯開關"
+            setOnCheckedChangeListener { _, checked ->
+                if (updatingModeControls) return@setOnCheckedChangeListener
+                if (checked) beginSubtitleCapture() else stopSubtitleCapture()
+                refreshHome()
+            }
+        }
+        modePanel.addView(modeRow("懸浮翻譯",
+            "OCR 翻譯影片現有外語字幕；無字幕語音翻譯將在後續版本加入",
+            subtitleSwitch))
+        modePanel.addView(text("字幕來源語言（切換語言需先關閉翻譯）", 13f))
+        subtitleLanguage = Spinner(this).apply {
+            adapter = ArrayAdapter(this@TransferActivity,
+                android.R.layout.simple_spinner_dropdown_item,
+                listOf("英文字幕", "日文字幕", "韓文字幕"))
+            val selected = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                .getString("source_language", "en")
+            setSelection(when (selected) { "ja" -> 1; "ko" -> 2; else -> 0 })
+            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+                override fun onItemSelected(parent: AdapterView<*>?, view: View?,
+                    position: Int, id: Long) {
+                    if (SubtitleCaptureService.running || subtitlePendingPermission) return
+                    val lang = arrayOf("en", "ja", "ko")[position.coerceIn(0, 2)]
+                    getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                        .edit().putString("source_language", lang).apply()
+                }
+            }
+        }
+        modePanel.addView(subtitleLanguage)
         modeDescription = text(modeLabel(), 14f)
         modePanel.addView(modeDescription)
         root.addView(modePanel)
