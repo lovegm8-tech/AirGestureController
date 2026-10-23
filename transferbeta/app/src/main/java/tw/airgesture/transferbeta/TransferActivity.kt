@@ -630,6 +630,16 @@ class TransferActivity : ComponentActivity() {
             orientation = LinearLayout.VERTICAL
         }
         val areaPreferences = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+        // Existing v1.0.24 installations often persisted AUTO (0) by default.
+        // Migrate that old default once so v1.0.25 really scans the whole
+        // display without asking the user to find a hidden setting.
+        if (!areaPreferences.getBoolean("full_scan_v125_migrated", false)) {
+            val prior = areaPreferences.getInt("subtitle_area_mode", 0)
+            val change = areaPreferences.edit()
+                .putBoolean("full_scan_v125_migrated", true)
+            if (prior == 0) change.putInt("subtitle_area_mode", 4)
+            change.apply()
+        }
         val topAreaText = text("自訂起點", 12f)
         val bottomAreaText = text("自訂終點", 12f)
         fun areaSeekBar(preference: String, maxProgress: Int,
