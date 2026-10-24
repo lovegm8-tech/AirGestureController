@@ -30,9 +30,19 @@ public final class SubtitleTwoLineBuffer {
         return reviseExisting("voice:" + utteranceId, translation);
     }
 
+    /** Do not allow a delayed AI answer to replace a newer preview. */
+    public boolean reviseVoiceIfUnchanged(long id, String expected, String improved) {
+        return reviseIfUnchanged("voice:" + id, expected, improved);
+    }
+
     public boolean reviseOcr(String original, String translation) {
         if (original == null || original.trim().isEmpty()) return false;
         return reviseExisting("ocr:" + original.trim(), translation);
+    }
+
+    public boolean reviseOcrIfUnchanged(String original, String expected, String improved) {
+        if (original == null || original.trim().isEmpty()) return false;
+        return reviseIfUnchanged("ocr:" + original.trim(), expected, improved);
     }
 
     public String previousOfVoice(long utteranceId) {
@@ -43,6 +53,16 @@ public final class SubtitleTwoLineBuffer {
     public String previousOfOcr(String original) {
         if (original == null) return "";
         return ("ocr:" + original.trim()).equals(secondKey) ? firstText : "";
+    }
+
+    private boolean reviseIfUnchanged(String key, String expected, String improved) {
+        if (expected == null) return false;
+        String normalized = expected.replaceAll("\\s+", " ").trim();
+        if (key.equals(secondKey) && normalized.equals(secondText))
+            return reviseExisting(key, improved);
+        if (key.equals(firstKey) && normalized.equals(firstText))
+            return reviseExisting(key, improved);
+        return false;
     }
 
     private boolean reviseExisting(String key, String translation) {
