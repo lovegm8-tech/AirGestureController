@@ -221,8 +221,11 @@ public final class SubtitlePlaybackSpeech {
                 byte[] pcm = new byte[3200]; // 100 ms of 16 kHz mono PCM 16-bit
                 long lastPartialAt = 0;
                 String previousPartial = "";
-                String lastCandidate = "";
-                long utteranceId = 1L;
+                SubtitleSpeechChunker chunker = new SubtitleSpeechChunker(
+                        language, (text, id, isFinal) -> {
+                            if (text.length() >= ("ja".equals(language) ? 3 : 5))
+                                callback.onUtterance(text, id, isFinal);
+                        });
                 long lastReportAt = android.os.SystemClock.elapsedRealtime();
                 long audibleSamples = 0;
                 while (alive.get() && !Thread.currentThread().isInterrupted()) {
@@ -236,21 +239,9 @@ public final class SubtitlePlaybackSpeech {
                         if (pcm[i] != 0 || pcm[i+1] != 0) { audibleSamples++; break; }
                     }
                     if (recognizer.acceptWaveForm(pcm, n)) {
-                        // Vosk final sentences still take priority for accuracy.
-                        // Partial text below is only an early subtitle preview.
-                        String sentence = recognizeText(recognizer.getResult(), "text");
+                        String result = recognizeText(recognizer.getResult(), "text");
                         previousPartial = "";
-                        // Final hypotheses may correct or shorten earlier
-                        // speculative partial captions; preserve corrections.
-                        if (sentence.length() >= SubtitleSpeechModels.minFinalLength(language)
-                                && !sentence.equalsIgnoreCase(lastCandidate)) {
-                            lastCandidate = sentence;
-                            callback.onUtterance(sentence, utteranceId, true);
-                        }
-                        // Even an empty Vosk final segment ends the speech
-                        // group: the next words must occupy a NEW subtitle row.
-                        utteranceId++;
-                        lastCandidate = "";
+                        chunker.onFinal(result);
                     } else {
                         long now = android.os.SystemClock.elapsedRealtime();
                         if (now - lastPartialAt >= SubtitleSpeechEmissionPolicy.PARTIAL_POLL_MS) {
@@ -258,11 +249,7 @@ public final class SubtitlePlaybackSpeech {
                             String stable = SubtitleSpeechEmissionPolicy.stablePartial(
                                     previousPartial, partial, language);
                             previousPartial = partial;
-                            if (SubtitleSpeechEmissionPolicy.meaningfulChange(
-                                    lastCandidate, stable, language)) {
-                                lastCandidate = stable;
-                                callback.onUtterance(stable, utteranceId, false);
-                            }
+                            chunker.onStable(stable, now);
                             lastPartialAt = now;
                         }
                     }
