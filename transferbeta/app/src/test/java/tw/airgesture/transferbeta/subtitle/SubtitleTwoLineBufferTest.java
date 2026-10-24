@@ -80,4 +80,30 @@ public class SubtitleTwoLineBufferTest {
         assertEquals(0, b.count());
         assertEquals("", b.first());
     }
+
+    @Test public void aiRevisionOnlyTouchesExistingLine() {
+        SubtitleTwoLineBuffer b = new SubtitleTwoLineBuffer();
+        b.putVoice(1, "語音第一句");
+        b.putVoice(2, "語音第二句");
+        assertTrue(b.reviseVoice(2, "AI 修正第二句"));
+        assertEquals("語音第一句", b.first());
+        assertEquals("AI 修正第二句", b.second());
+        b.putVoice(3, "語音第三句");
+        assertFalse(b.reviseVoice(1, "過時的 AI 修正"));
+        assertEquals("AI 修正第二句", b.first());
+        assertEquals("語音第三句", b.second());
+    }
+
+    @Test public void ocrAiCorrectionDoesNotReintroduceEvictedText() {
+        SubtitleTwoLineBuffer b = new SubtitleTwoLineBuffer();
+        b.putOcr("Hello", "你好");
+        b.putOcr("Welcome", "歡迎");
+        assertTrue(b.reviseOcr("Hello", "您好"));
+        assertEquals("您好", b.first());
+        b.putOcr("Thank you", "謝謝你");
+        assertFalse(b.reviseOcr("Hello", "過時中文"));
+        assertEquals("歡迎", b.first());
+        assertEquals("謝謝你", b.second());
+        assertEquals("歡迎", b.previousOfOcr("Thank you"));
+    }
 }
