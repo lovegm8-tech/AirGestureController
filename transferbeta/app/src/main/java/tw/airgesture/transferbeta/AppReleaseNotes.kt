@@ -11,6 +11,7 @@ internal object AppReleaseNotes {
     internal data class Entry(val version: String, val summary: String)
 
     val entries: List<Entry> = listOf(
+        Entry("1.0.42", "新增翻譯逐階段診斷紀錄，可信的畫面原文字幕可優先翻譯；Qwen 過期結果不得蓋掉新字幕。"),
         Entry("1.0.41", "輕量偵測播放音訊停頓，輔助語音片語定稿與字幕換行；Qwen 最短 7 秒接受一次新潤飾，減少持續高負載。"),
         Entry("1.0.40", "語音長段落提前切成可讀片語，改善舊字幕卡住及翻譯延遲；OCR 與語音共用本地 Qwen 校對、兩行字幕修正更穩。"),
         Entry("1.0.39", "本地 AI 模型下載支援手機熱點與行動數據；新增從手機檔案離線匯入、模型檢查和下載錯誤提示。"),
