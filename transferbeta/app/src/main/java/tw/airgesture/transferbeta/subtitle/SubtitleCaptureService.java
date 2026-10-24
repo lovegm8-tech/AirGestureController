@@ -112,6 +112,7 @@ public final class SubtitleCaptureService extends Service {
     private SubtitleRoiEditor roiEditor;
     private SubtitleBubbleController translationBubble;
     private SubtitlePlaybackSpeech playbackSpeech;
+    private SubtitleSenseVoiceSpeech senseVoiceSpeech;
     private volatile boolean voiceFallbackEnabled = false;
     private volatile boolean voiceUnavailable = false;
     private volatile long voiceStartedAtMs = 0L;
@@ -242,12 +243,14 @@ public final class SubtitleCaptureService extends Service {
 
         try {
             createNotificationChannel();
+            String configuredSource = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                    .getString("source_language", "en");
+            boolean usingSenseVoice = "sensevoice".equals(
+                    getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                            .getString("asr_engine", "vosk"));
             voiceFallbackEnabled = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
                     .getBoolean("enable_voice_fallback", true)
-                    && ("en".equals(getSharedPreferences("floating_subtitle", MODE_PRIVATE)
-                            .getString("source_language", "en")) ||
-                        "ja".equals(getSharedPreferences("floating_subtitle", MODE_PRIVATE)
-                            .getString("source_language", "en")))
+                    && (usingSenseVoice || SubtitleSpeechModels.supports(configuredSource))
                     && checkSelfPermission(Manifest.permission.RECORD_AUDIO)
                             == PackageManager.PERMISSION_GRANTED;
             int foregroundTypes = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION;
@@ -615,12 +618,26 @@ public final class SubtitleCaptureService extends Service {
 
 
     private void startPlaybackSpeech() {
-        lastVoiceStatus = "正在準備" + ("ja".equals(sourceLanguage) ? "日文" : "英文") + "離線語音補位";
-        playbackSpeech = new SubtitlePlaybackSpeech(this, mediaProjection, sourceLanguage,
-                new SubtitlePlaybackSpeech.Callback() {
+        String selection = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                .getString("asr_engine", "vosk");
+        boolean useSenseVoice = "sensevoice".equals(selection)
+                && SubtitleSenseVoiceModel.installed(this);
+        if ("sensevoice".equals(selection) && !useSenseVoice) {
+            lastVoiceStatus = "SenseVoice 未安裝，"
+                    + (SubtitleSpeechModels.supports(sourceLanguage)
+                        ? "暫以 Vosk 辨識" : "本語言改用 OCR");
+        }
+        if (!useSenseVoice && !SubtitleSpeechModels.supports(sourceLanguage)) {
+            voiceUnavailable = true;
+            return;
+        }
+        final String activeName = useSenseVoice ? "SenseVoice" : "Vosk";
+        if (useSenseVoice) lastVoiceStatus = "正在啟動 SenseVoice INT8 離線辨識";
+        SubtitlePlaybackSpeech.Callback listener = new SubtitlePlaybackSpeech.Callback() {
                     @Override public void onStatus(String status) {
                         lastVoiceStatus = status;
                         if (status.contains("無法啟動") ||
+                                status.contains("模型未安裝") ||
                                 status.contains("未取得可辨識") ||
                                 status.contains("讀取失敗") ||
                                 status.contains("無法擷取") ||
@@ -629,7 +646,7 @@ public final class SubtitleCaptureService extends Service {
                         }
                     }
                     @Override public void onHypothesis(String original, boolean isFinal) {
-                        trace(isFinal ? "Vosk 原始 final" : "Vosk 原始 partial", original);
+                        trace(activeName + (isFinal ? " 原始 final" : " 原始 partial"), original);
                     }
                     @Override public void onUtterance(String original, long utteranceId,
                                                       boolean isFinal) {
@@ -640,8 +657,16 @@ public final class SubtitleCaptureService extends Service {
                         voiceUnavailable = false;
                         main.post(() -> translateVoiceFallback(original, utteranceId, isFinal));
                     }
-                });
-        playbackSpeech.start();
+                };
+        if (useSenseVoice) {
+            senseVoiceSpeech = new SubtitleSenseVoiceSpeech(this, mediaProjection,
+                    sourceLanguage, listener);
+            senseVoiceSpeech.start();
+        } else {
+            playbackSpeech = new SubtitlePlaybackSpeech(this, mediaProjection,
+                    sourceLanguage, listener);
+            playbackSpeech.start();
+        }
     }
 
     /** Latest-only speech coalescing. Slow ML Kit translations no longer drop
@@ -1502,6 +1527,10 @@ public final class SubtitleCaptureService extends Service {
         if (playbackSpeech != null) {
             playbackSpeech.stop();
             playbackSpeech = null;
+        }
+        if (senseVoiceSpeech != null) {
+            senseVoiceSpeech.stop();
+            senseVoiceSpeech = null;
         }
         // Do not run a large model once subtitles have been stopped.
         SubtitleLocalAi.release();
