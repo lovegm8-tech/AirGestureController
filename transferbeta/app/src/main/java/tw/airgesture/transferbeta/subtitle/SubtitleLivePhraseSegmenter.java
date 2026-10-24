@@ -81,7 +81,7 @@ public final class SubtitleLivePhraseSegmenter {
                 String sealed = norm(tail.substring(0, cut));
                 if (!sealed.isEmpty() && !sealed.equals(currentSource))
                     out.add(new Phrase(activeId, sealed, false));
-                consumed = full.substring(0, full.indexOf(tail) + cut).trim();
+                consumed = full.substring(0, full.length() - tail.length() + cut).trim();
                 activeId = ++nextId;
                 activeStartedMs = nowMs;
                 hadPreview = false;
