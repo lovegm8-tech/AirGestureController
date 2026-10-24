@@ -84,6 +84,8 @@ class TransferActivity : ComponentActivity() {
     private lateinit var transferSwitch: Switch
     private lateinit var subtitleSwitch: Switch
     private lateinit var subtitleLanguage: Spinner
+    private lateinit var asrEngineSpinner: Spinner
+    private lateinit var asrModelStatus: TextView
     private lateinit var voiceFallbackSwitch: Switch
     private lateinit var aiLocalSwitch: Switch
     private lateinit var aiModelStatus: TextView
@@ -168,7 +170,10 @@ class TransferActivity : ComponentActivity() {
         audioPermissionRequestedForSubtitleStart = false
         val selectedLanguage = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
             .getString("source_language", "en")
-        val allowed = granted && (selectedLanguage == "en" || selectedLanguage == "ja")
+        val selectedEngine = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+            .getString("asr_engine", "vosk")
+        val allowed = granted && (selectedLanguage == "en" || selectedLanguage == "ja" ||
+            (selectedLanguage == "ko" && selectedEngine == "sensevoice"))
         getSharedPreferences("floating_subtitle", MODE_PRIVATE)
             .edit().putBoolean("enable_voice_fallback", allowed).apply()
         if (::voiceFallbackSwitch.isInitialized) {
@@ -287,7 +292,9 @@ class TransferActivity : ComponentActivity() {
         if (SubtitleCaptureService.running || subtitlePendingPermission) return
         val prefs = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
         val language = prefs.getString("source_language", "en")
-        if ((language == "en" || language == "ja") &&
+        val engine = prefs.getString("asr_engine", "vosk")
+        if ((language == "en" || language == "ja" ||
+                (language == "ko" && engine == "sensevoice")) &&
             prefs.getBoolean("enable_voice_fallback", true) &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) !=
                 PackageManager.PERMISSION_GRANTED) {
@@ -446,13 +453,19 @@ class TransferActivity : ComponentActivity() {
             if (::subtitleSwitch.isInitialized) {
                 subtitleSwitch.isChecked = SubtitleCaptureService.running || subtitlePendingPermission
                 subtitleLanguage.isEnabled = !SubtitleCaptureService.running && !subtitlePendingPermission
+                if (::asrEngineSpinner.isInitialized)
+                    asrEngineSpinner.isEnabled = !SubtitleCaptureService.running && !subtitlePendingPermission
             }
             updatingModeControls = false
             if (::voiceFallbackSwitch.isInitialized) {
+                val preferences = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
                 voiceFallbackSwitch.isEnabled =
-                    getSharedPreferences("floating_subtitle", MODE_PRIVATE)
-                        .getString("source_language", "en") != "ko"
+                    preferences.getString("source_language", "en") != "ko" ||
+                    preferences.getString("asr_engine", "vosk") == "sensevoice"
             }
+            if (::asrModelStatus.isInitialized)
+                asrModelStatus.text = "SenseVoice：" +
+                    tw.airgesture.transferbeta.subtitle.SubtitleSenseVoiceModel.status(this)
             if (::aiModelStatus.isInitialized)
                 aiModelStatus.text = "本地 AI：" +
                     tw.airgesture.transferbeta.subtitle.SubtitleLocalAi.status(this) +
@@ -665,8 +678,10 @@ class TransferActivity : ComponentActivity() {
                     getSharedPreferences("floating_subtitle", MODE_PRIVATE)
                         .edit().putString("source_language", lang).apply()
                     if (::voiceFallbackSwitch.isInitialized) {
-                        voiceFallbackSwitch.isEnabled = (lang != "ko")
-                        val allowedVoice = lang != "ko" &&
+                        val koreanSupported = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                            .getString("asr_engine", "vosk") == "sensevoice"
+                        voiceFallbackSwitch.isEnabled = (lang != "ko" || koreanSupported)
+                        val allowedVoice = (lang != "ko" || koreanSupported) &&
                             getSharedPreferences("floating_subtitle", MODE_PRIVATE)
                                 .getBoolean("enable_voice_fallback", true)
                         updatingModeControls = true
@@ -677,16 +692,90 @@ class TransferActivity : ComponentActivity() {
             }
         }
         modePanel.addView(subtitleLanguage)
+        modePanel.addView(text("播放語音辨識引擎（需先停止翻譯再切換）", 13f))
+        asrEngineSpinner = Spinner(this).apply {
+            adapter = ArrayAdapter(this@TransferActivity,
+                android.R.layout.simple_spinner_dropdown_item,
+                listOf("Vosk（原版／英文日文）", "SenseVoice INT8 AI（英文日文韓文）"))
+            setSelection(if (getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                    .getString("asr_engine", "vosk") == "sensevoice") 1 else 0)
+            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+                override fun onItemSelected(parent: AdapterView<*>?, view: View?,
+                                            position: Int, id: Long) {
+                    if (SubtitleCaptureService.running || subtitlePendingPermission) return
+                    val selection = if (position == 1) "sensevoice" else "vosk"
+                    getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                        .edit().putString("asr_engine", selection).apply()
+                    if (::voiceFallbackSwitch.isInitialized) {
+                        val lang = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                            .getString("source_language", "en")
+                        voiceFallbackSwitch.isEnabled = (lang != "ko" || selection == "sensevoice")
+                        if (lang == "ko" && selection != "sensevoice") {
+                            updatingModeControls = true
+                            voiceFallbackSwitch.isChecked = false
+                            updatingModeControls = false
+                        }
+                    }
+                }
+            }
+        }
+        modePanel.addView(asrEngineSpinner)
+        asrModelStatus = text("SenseVoice：檢查模型…", 13f)
+        modePanel.addView(asrModelStatus)
+        modePanel.addView(Button(this).apply {
+            text = "下載 SenseVoice INT8 模型（約 163 MB）"
+            isAllCaps = false
+            setOnClickListener {
+                if (SubtitleCaptureService.running) {
+                    flash("請先停止翻譯再下載／安裝 ASR 模型")
+                } else {
+                    try {
+                        flash(tw.airgesture.transferbeta.subtitle.SubtitleSenseVoiceModel
+                            .download(this@TransferActivity))
+                    } catch (error: Exception) {
+                        flash("SenseVoice 下載失敗：" + error.javaClass.simpleName)
+                    }
+                    refreshHome()
+                }
+            }
+        })
+        modePanel.addView(Button(this).apply {
+            text = "驗證並安裝已下載的 SenseVoice 模型"
+            isAllCaps = false
+            setOnClickListener {
+                tw.airgesture.transferbeta.subtitle.SubtitleSenseVoiceModel
+                    .install(this@TransferActivity, java.util.function.Consumer { status ->
+                        runOnUiThread {
+                            flash(status)
+                            refreshHome()
+                        }
+                    })
+                refreshHome()
+            }
+        })
+        modePanel.addView(Button(this).apply {
+            text = "檢查 SenseVoice 模型狀態"
+            isAllCaps = false
+            setOnClickListener {
+                flash(tw.airgesture.transferbeta.subtitle.SubtitleSenseVoiceModel
+                    .status(this@TransferActivity))
+                refreshHome()
+            }
+        })
         voiceFallbackSwitch = Switch(this).apply {
             isChecked = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
                 .getBoolean("enable_voice_fallback", true) &&
                     getSharedPreferences("floating_subtitle", MODE_PRIVATE)
-                        .getString("source_language", "en") != "ko"
-            contentDescription = "英文及日文語音優先翻譯開關"
+                        .getString("source_language", "en") != "ko" ||
+                    getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                        .getString("asr_engine", "vosk") == "sensevoice"
+            contentDescription = "離線播放語音辨識開關"
             setOnCheckedChangeListener { _, checked ->
                 if (updatingModeControls) return@setOnCheckedChangeListener
                 val prefs = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
-                if (checked && prefs.getString("source_language", "en") == "ko") {
+                if (checked && prefs.getString("source_language", "en") == "ko" &&
+                    prefs.getString("asr_engine", "vosk") != "sensevoice") {
                     updatingModeControls = true
                     isChecked = false
                     updatingModeControls = false
@@ -708,8 +797,8 @@ class TransferActivity : ComponentActivity() {
             }
         }
         modePanel.addView(modeRow(
-            "語音優先翻譯（英文／日文）",
-            "開啟翻譯就先辨識允許擷取的影片聲音，不必框選字幕；沒有語音結果時自動嘗試 OCR。首次使用各語言需下載離線模型，耗電可能增加。",
+            "播放語音優先翻譯（Vosk 英日／SenseVoice 英日韓）",
+            "SenseVoice 為實驗性離線 ASR，須先下載、驗證並安裝模型；辨識音訊不會上傳，未安裝時英文／日文可回退 Vosk。切換引擎需重啟翻譯。",
             voiceFallbackSwitch))
         aiLocalSwitch = Switch(this).apply {
             isChecked = tw.airgesture.transferbeta.subtitle.SubtitleLocalAi.enabled(this@TransferActivity)
