@@ -8,7 +8,7 @@ package tw.airgesture.transferbeta.subtitle;
  */
 public final class SubtitleSpeechEmissionPolicy {
     private SubtitleSpeechEmissionPolicy() { }
-    public static final long PARTIAL_POLL_MS = 520L;
+    public static final long PARTIAL_POLL_MS = 360L;
 
     public static String stablePartial(String previous, String current, String language) {
         if (previous == null || current == null) return "";
