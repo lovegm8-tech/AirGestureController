@@ -978,26 +978,22 @@ class TransferActivity : ComponentActivity() {
                 else "已關閉張掌圓圈與軌跡，手勢操作維持不變", true)
         }
         extraButton("查看版本更新紀錄／更新進度") {
-            val versionLog = """
-                v1.0.22｜碰一碰傳送前重建 NFC 讀取模式，12 秒未感應自動重試一次，提供手動重試與本機診斷；傳送端／接收端碰觸時若 Nearby 未連線則自動搜尋信任裝置；熄屏省電、解鎖後快速重連，斷線限頻重搜；原有驗證、手勢與逐檔傳輸不變
-                v1.0.21｜NFC 碰一碰支援一次選擇 2～32 個原始照片、影片或文件；一次 NFC 驗證指定一台信任裝置，Nearby 逐檔無損傳送並逐檔 SHA-256 核對，接收端自動接受；一般隔空抓取、多檔及網址傳送保持不變
-                v1.0.20｜依實機結果移除「不按分享就碰觸傳送」和 NFC 網頁接收待命實驗；保留手動「分享 → 懸浮操作 · NFC 碰一碰」發送單張照片、影片、文件或有效網址，Nearby 單一指定接收者自動接收
-                v1.0.19｜曾嘗試免按分享的 NFC 網頁碰觸（已在 v1.0.20 移除）
-                v1.0.18｜NFC 背景網頁實驗原型（已移除）
-                v1.0.17｜修正三星相簿在「懸浮操作／NFC 碰一碰」雙分享入口的二次選單卡住；手勢抓取自動選一般懸浮操作，NFC 入口保留手動選擇
-                v1.0.16｜三星相簿分享新增 NFC 碰一碰獨立選項；NFC 一次性驗證綁定已配對 Nearby 裝置，只傳給碰觸對象；成功驗證後自動接收原檔（需兩端背景傳檔運作）
-                v1.0.15｜修正 S26 Ultra 前鏡頭未鏡像影像的左右手正反判斷：掌心可起滑、手背不可起滑；不影響傳檔與握拳\n                v1.0.14｜首頁獨立控制前鏡頭手勢／Nearby 傳檔；純傳檔模式不用開相機或無障礙服務；解鎖後恢復附近搜尋；通知顯示模式
-                v1.0.13｜掌心朝向前鏡頭才可起滑／重新起滑；手背不能啟動滑動；右側提示可起滑狀態；握拳、抓取與接收維持原樣
-                v1.0.12｜上滑判定恢復 v1.0.10；張掌顯示手掌位置圓圈與軌跡；減少幽靈手提示、加快提示消失
-                v1.0.11｜縮短已解鎖狀態下的鏡頭啟動等待、改善首次抬手辨識與下緣起手上滑；左滑避開三星返回；移除自動更新
-                v1.0.10｜提升快速張掌滑動的追蹤連續性與方向判斷
-                v1.0.9｜張掌左滑、辨識提示靠右、逐檔無損傳送、遊戲自動暫停、辨識加速、握拳 1.5 秒
-                v1.0.8｜隔空操作及隔空抓取整合、原有單檔及多人接收
-            """.trimIndent()
-            AlertDialog.Builder(this).setTitle("懸浮操作 v" + BuildConfig.VERSION_NAME)
-                .setMessage(versionLog +
-                    "\n\n更新方式：不再自動檢查或下載 APK。需手動取得同簽章的新版本安裝更新。" +
-                    "\n進度說明：此紀錄隨 APK 版本更新，不會連線查詢 GitHub。")
+            // Notes are compiled into the offline APK. CI and unit tests
+            // reject version bumps without a corresponding release note.
+            val versionLog = AppReleaseNotes.displayText()
+            val current = BuildConfig.VERSION_NAME
+            val progress = if (AppReleaseNotes.containsVersion(current)) {
+                "目前已安裝：v$current（版本代碼 ${BuildConfig.VERSION_CODE}）\\n" +
+                    "此版本的更新內容已收錄於下方。"
+            } else {
+                "目前已安裝：v$current（版本代碼 ${BuildConfig.VERSION_CODE}）\\n" +
+                    "注意：尚未收錄這個版本的更新紀錄，請回報開發者。"
+            }
+            AlertDialog.Builder(this)
+                .setTitle("懸浮操作｜版本更新紀錄")
+                .setMessage(progress + "\\n\\n" + versionLog +
+                    "\\n\\n更新方式：不自動檢查或下載 APK，請手動安裝同簽章新版。" +
+                    "\\n此畫面是目前 APK 內建的歷史紀錄，不會連線顯示 GitHub 即時進度。")
                 .setPositiveButton("完成", null).show()
         }
         extraButton("玩遊戲時自動暫停隔空操作（開／關）") {
