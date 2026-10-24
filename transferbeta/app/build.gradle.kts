@@ -13,15 +13,18 @@ android {
         applicationId = "tw.airgesture.transferbeta"
         minSdk = 29
         targetSdk = 35
-        versionCode = 35
-        versionName = "1.0.22"
+        versionCode = 53
+        versionName = "1.0.40"
+        // S26 Ultra / S25 are arm64-v8a. Remove unused x86/x86_64/32-bit
+        // copies of MediaPipe and Vosk without stripping needed functionality.
+        ndk { abiFilters += setOf("arm64-v8a") }
     }
     buildTypes { release { isMinifyEnabled = false } }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
+    kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
     packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
     testOptions { unitTests.isReturnDefaultValues = true }
 }
@@ -40,6 +43,14 @@ dependencies {
     implementation("androidx.media3:media3-common:1.8.1")
     // One upgrade-cycle only: cancels WorkManager jobs scheduled by the retired updater.
     implementation("androidx.work:work-runtime-ktx:2.10.5")
+    implementation("com.google.mlkit:text-recognition:16.0.1")
+    implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
+    implementation("com.google.mlkit:text-recognition-korean:16.0.1")
+    implementation("com.google.mlkit:translate:17.0.3")
+    implementation("com.alphacephei:vosk-android:0.3.75")
+    // Official Google LiteRT-LM Android runtime. Model weights are NOT in APK.
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     testImplementation("junit:junit:4.13.2")
 }
 val modelFile = layout.projectDirectory.file("src/main/assets/gesture_recognizer.task")
