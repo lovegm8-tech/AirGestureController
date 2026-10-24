@@ -1,0 +1,300 @@
+
+name: Floating Control v1.0.41 OCR Signed Test APK
+
+# Build signed OCR feature APK on a dedicated testing branch; existing release workflows stay unchanged.
+on:
+  push:
+    branches:
+      - feature/floating-subtitle-vad-thermal-v1-0-41
+    paths:
+      - '.github/workflows/floating-subtitle-v1-0-41.yml'
+      - 'transferbeta/app/src/main/**'
+      - 'transferbeta/app/build.gradle.kts'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  signed-release:
+    if: github.ref == 'refs/heads/feature/floating-subtitle-vad-thermal-v1-0-41' && github.event.repository.full_name == 'lovegm8-tech/AirGestureController'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    defaults:
+      run:
+        working-directory: transferbeta
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Install Android SDK
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+      - name: Run tests and assemble release APK
+        run: gradle :app:testDebugUnitTest :app:assembleRelease --no-daemon
+      - name: Assert activity only backgrounds on user tap
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          activity = Path("app/src/main/java/tw/airgesture/transferbeta/TransferActivity.kt").read_text()
+          policy = Path("app/src/main/java/tw/airgesture/transferbeta/core/HomeScreenPolicy.kt").read_text()
+          subtitle = Path("app/src/main/java/tw/airgesture/transferbeta/subtitle/SubtitleCaptureService.java").read_text()
+          assert activity.count('moveTaskToBack(true)') == 1, 'Unexpected hidden Activity minimize'
+          assert 'maybeReturnHome' not in activity, 'Automatic background callbacks still exist'
+          assert 'shouldAutoBackground' not in policy, 'Automatic background policy still exists'
+          assert activity.count('returnToDesktopOnUserTap()') == 4, 'Manual button is not only background entry'
+          assert 'main.postDelayed(this::openSelectionEditor' not in subtitle, 'Editor blocks manual home button'
+          assert 'main.postDelayed(this::showReopenButton' in subtitle, 'Translation bubble not available'
+          print('Verified: no automatic minimize; explicit button is sole background trigger')
+          PY
+      - name: Assert voice-first OCR fallback and manual home
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          activity = Path("app/src/main/java/tw/airgesture/transferbeta/TransferActivity.kt").read_text()
+          service = Path("app/src/main/java/tw/airgesture/transferbeta/subtitle/SubtitleCaptureService.java").read_text()
+          priority = Path("app/src/main/java/tw/airgesture/transferbeta/subtitle/SubtitleVoicePriority.java").read_text()
+          assert activity.count('moveTaskToBack(true)') == 1, 'Unexpected background transition'
+          assert 'maybeReturnHome' not in activity, 'Automatic background callback returned'
+          assert 'shouldAutoBackground' not in Path("app/src/main/java/tw/airgesture/transferbeta/core/HomeScreenPolicy.kt").read_text()
+          assert 'audioPermissionRequestedForSubtitleStart = true' in activity
+          assert 'beginSubtitleCapture()' in activity
+          assert 'voice_first_migrated_v135' in activity
+          assert 'calibrating = false;' in service
+          assert 'showReopenButton' in service
+          assert 'main.postDelayed(this::openSelectionEditor' not in service
+          assert 'SubtitleVoicePriority.mayScanOcr' in service
+          assert 'SubtitleVoicePriority.mayDisplayOcr' in service
+          assert 'voiceUnavailable = true' in service
+          assert 'lastVoiceUtteranceMs = SystemClock.elapsedRealtime()' in service
+          assert 'VOICE_FRESH_MS' in priority
+          assert 'later.setOnClickListener' in service
+          print('Voice-first + OCR backup + no forced ROI + manual-home verified')
+          PY
+      - name: Verify fast ASR and queued translator architecture
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          recognition = Path("app/src/main/java/tw/airgesture/transferbeta/subtitle/SubtitlePlaybackSpeech.java").read_text()
+          emission = Path("app/src/main/java/tw/airgesture/transferbeta/subtitle/SubtitleSpeechEmissionPolicy.java").read_text()
+          service = Path("app/src/main/java/tw/airgesture/transferbeta/subtitle/SubtitleCaptureService.java").read_text()
+          activity = Path("app/src/main/java/tw/airgesture/transferbeta/TransferActivity.kt").read_text()
+          assert "PARTIAL_POLL_MS = 360L" in emission
+          assert "lastPartialAt >= 2900" not in recognition
+          assert "SubtitleSpeechEmissionPolicy.stablePartial" in recognition
+          assert "private void drainVoiceTranslationQueue()" in service
+          assert "pendingVoiceSource" in service
+          assert "MIN_VOICE_CAPTION_SPACING_MS = 260L" in service
+          assert "moveTaskToBack(true)" in activity and activity.count("moveTaskToBack(true)") == 1
+          assert "maybeReturnHome" not in activity
+          print("Low-latency stable ASR + queued translation + user-only home verified")
+          PY
+      - name: Check exactly two independent subtitle rows and ASR revision IDs
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path("app/src/main/java/tw/airgesture/transferbeta/subtitle")
+          service = (root / "SubtitleCaptureService.java").read_text()
+          speech = (root / "SubtitlePlaybackSpeech.java").read_text()
+          two = (root / "SubtitleTwoLineBuffer.java").read_text()
+          activity = Path("app/src/main/java/tw/airgesture/transferbeta/TransferActivity.kt").read_text()
+          assert "captionFirstLine.setText(twoLineCaptions.first())" in service
+          assert "captionSecondLine.setText(twoLineCaptions.second())" in service
+          assert "line.setSingleLine(true)" in service
+          assert "captionView = new LinearLayout(this)" in service
+          assert "publishVoiceCaption(sourceId, zh)" in service
+          assert "publishOcrCaption(source, lastTranslation)" in service
+          assert "chunker.onFinal(result)" in speech
+          assert "chunker.onStable(stable, now)" in speech
+          assert "currentId++" in (root / "SubtitleSpeechChunker.java").read_text()
+          assert "firstKey = secondKey" in two
+          assert activity.count("moveTaskToBack(true)") == 1
+          assert "maybeReturnHome" not in activity
+          print("Two single-line rows, third-sentence eviction and in-place ASR corrections verified")
+          PY
+      - name: Verify genuine local Qwen implementation and zero forced remote inference
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          src=Path("app/src/main/java/tw/airgesture/transferbeta")
+          model=(src/"subtitle/SubtitleLocalAi.kt").read_text()
+          service=(src/"subtitle/SubtitleCaptureService.java").read_text()
+          ui=(src/"TransferActivity.kt").read_text()
+          gradle=Path("app/build.gradle.kts").read_text()
+          assert "litertlm-android:0.18.0" in gradle
+          assert 'Engine(EngineConfig(' in model
+          assert 'conversation.sendMessage(prompt)' in model
+          assert "DownloadManager.Request" in model and "MODEL_SHA256" in model
+          assert "getExternalFilesDir" in model
+          assert "SubtitleLocalAi.refine(" in service
+          assert "requestVoiceAiRefinement(sourceId, source, zh)" in service
+          assert "publishVoiceCaption(sourceId, zh)" in service
+          assert 'aiLocalSwitch = Switch(this)' in ui
+          assert 'SubtitleLocalAi.download(' in ui
+          assert ui.count("moveTaskToBack(true)") == 1
+          print("Verified integrated LiteRT-LM, user-init model install, ML Kit fallback, 2-row update")
+          PY
+      - name: Verify hotspot downloads and offline model import
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          src = Path("app/src/main/java/tw/airgesture/transferbeta")
+          model = (src/"subtitle/SubtitleLocalAi.kt").read_text()
+          ui = (src/"TransferActivity.kt").read_text()
+          service = (src/"subtitle/SubtitleCaptureService.java").read_text()
+          assert '.setAllowedOverMetered(true)' in model
+          assert '.setAllowedOverRoaming(false)' in model
+          assert '.setAllowedOverMetered(false)' not in model
+          assert 'MODEL_SHA256' in model
+          assert 'fun importModel(' in model
+          assert 'contentResolver.openInputStream(uri)' in model
+          assert 'MessageDigest.getInstance("SHA-256")' in model
+          assert 'ActivityResultContracts.GetContent()' in ui
+          assert 'aiModelImportPicker.launch("*/*")' in ui
+          assert 'SubtitleLocalAi.importModel(' in ui
+          assert '重新檢查本地 AI 下載狀態' in ui
+          assert ui.count('moveTaskToBack(true)') == 1
+          assert 'publishVoiceCaption(sourceId, zh)' in service
+          print('Mobile hotspot/metered download, safe offline import, manual-home verified')
+          PY
+      - name: Verify long-speech segmentation, 260ms pace, and shared OCR Qwen
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path("app/src/main/java/tw/airgesture/transferbeta/subtitle")
+          service=(root/"SubtitleCaptureService.java").read_text()
+          chunk=(root/"SubtitleSpeechChunker.java").read_text()
+          ai=(root/"SubtitleLocalAi.kt").read_text()
+          buffer=(root/"SubtitleTwoLineBuffer.java").read_text()
+          assert "MAX_UNBROKEN_CHUNK_MS = 1450L" in chunk
+          assert "consumedPrefix = currentHypothesis" in chunk
+          assert "MIN_VOICE_CAPTION_SPACING_MS = 260L" in service
+          assert "requestOcrAiRefinement(source, lastTranslation)" in service
+          assert "requestVoiceAiRefinement(sourceId, source, zh)" in service
+          assert "twoLineCaptions.reviseOcr(original, improved)" in service
+          assert "twoLineCaptions.reviseVoice(id, improved)" in service
+          assert "latestRefinement.set(Refinement(" in ai
+          assert "aiWorkerActive.compareAndSet(false, true)" in ai
+          assert '"ko" -> "韓文"' in ai
+          assert "boolean reviseExisting(" in buffer
+          print("Streaming chunking, queue coalescing, OCR/voice shared Qwen and no old row revival verified")
+          PY
+      - name: Check silence boundary, bounded Qwen, old features
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          base=Path("app/src/main/java/tw/airgesture/transferbeta/subtitle")
+          chunk=(base/"SubtitleSpeechChunker.java").read_text()
+          asr=(base/"SubtitlePlaybackSpeech.java").read_text()
+          ai=(base/"SubtitleLocalAi.kt").read_text()
+          svc=(base/"SubtitleCaptureService.java").read_text()
+          assert "QUIET_BOUNDARY_MS = 780L" in chunk
+          assert "public void onQuiet(" in chunk
+          assert "chunker.onQuiet(nowMs)" in asr
+          assert "MAX_UNBROKEN_CHUNK_MS = 1450L" in chunk
+          assert "MIN_REFINEMENT_INTERVAL_MS = 7000L" in ai
+          assert "lastRefinementAcceptedMs" in ai
+          assert "SubtitleLocalAi.refine(" in svc
+          assert "requestOcrAiRefinement(" in svc
+          print("Silence assisted phrase rolling, throttled Qwen and shared OCR/voice AI verified")
+          PY
+      - name: Read app version automatically
+        id: app_version
+        shell: bash
+        run: |
+          set -euo pipefail
+          CODE=$(sed -nE 's/^[[:space:]]*versionCode[[:space:]]*=[[:space:]]*([0-9]+).*$/\1/p' app/build.gradle.kts | head -n 1)
+          NAME=$(sed -nE 's/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"([^"]+)".*$/\1/p' app/build.gradle.kts | head -n 1)
+          if [[ -z "$CODE" || -z "$NAME" ]]; then
+            echo 'Could not read versionCode/versionName from app/build.gradle.kts' >&2
+            exit 1
+          fi
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+      - name: Sign release APK with repository secret
+        shell: bash
+        env:
+          SIGNING_BUNDLE_B64: ${{ secrets.AIRGESTURE_SIGNING_BUNDLE_B64 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${SIGNING_BUNDLE_B64}" ]]; then
+            echo 'Missing secret AIRGESTURE_SIGNING_BUNDLE_B64' >&2
+            exit 1
+          fi
+          umask 077
+          python3 - <<'PY'
+          import base64, json, os, pathlib, subprocess
+          import re
+          encoded = os.environ.pop("SIGNING_BUNDLE_B64").strip().lstrip("\ufeff")
+          if encoded.startswith("AIRGESTURE_SIGNING_BUNDLE_B64="):
+              encoded = encoded.split("=", 1)[1]
+          encoded = encoded.strip().strip("'\"")
+          encoded = "".join(encoded.split())
+          candidates = [encoded] + re.findall(r"[A-Za-z0-9+/=]{2000,}", encoded)
+          bundle = None
+          for candidate in candidates:
+              try:
+                  decoded = json.loads(base64.b64decode(candidate, validate=True))
+                  if isinstance(decoded, dict) and decoded.get("key_alias") == "airgesture":
+                      bundle = decoded
+                      break
+              except (ValueError, KeyError, json.JSONDecodeError):
+                  pass
+          if bundle is None:
+              raise SystemExit("Invalid signing Secret format. Re-copy the entire Base64 text file into AIRGESTURE_SIGNING_BUNDLE_B64.")
+          assert bundle["key_alias"] == "airgesture"
+          keyfile = pathlib.Path(os.environ["RUNNER_TEMP"]) / "release-signing.jks"
+          output = pathlib.Path("app/build/outputs/apk/release/app-release.apk")
+          unsigned = pathlib.Path("app/build/outputs/apk/release/app-release-unsigned.apk")
+          try:
+              keyfile.write_bytes(base64.b64decode(bundle["keystore_base64"], validate=True))
+              assert unsigned.is_file(), "Unsigned APK is missing"
+              env = os.environ.copy()
+              env["STORE_PASSWORD"] = bundle["store_password"]
+              env["KEY_PASSWORD"] = bundle["key_password"]
+              subprocess.run([
+                  str(pathlib.Path(os.environ["ANDROID_HOME"]) / "build-tools" / "35.0.0" / "apksigner"),
+                  "sign", "--ks", str(keyfile), "--ks-key-alias", bundle["key_alias"],
+                  "--ks-pass", "env:STORE_PASSWORD", "--key-pass", "env:KEY_PASSWORD",
+                  "--out", str(output), str(unsigned)
+              ], env=env, check=True)
+          finally:
+              keyfile.unlink(missing_ok=True)
+          PY
+      - name: Verify version, upgrade package, and permanent signature
+        shell: bash
+        env:
+          EXPECTED_CODE: ${{ steps.app_version.outputs.code }}
+          EXPECTED_NAME: ${{ steps.app_version.outputs.name }}
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/release/app-release.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" > "$RUNNER_TEMP/badging.txt"
+          PACKAGE_LINE=$(sed -n '1p' "$RUNNER_TEMP/badging.txt")
+          echo "$PACKAGE_LINE"
+          [[ "$PACKAGE_LINE" == *"package: name='tw.airgesture.transferbeta' versionCode='$EXPECTED_CODE' versionName='$EXPECTED_NAME'"* ]]
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" > "$RUNNER_TEMP/cert.txt"
+          grep -qiF '05e77197d2ad73ac4a255e4c40b868a5c26c539b9aea3c1abd53100ff484f19e' "$RUNNER_TEMP/cert.txt"
+      - name: Validate only ARM64 native libraries shipped
+        run: |
+          python3 - <<'PY'
+          import zipfile
+          path = 'app/build/outputs/apk/release/app-release.apk'
+          with zipfile.ZipFile(path) as z:
+              libraries = [n for n in z.namelist() if n.startswith('lib/') and n.endswith('.so')]
+              assert libraries, 'No native libraries packed'
+              unexpected = [n for n in libraries if not n.startswith('lib/arm64-v8a/')]
+              assert not unexpected, 'Unexpected 32-bit/x86 native libraries: ' + str(unexpected[:10])
+              print('Verified ARM64-only native libs:', len(libraries))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FloatingControl-v${{ steps.app_version.outputs.name }}-OCR-permanent-signed
+          path: transferbeta/app/build/outputs/apk/release/app-release.apk
+          retention-days: 30
