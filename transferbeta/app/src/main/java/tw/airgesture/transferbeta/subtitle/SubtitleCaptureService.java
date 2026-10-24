@@ -1008,7 +1008,7 @@ public final class SubtitleCaptureService extends Service {
                         pausedByUser, now, voiceStartedAtMs, lastVoiceUtteranceMs);
                 if (fallbackOcr && voiceFallbackEnabled && !voiceUnavailable)
                     lastSelectionStatus = "語音暫無台詞，正在以 OCR 補充";
-                boolean audioActive = voiceFallbackEnabled && !voiceUnavailable && !fallbackOcr;
+                boolean audioActive = voiceFallbackEnabled && !voiceUnavailable && !calibrating && !pausedByUser && !fallbackOcr;
                 boolean passiveProbe = audioActive &&
                         SubtitleOcrVoiceArbitration.shouldProbe(
                                 now, lastOcrProbeAtMs, lastTrustedOcrAtMs);
