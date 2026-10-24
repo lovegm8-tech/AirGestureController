@@ -35,6 +35,7 @@ import java.util.zip.ZipInputStream;
 public final class SubtitlePlaybackSpeech {
     public interface Callback {
         void onStatus(String status);
+        void onHypothesis(String text, boolean isFinal);
         void onUtterance(String words, long utteranceId, boolean isFinal);
     }
 
@@ -258,6 +259,7 @@ public final class SubtitlePlaybackSpeech {
 
                     if (recognizer.acceptWaveForm(pcm, n)) {
                         String result = recognizeText(recognizer.getResult(), "text");
+                        if (!result.isEmpty()) callback.onHypothesis(result, true);
                         previousPartial = "";
                         quietSinceMs = 0L;
                         chunker.onFinal(result);
@@ -265,6 +267,8 @@ public final class SubtitlePlaybackSpeech {
                         long now = android.os.SystemClock.elapsedRealtime();
                         if (now - lastPartialAt >= SubtitleSpeechEmissionPolicy.PARTIAL_POLL_MS) {
                             String partial = recognizeText(recognizer.getPartialResult(), "partial");
+                            if (!partial.isEmpty() && !partial.equals(previousPartial))
+                                callback.onHypothesis(partial, false);
                             String stable = SubtitleSpeechEmissionPolicy.stablePartial(
                                     previousPartial, partial, language);
                             previousPartial = partial;
