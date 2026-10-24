@@ -177,8 +177,8 @@ jobs:
           assert "MIN_VOICE_CAPTION_SPACING_MS = 260L" in service
           assert "requestOcrAiRefinement(source, lastTranslation)" in service
           assert "requestVoiceAiRefinement(sourceId, source, zh)" in service
-          assert "twoLineCaptions.reviseOcr(original, improved)" in service
-          assert "twoLineCaptions.reviseVoice(id, improved)" in service
+          assert "twoLineCaptions.reviseOcrIfUnchanged(original, quickChinese, improved)" in service
+          assert "twoLineCaptions.reviseVoiceIfUnchanged(id, quickChinese, improved)" in service
           assert "latestRefinement.set(Refinement(" in ai
           assert "aiWorkerActive.compareAndSet(false, true)" in ai
           assert '"ko" -> "韓文"' in ai
