@@ -19,6 +19,8 @@ public final class SubtitleSpeechChunker {
     private long chunkStartMs = -1L;
     private String consumedPrefix = "";
     private String current = "";
+    private String latestStableFull = "";
+    public static final long QUIET_BOUNDARY_MS = 780L;
 
     public SubtitleSpeechChunker(String language, Listener listener) {
         this.language = language;
@@ -28,6 +30,7 @@ public final class SubtitleSpeechChunker {
     public void onStable(String fullHypothesis, long elapsedMs) {
         String currentHypothesis = normalize(fullHypothesis);
         if (currentHypothesis.isEmpty()) return;
+        latestStableFull = currentHypothesis;
         String suffix = suffixAfterCommitted(currentHypothesis);
         if (suffix == null || suffix.isEmpty()) return;
         if (chunkStartMs < 0) chunkStartMs = elapsedMs;
@@ -47,6 +50,21 @@ public final class SubtitleSpeechChunker {
         }
     }
 
+    /**
+     * Lightweight playback-energy boundary hint. Called after a real quiet
+     * interval, not after every sample; recognition itself continues running.
+     * The pending stable phrase is finalized only once. The recognizer's
+     * subsequent final output will not replay that already consumed prefix.
+     */
+    public void onQuiet(long elapsedMs) {
+        if (current.isEmpty() || latestStableFull.isEmpty()) return;
+        listener.onChunk(current, currentId, true);
+        consumedPrefix = latestStableFull;
+        current = "";
+        currentId++;
+        chunkStartMs = -1L;
+    }
+
     public void onFinal(String fullResult) {
         String result = normalize(fullResult);
         String suffix = suffixAfterCommitted(result);
@@ -59,6 +77,7 @@ public final class SubtitleSpeechChunker {
         }
         consumedPrefix = "";
         current = "";
+        latestStableFull = "";
         currentId++;
         chunkStartMs = -1L;
     }
