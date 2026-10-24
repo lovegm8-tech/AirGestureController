@@ -781,8 +781,7 @@ public final class SubtitleCaptureService extends Service {
                             SystemClock.elapsedRealtime(), lastTrustedOcrAtMs)) return;
                     publishVoiceCaption(sourceId, zh);
                     positionVoiceCaption();
-                    if (sourceFinal && sourceId == lastSpokenUtteranceId)
-                        requestVoiceAiRefinement(sourceId, source, zh);
+                    if (sourceFinal && sourceId == lastSpokenUtteranceId) requestVoiceAiRefinement(sourceId, source, zh);
                 })
                 .addOnFailureListener(error -> {
                     if (source.equals(lastSpokenSource)) lastSpokenSource = "";
@@ -807,8 +806,7 @@ public final class SubtitleCaptureService extends Service {
         SubtitleLocalAi.refine(getApplicationContext(), sourceLanguage,
                 original, quickChinese, previous, improved -> main.post(() -> {
                     if (!running || pausedByUser || calibrating || !aiRefineEnabled) return;
-                    if (id == lastVoiceTranslatedId &&
-                            twoLineCaptions.reviseVoiceIfUnchanged(id, quickChinese, improved)) {
+                    if (id == lastVoiceTranslatedId && twoLineCaptions.reviseVoiceIfUnchanged(id, quickChinese, improved)) {
                         trace("Qwen 語音 #" + id, improved);
                         renderTwoLineCaptions();
                         lastTranslationResult = improved;
