@@ -116,9 +116,13 @@ public final class SubtitleCaptureService extends Service {
     private String pendingVoiceSource = "";
     private long pendingVoiceUtteranceId = -1L;
     private boolean pendingVoiceIsFinal = false;
+    private long pendingVoiceAtMs = 0L;
     private long lastSpokenUtteranceId = -1L;
+    private boolean lastSpokenIsFinal = false;
+    private long lastPublishedVoiceId = -1L;
+    private long lastCaptionAtMs = 0L;
     private boolean voiceRetryScheduled = false;
-    private static final long MIN_VOICE_CAPTION_SPACING_MS = 750L;
+    private static final long MIN_VOICE_CAPTION_SPACING_MS = 280L;
     public static volatile String lastVoiceLatencyStatus = "尚無語音翻譯耗時";
     public static volatile String lastVoiceStatus = "語音補位未啟用";
     public static volatile String lastCaptureStatus = "尚未取得畫面";
@@ -613,12 +617,13 @@ public final class SubtitleCaptureService extends Service {
                         }
                     }
                     @Override public void onUtterance(String original, long utteranceId,
-                                                      boolean isFinal) {
-                        // Vosk audio runs off the main thread; serialize speech
-                        // queue and UI/caption updates on the main looper.
+                                                      boolean isFinal, long recognizedAtMs) {
+                        // Keep the original monotonic ASR output timestamp to
+                        // separate recognition delay from translation queueing.
                         lastVoiceUtteranceMs = SystemClock.elapsedRealtime();
                         voiceUnavailable = false;
-                        main.post(() -> translateVoiceFallback(original, utteranceId, isFinal));
+                        main.post(() -> translateVoiceFallback(original, utteranceId,
+                                isFinal, recognizedAtMs));
                     }
                 });
         playbackSpeech.start();
@@ -629,7 +634,7 @@ public final class SubtitleCaptureService extends Service {
      * stable ASR hypothesis, then translate it as soon as the engine is free.
      */
     private void translateVoiceFallback(String original, long utteranceId,
-                                      boolean isFinal) {
+                                      boolean isFinal, long recognizedAtMs) {
         if (original == null || !running) return;
         String source = original.replaceAll("\\s+", " ").trim();
         int minLength = "ja".equals(sourceLanguage) ? 3 : 5;
@@ -642,12 +647,19 @@ public final class SubtitleCaptureService extends Service {
             if (pausedByUser || calibrating) pendingVoiceSource = "";
             return;
         }
-        if (utteranceId == lastSpokenUtteranceId &&
-                source.equalsIgnoreCase(lastSpokenSource)) return;
+        // The final Vosk result is sometimes text-identical to the preview.
+        // It must still pass through for a natural AI correction.
+        if (SubtitleVoiceQueuePolicy.suppress(lastSpokenUtteranceId,
+                lastSpokenSource, lastSpokenIsFinal, utteranceId, source, isFinal))
+            return;
+        if (!SubtitleVoiceQueuePolicy.replace(pendingVoiceUtteranceId,
+                pendingVoiceIsFinal, utteranceId, isFinal)) return;
         if (utteranceId == pendingVoiceUtteranceId &&
-                source.equalsIgnoreCase(pendingVoiceSource)) return;
+                source.equalsIgnoreCase(pendingVoiceSource) &&
+                (!isFinal || pendingVoiceIsFinal)) return;
         pendingVoiceUtteranceId = utteranceId;
         pendingVoiceIsFinal = isFinal;
+        pendingVoiceAtMs = recognizedAtMs;
         pendingVoiceSource = source;
         drainVoiceTranslationQueue();
     }
@@ -659,14 +671,16 @@ public final class SubtitleCaptureService extends Service {
             return;
         }
         if (pendingVoiceSource.isEmpty() || voiceTranslateBusy.get()) return;
-        long sinceLast = SystemClock.elapsedRealtime() - lastVoiceCaptionMs;
-        if (lastVoiceCaptionMs > 0 && sinceLast < MIN_VOICE_CAPTION_SPACING_MS) {
+        long sinceLast = SystemClock.elapsedRealtime() - lastCaptionAtMs;
+        long waitMs = SubtitleVoiceQueuePolicy.throttle(lastPublishedVoiceId,
+                pendingVoiceUtteranceId, pendingVoiceIsFinal, sinceLast);
+        if (waitMs > 0) {
             if (!voiceRetryScheduled) {
                 voiceRetryScheduled = true;
                 main.postDelayed(() -> {
                     voiceRetryScheduled = false;
                     drainVoiceTranslationQueue();
-                }, MIN_VOICE_CAPTION_SPACING_MS - sinceLast);
+                }, waitMs);
             }
             return;
         }
@@ -675,10 +689,13 @@ public final class SubtitleCaptureService extends Service {
         final String source = pendingVoiceSource;
         final long sourceId = pendingVoiceUtteranceId;
         final boolean sourceFinal = pendingVoiceIsFinal;
+        final long recognizedAtMs = pendingVoiceAtMs;
         pendingVoiceSource = "";
         lastSpokenSource = source;
         lastSpokenUtteranceId = sourceId;
+        lastSpokenIsFinal = sourceFinal;
         final long translateStarted = SystemClock.elapsedRealtime();
+        final long queueMs = Math.max(0L, translateStarted - recognizedAtMs);
         translator.translate(source)
                 .addOnSuccessListener(translated -> {
                     if (!running || pausedByUser || calibrating) return;
@@ -695,11 +712,20 @@ public final class SubtitleCaptureService extends Service {
                         lastVoiceStatus = "語音已辨識，但中文翻譯沒有輸出";
                         return;
                     }
-                    lastVoiceCaptionMs = SystemClock.elapsedRealtime();
+                    long completedAt = SystemClock.elapsedRealtime();
+                    // An old translation must never move the two-line
+                    // carousel backward or delay the newest spoken phrase.
+                    if (sourceId < lastPublishedVoiceId - 1) return;
+                    lastVoiceCaptionMs = completedAt;
+                    lastCaptionAtMs = completedAt;
+                    lastPublishedVoiceId = Math.max(lastPublishedVoiceId, sourceId);
                     lastTranslationResult = zh;
-                    lastVoiceLatencyStatus = "ASR文字送翻譯→顯示 " +
-                            (lastVoiceCaptionMs - translateStarted) + " ms（不含語音辨識）";
-                    lastVoiceStatus = sourceFinal ? "完整句修正已更新" : "語音中文字幕已更新";
+                    lastVoiceLatencyStatus = "語音輸出→送譯排隊 " + queueMs +
+                            " ms｜ML Kit " + (completedAt - translateStarted) +
+                            " ms｜輸出→顯示 " +
+                            Math.max(0L, completedAt - recognizedAtMs) +
+                            " ms（不含開口→語音辨識等待）";
+                    lastVoiceStatus = sourceFinal ? "完整片語已定稿" : "即時片語已更新";
                     publishVoiceCaption(sourceId, zh);
                     positionVoiceCaption();
                     if (sourceFinal && aiRefineEnabled) {
