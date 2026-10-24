@@ -770,10 +770,10 @@ public final class SubtitleCaptureService extends Service {
                     lastTranslationResult = zh;
                     long mlKitMs = lastVoiceCaptionMs - translateStarted;
                     long queueMs = Math.max(0, translateStarted - queuedAt);
-                    lastVoiceLatencyStatus = "新語音→字幕 " +
+                    lastVoiceLatencyStatus = "ASR 輸出→字幕 " +
                             (lastVoiceCaptionMs - queuedAt) + " ms（含佇列 " +
                             queueMs + " ms、ML Kit " + mlKitMs +
-                            " ms，不含 Vosk 初始辨識）";
+                            " ms，不含語音擷取與 ASR 辨識）";
                     lastVoiceStatus = sourceFinal ? "完整句已更新" : "語音字幕預覽已更新";
                     trace("ML Kit 語音 #" + sourceId + "（" + mlKitMs + "ms）",
                             source + " → " + zh);
@@ -781,7 +781,8 @@ public final class SubtitleCaptureService extends Service {
                             SystemClock.elapsedRealtime(), lastTrustedOcrAtMs)) return;
                     publishVoiceCaption(sourceId, zh);
                     positionVoiceCaption();
-                    if (sourceFinal) requestVoiceAiRefinement(sourceId, source, zh);
+                    if (sourceFinal && sourceId == lastSpokenUtteranceId)
+                        requestVoiceAiRefinement(sourceId, source, zh);
                 })
                 .addOnFailureListener(error -> {
                     if (source.equals(lastSpokenSource)) lastSpokenSource = "";
@@ -806,7 +807,8 @@ public final class SubtitleCaptureService extends Service {
         SubtitleLocalAi.refine(getApplicationContext(), sourceLanguage,
                 original, quickChinese, previous, improved -> main.post(() -> {
                     if (!running || pausedByUser || calibrating || !aiRefineEnabled) return;
-                    if (twoLineCaptions.reviseVoiceIfUnchanged(id, quickChinese, improved)) {
+                    if (id == lastVoiceTranslatedId &&
+                            twoLineCaptions.reviseVoiceIfUnchanged(id, quickChinese, improved)) {
                         trace("Qwen 語音 #" + id, improved);
                         renderTwoLineCaptions();
                         lastTranslationResult = improved;
