@@ -1400,9 +1400,10 @@ public final class SubtitleCaptureService extends Service {
             lastSelectionStatus = "已辨識字幕，但翻譯模型尚未就緒：" + lastModelStatus;
             return;
         }
-        if (source.equals(lastSource)) {
-            if (trustedOcr && lastOcrCaptionMs > 0L)
-                lastTrustedOcrAtMs = SystemClock.elapsedRealtime();
+        if (source.equals(lastSource) && twoLineCaptions.containsOcr(source)) {
+            // Only preserve priority when that OCR line is truly displayed:
+            // an older ML Kit request may have been rejected while voice won.
+            if (trustedOcr) lastTrustedOcrAtMs = SystemClock.elapsedRealtime();
             positionCaptionAbove(chosen);
             return;
         }
