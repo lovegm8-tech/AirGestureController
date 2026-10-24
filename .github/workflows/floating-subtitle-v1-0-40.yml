@@ -132,7 +132,7 @@ jobs:
           assert "DownloadManager.Request" in model and "MODEL_SHA256" in model
           assert "getExternalFilesDir" in model
           assert "SubtitleLocalAi.refine(" in service
-          assert "if (sourceFinal && aiRefineEnabled)" in service
+          assert "requestVoiceAiRefinement(sourceId, source, zh)" in service
           assert "publishVoiceCaption(sourceId, zh)" in service
           assert 'aiLocalSwitch = Switch(this)' in ui
           assert 'SubtitleLocalAi.download(' in ui
