@@ -84,7 +84,7 @@ jobs:
           emission = Path("app/src/main/java/tw/airgesture/transferbeta/subtitle/SubtitleSpeechEmissionPolicy.java").read_text()
           service = Path("app/src/main/java/tw/airgesture/transferbeta/subtitle/SubtitleCaptureService.java").read_text()
           activity = Path("app/src/main/java/tw/airgesture/transferbeta/TransferActivity.kt").read_text()
-          assert "PARTIAL_POLL_MS = 520L" in emission
+          assert "PARTIAL_POLL_MS = 360L" in emission
           assert "lastPartialAt >= 2900" not in recognition
           assert "SubtitleSpeechEmissionPolicy.stablePartial" in recognition
           assert "private void drainVoiceTranslationQueue()" in service
