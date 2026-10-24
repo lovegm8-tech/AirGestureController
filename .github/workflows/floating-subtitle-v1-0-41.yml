@@ -203,6 +203,24 @@ jobs:
           assert "requestOcrAiRefinement(" in svc
           print("Silence assisted phrase rolling, throttled Qwen and shared OCR/voice AI verified")
           PY
+      - name: Reject builds with missing in-app version history
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          gradle = Path("app/build.gradle.kts").read_text()
+          notes = Path("app/src/main/java/tw/airgesture/transferbeta/AppReleaseNotes.kt").read_text()
+          activity = Path("app/src/main/java/tw/airgesture/transferbeta/TransferActivity.kt").read_text()
+          version = re.search(r'versionName\\s*=\\s*"([^"]+)"', gradle).group(1)
+          entries = re.findall(r'Entry\\("([0-9]+\\.[0-9]+\\.[0-9]+)",', notes)
+          assert entries, "No in-app release notes"
+          assert entries[0] == version, "App version " + version + " but latest note is " + entries[0]
+          expected = ["1.0." + str(n) for n in range(int(version.split(".")[-1]), 7, -1)]
+          assert entries == expected, "Version update notes are missing, duplicate or unordered"
+          assert "AppReleaseNotes.displayText()" in activity
+          assert "AppReleaseNotes.containsVersion(current)" in activity
+          print("Verified release notes v" + entries[0] + " through v1.0.8 (" + str(len(entries)) + " versions)")
+          PY
       - name: Read app version automatically
         id: app_version
         shell: bash
