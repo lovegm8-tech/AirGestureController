@@ -25,6 +25,43 @@ public final class SubtitleTwoLineBuffer {
         return put("ocr:" + original.trim(), translation);
     }
 
+    /** Revisions must NEVER create a new row, even if an old AI reply arrives. */
+    public boolean reviseVoice(long utteranceId, String translation) {
+        return reviseExisting("voice:" + utteranceId, translation);
+    }
+
+    public boolean reviseOcr(String original, String translation) {
+        if (original == null || original.trim().isEmpty()) return false;
+        return reviseExisting("ocr:" + original.trim(), translation);
+    }
+
+    public String previousOfVoice(long utteranceId) {
+        String key = "voice:" + utteranceId;
+        return key.equals(secondKey) ? firstText : "";
+    }
+
+    public String previousOfOcr(String original) {
+        if (original == null) return "";
+        return ("ocr:" + original.trim()).equals(secondKey) ? firstText : "";
+    }
+
+    private boolean reviseExisting(String key, String translation) {
+        if (translation == null) return false;
+        String text = translation.replaceAll("\\s+", " ").trim();
+        if (text.isEmpty()) return false;
+        if (key.equals(secondKey)) {
+            if (secondText.equals(text)) return false;
+            secondText = text;
+            return true;
+        }
+        if (key.equals(firstKey)) {
+            if (firstText.equals(text)) return false;
+            firstText = text;
+            return true;
+        }
+        return false;
+    }
+
     private boolean put(String key, String translation) {
         if (translation == null) return false;
         // Some ML Kit outputs include literal newline. One sentence is still
