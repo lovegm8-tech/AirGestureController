@@ -983,17 +983,17 @@ class TransferActivity : ComponentActivity() {
             val versionLog = AppReleaseNotes.displayText()
             val current = BuildConfig.VERSION_NAME
             val progress = if (AppReleaseNotes.containsVersion(current)) {
-                "目前已安裝：v$current（版本代碼 ${BuildConfig.VERSION_CODE}）\\n" +
+                "目前已安裝：v$current（版本代碼 ${BuildConfig.VERSION_CODE}）\n" +
                     "此版本的更新內容已收錄於下方。"
             } else {
-                "目前已安裝：v$current（版本代碼 ${BuildConfig.VERSION_CODE}）\\n" +
+                "目前已安裝：v$current（版本代碼 ${BuildConfig.VERSION_CODE}）\n" +
                     "注意：尚未收錄這個版本的更新紀錄，請回報開發者。"
             }
             AlertDialog.Builder(this)
                 .setTitle("懸浮操作｜版本更新紀錄")
-                .setMessage(progress + "\\n\\n" + versionLog +
-                    "\\n\\n更新方式：不自動檢查或下載 APK，請手動安裝同簽章新版。" +
-                    "\\n此畫面是目前 APK 內建的歷史紀錄，不會連線顯示 GitHub 即時進度。")
+                .setMessage(progress + "\n\n" + versionLog +
+                    "\n\n更新方式：不自動檢查或下載 APK，請手動安裝同簽章新版。" +
+                    "\n此畫面是目前 APK 內建的歷史紀錄，不會連線顯示 GitHub 即時進度。")
                 .setPositiveButton("完成", null).show()
         }
         extraButton("玩遊戲時自動暫停隔空操作（開／關）") {
