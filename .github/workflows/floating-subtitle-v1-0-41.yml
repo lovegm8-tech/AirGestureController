@@ -211,8 +211,8 @@ jobs:
           gradle = Path("app/build.gradle.kts").read_text()
           notes = Path("app/src/main/java/tw/airgesture/transferbeta/AppReleaseNotes.kt").read_text()
           activity = Path("app/src/main/java/tw/airgesture/transferbeta/TransferActivity.kt").read_text()
-          version = re.search(r'versionName\\s*=\\s*"([^"]+)"', gradle).group(1)
-          entries = re.findall(r'Entry\\("([0-9]+\\.[0-9]+\\.[0-9]+)",', notes)
+          version = re.search(r'versionName\s*=\s*"([^"]+)"', gradle).group(1)
+          entries = re.findall(r'Entry\("([0-9]+\.[0-9]+\.[0-9]+)",', notes)
           assert entries, "No in-app release notes"
           assert entries[0] == version, "App version " + version + " but latest note is " + entries[0]
           expected = ["1.0." + str(n) for n in range(int(version.split(".")[-1]), 7, -1)]
