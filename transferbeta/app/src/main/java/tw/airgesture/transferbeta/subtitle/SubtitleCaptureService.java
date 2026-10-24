@@ -93,6 +93,12 @@ public final class SubtitleCaptureService extends Service {
     private TextView captionFirstLine;
     private TextView captionSecondLine;
     private final SubtitleTwoLineBuffer twoLineCaptions = new SubtitleTwoLineBuffer();
+    private final SubtitlePipelineTrace pipelineTrace = new SubtitlePipelineTrace();
+    private long lastOcrProbeAtMs = 0L;
+    private long lastTrustedOcrAtMs = 0L;
+    private void trace(String stage, String text) {
+        pipelineTrace.record(SystemClock.elapsedRealtime(), stage, text);
+    }
     public static volatile String lastAiStatus = "AI 模型尚未載入";
     private volatile boolean aiRefineEnabled = false;
     private FrameLayout editorRoot;
@@ -197,6 +203,9 @@ public final class SubtitleCaptureService extends Service {
         lastAcceptedOcrLines = 0;
         lastSpokenOriginal = "尚無語音辨識結果";
         twoLineCaptions.clear();
+        pipelineTrace.clear();
+        lastOcrProbeAtMs = 0L;
+        lastTrustedOcrAtMs = 0L;
         workerThread = new HandlerThread("floating-subtitle-ocr");
         workerThread.start();
         worker = new Handler(workerThread.getLooper());
@@ -619,11 +628,15 @@ public final class SubtitleCaptureService extends Service {
                             voiceUnavailable = true;
                         }
                     }
+                    @Override public void onHypothesis(String original, boolean isFinal) {
+                        trace(isFinal ? "Vosk 原始 final" : "Vosk 原始 partial", original);
+                    }
                     @Override public void onUtterance(String original, long utteranceId,
                                                       boolean isFinal) {
                         // Vosk audio runs off the main thread; serialize speech
                         // queue and UI/caption updates on the main looper.
                         lastVoiceUtteranceMs = SystemClock.elapsedRealtime();
+                        trace("ASR 片語 #" + utteranceId + (isFinal ? " final" : " 預覽"), original);
                         voiceUnavailable = false;
                         main.post(() -> translateVoiceFallback(original, utteranceId, isFinal));
                     }
@@ -643,6 +656,11 @@ public final class SubtitleCaptureService extends Service {
         if (source.length() < minLength) return;
         lastSpokenOriginal = source;
         long now = SystemClock.elapsedRealtime();
+        if (SubtitleOcrVoiceArbitration.prefersOcr(now, lastTrustedOcrAtMs)) {
+            pendingVoiceSource = "";
+            if (isFinal) trace("仲裁", "信任畫面字幕，略過語音片語 #" + utteranceId);
+            return;
+        }
         if (!SubtitleVoicePriority.mayDisplayVoice(voiceFallbackEnabled, modelReady,
                 calibrating, pausedByUser, now, lastOcrCaptionMs, lastVoiceCaptionMs)) {
             // Respect pause and editor mode; never build a backlog in these states.
@@ -732,6 +750,10 @@ public final class SubtitleCaptureService extends Service {
                             queueMs + " ms、ML Kit " + mlKitMs +
                             " ms，不含 Vosk 初始辨識）";
                     lastVoiceStatus = sourceFinal ? "完整句已更新" : "語音字幕預覽已更新";
+                    trace("ML Kit 語音 #" + sourceId + "（" + mlKitMs + "ms）",
+                            source + " → " + zh);
+                    if (SubtitleOcrVoiceArbitration.prefersOcr(
+                            SystemClock.elapsedRealtime(), lastTrustedOcrAtMs)) return;
                     publishVoiceCaption(sourceId, zh);
                     positionVoiceCaption();
                     if (sourceFinal) requestVoiceAiRefinement(sourceId, source, zh);
@@ -759,7 +781,8 @@ public final class SubtitleCaptureService extends Service {
         SubtitleLocalAi.refine(getApplicationContext(), sourceLanguage,
                 original, quickChinese, previous, improved -> main.post(() -> {
                     if (!running || pausedByUser || calibrating || !aiRefineEnabled) return;
-                    if (twoLineCaptions.reviseVoice(id, improved)) {
+                    if (twoLineCaptions.reviseVoiceIfUnchanged(id, quickChinese, improved)) {
+                        trace("Qwen 語音 #" + id, improved);
                         renderTwoLineCaptions();
                         lastTranslationResult = improved;
                         lastAiStatus = "本地 Qwen 已修正語音字幕第 " + id + " 句";
@@ -774,11 +797,14 @@ public final class SubtitleCaptureService extends Service {
         SubtitleLocalAi.refine(getApplicationContext(), language,
                 original, quickChinese, previous, improved -> main.post(() -> {
                     if (!running || pausedByUser || calibrating || !aiRefineEnabled) return;
-                    if (!SubtitleVoicePriority.mayDisplayOcr(voiceFallbackEnabled,
-                            SystemClock.elapsedRealtime(), lastVoiceCaptionMs)) return;
+                    if (!SubtitleOcrVoiceArbitration.prefersOcr(
+                            SystemClock.elapsedRealtime(), lastTrustedOcrAtMs)
+                            && !SubtitleVoicePriority.mayDisplayOcr(voiceFallbackEnabled,
+                                    SystemClock.elapsedRealtime(), lastVoiceCaptionMs)) return;
                     // Do NOT insert missing captions: Qwen can be slower than
                     // an entire next line and must not restore evicted text.
-                    if (twoLineCaptions.reviseOcr(original, improved)) {
+                    if (twoLineCaptions.reviseOcrIfUnchanged(original, quickChinese, improved)) {
+                        trace("Qwen OCR", original + " → " + improved);
                         renderTwoLineCaptions();
                         lastTranslationResult = improved;
                         lastAiStatus = "本地 Qwen 已修正 OCR 中文字幕";
@@ -862,7 +888,9 @@ public final class SubtitleCaptureService extends Service {
                     "\n語音：" + lastVoiceStatus +
                     "\n翻譯延遲診斷：" + lastVoiceLatencyStatus +
                     "\n本地 Qwen：" + lastAiStatus +
-                    "\n模型狀態：" + SubtitleLocalAi.status(this));
+                    "\n模型狀態：" + SubtitleLocalAi.status(this) +
+                    "\n\n【最近 60 筆逐階段診斷（僅記憶體）】\n" +
+                    pipelineTrace.snapshot());
             contents.addView(details);
 
             Button dismiss = new Button(this);
@@ -921,13 +949,17 @@ public final class SubtitleCaptureService extends Service {
         // All ML Kit callbacks run on main thread. A final ASR result carries
         // the same utterance ID as its partial hypothesis, so it revises the
         // same row instead of advancing to the next one.
-        if (twoLineCaptions.putVoice(utteranceId, translated))
+        if (twoLineCaptions.putVoice(utteranceId, translated)) {
+            trace("顯示語音 #" + utteranceId, translated);
             renderTwoLineCaptions();
+        }
     }
 
     private void publishOcrCaption(String source, String translated) {
-        if (twoLineCaptions.putOcr(source, translated))
+        if (twoLineCaptions.putOcr(source, translated)) {
+            trace("顯示 OCR", source + " → " + translated);
             renderTwoLineCaptions();
+        }
     }
 
 
@@ -976,7 +1008,15 @@ public final class SubtitleCaptureService extends Service {
                         pausedByUser, now, voiceStartedAtMs, lastVoiceUtteranceMs);
                 if (fallbackOcr && voiceFallbackEnabled && !voiceUnavailable)
                     lastSelectionStatus = "語音暫無台詞，正在以 OCR 補充";
-                if (fallbackOcr && ocrBusy.compareAndSet(false, true)) captureFrame();
+                boolean audioActive = voiceFallbackEnabled && !voiceUnavailable && !fallbackOcr;
+                boolean passiveProbe = audioActive &&
+                        SubtitleOcrVoiceArbitration.shouldProbe(
+                                now, lastOcrProbeAtMs, lastTrustedOcrAtMs);
+                if ((fallbackOcr || passiveProbe) &&
+                        ocrBusy.compareAndSet(false, true)) {
+                    lastOcrProbeAtMs = now;
+                    captureFrame();
+                }
                 adaptRotation();
             } catch (Exception ignored) {
                 ocrBusy.set(false);
@@ -1346,10 +1386,14 @@ public final class SubtitleCaptureService extends Service {
         lastSubtitleObservedMs = SystemClock.elapsedRealtime();
         // Tracking is based on OCR coordinates, not a fixed screen crop.
         String source = chosen.text.replaceAll("\\s+", " ").trim();
+        if (!source.equals(lastRecognizedSource)) trace("OCR 候選", source);
         lastRecognizedSource = source;
         stableSubtitleFrames = previousCandidate != null
                 && source.equals(previousCandidate.text)
                 ? Math.min(30, stableSubtitleFrames + 1) : 0;
+        boolean trustedOcr = SubtitleOcrVoiceArbitration.isTrusted(
+                chosen, previousCandidate, stableSubtitleFrames,
+                manualRoiActive, width, height);
         previousCandidate = chosen;
         if (source.length() < 3) return;
         if (!modelReady || translator == null) {
@@ -1357,14 +1401,17 @@ public final class SubtitleCaptureService extends Service {
             return;
         }
         if (source.equals(lastSource)) {
+            if (trustedOcr && lastOcrCaptionMs > 0L)
+                lastTrustedOcrAtMs = SystemClock.elapsedRealtime();
             positionCaptionAbove(chosen);
             return;
         }
-        if (!SubtitleVoicePriority.mayDisplayOcr(voiceFallbackEnabled,
+        if (!trustedOcr && !SubtitleVoicePriority.mayDisplayOcr(voiceFallbackEnabled,
                 SystemClock.elapsedRealtime(), lastVoiceCaptionMs)) return;
         if (!translateBusy.compareAndSet(false, true)) return;
         final SubtitleCandidatePolicy.Candidate translatedCandidate = chosen;
         lastSource = source;
+        trace(trustedOcr ? "OCR 可信字幕" : "OCR 補位", source);
         translator.translate(source)
                 .addOnSuccessListener(translated -> {
                     if (!running || pausedByUser || calibrating ||
@@ -1389,9 +1436,11 @@ public final class SubtitleCaptureService extends Service {
                         showCaption("等待正確的中文字幕…");
                         return;
                     }
-                    if (!SubtitleVoicePriority.mayDisplayOcr(voiceFallbackEnabled,
+                    if (!trustedOcr && !SubtitleVoicePriority.mayDisplayOcr(voiceFallbackEnabled,
                             SystemClock.elapsedRealtime(), lastVoiceCaptionMs)) return;
                     lastOcrCaptionMs = SystemClock.elapsedRealtime();
+                    if (trustedOcr) lastTrustedOcrAtMs = lastOcrCaptionMs;
+                    trace("ML Kit OCR", source + " → " + lastTranslation);
                     publishOcrCaption(source, lastTranslation);
                     positionCaptionAbove(translatedCandidate);
                     // Share the SAME downloaded Qwen model with voice
