@@ -343,7 +343,7 @@ jobs:
           assert 'getString("asr_engine", "vosk")' in ui
           assert "SubtitleSenseVoiceModel" in ui
           assert 'versionCode = 57' in Path("app/build.gradle.kts").read_text()
-          assert 'versionName = "1.0.43"' in Path("app/build.gradle.kts").read_text()
+          assert 'versionName = "1.0.44"' in Path("app/build.gradle.kts").read_text()
           print("SenseVoice optional ASR, Vosk fallback, user selection, integrity checks verified")
           PY
       - name: Validate only ARM64 native libraries shipped
