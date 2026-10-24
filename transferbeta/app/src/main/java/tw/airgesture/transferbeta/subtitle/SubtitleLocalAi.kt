@@ -15,6 +15,8 @@ import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+import android.os.SystemClock
 
 /**
  * Genuine, on-device Qwen3-0.6B INT4 post-editor. Never sends transcripts to
@@ -38,6 +40,11 @@ object SubtitleLocalAi {
     private val lock = Any()
     @Volatile private var preparing = false
     @Volatile private var permanentlyInvalid = false
+    // No accumulating inference backlog: keep AI optional and the phone
+    // responsive while Vosk and video playback stay active.
+    private val refineBusy = AtomicBoolean(false)
+    @Volatile private var lastRefineStartedMs = 0L
+    private const val MIN_REFINE_GAP_MS = 8000L
 
     @JvmStatic fun modelFile(context: Context): File =
         File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), MODEL_NAME)
@@ -215,15 +222,21 @@ object SubtitleLocalAi {
                           callback: java.util.function.Consumer<String>) {
         if (!enabled(context) || !modelInstalled(context) || permanentlyInvalid) return
         if (sourceLanguage != "en" && sourceLanguage != "ja") return
-        if (original.length !in 5..260 || fastChinese.isBlank()) return
+        val minChars = if (sourceLanguage == "ja") 8 else 13
+        if (original.length !in minChars..260 || fastChinese.isBlank()) return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastRefineStartedMs < MIN_REFINE_GAP_MS) return
+        if (!refineBusy.compareAndSet(false, true)) return
+        lastRefineStartedMs = now
         val app = context.applicationContext
         executor.execute {
-            if (!enabled(app)) return@execute
             try {
+                if (!enabled(app)) return@execute
                 if (!ensureInitialized(app)) return@execute
-                val instruction = "你是繁體中文字幕校對者。只輸出一行自然、簡短、準確的台灣繁體中文譯文。" +
-                        "嚴禁添加說明、引號、英文原文、說話者、標記或換行。保留人名專有名詞。" +
-                        "參考上一句以理解上下文，勿憑空增加劇情。"
+                val instruction = "你是台灣影片繁體中文字幕翻譯員。以語音辨識原文為主要依據，" +
+                        "前一句字幕僅用來理解語境；快速機翻可能錯誤，禁止直接照抄其錯譯。" +
+                        "只輸出一行自然、精簡、準確的台灣繁體中文。" +
+                        "不要解釋、引號、英文原文、角色標記或換行，勿自行增加未說出的內容。"
                 val prompt = "來源語言：" + (if (sourceLanguage == "ja") "日文" else "英文") +
                         "\n上一句中文字幕：${previousChinese.take(90)}" +
                         "\n語音辨識原文：${original.take(260)}" +
@@ -243,6 +256,8 @@ object SubtitleLocalAi {
                 lastStatus = "Qwen AI 文字潤飾運作中"
             } catch (e: Throwable) {
                 lastStatus = "AI 暫停，仍使用快速翻譯：${e.javaClass.simpleName}"
+            } finally {
+                refineBusy.set(false)
             }
         }
     }
