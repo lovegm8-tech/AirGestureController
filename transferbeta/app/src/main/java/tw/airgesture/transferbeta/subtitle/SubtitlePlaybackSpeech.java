@@ -35,7 +35,7 @@ import java.util.zip.ZipInputStream;
 public final class SubtitlePlaybackSpeech {
     public interface Callback {
         void onStatus(String status);
-        void onUtterance(String words, long utteranceId, boolean isFinal);
+        void onUtterance(String words, long utteranceId, boolean isFinal, long recognizedAtMs);
     }
 
     private final String modelFolder;
@@ -222,7 +222,8 @@ public final class SubtitlePlaybackSpeech {
                 long lastPartialAt = 0;
                 String previousPartial = "";
                 String lastCandidate = "";
-                long utteranceId = 1L;
+                SubtitleLivePhraseSegmenter phrases = new SubtitleLivePhraseSegmenter(language);
+                long quietSinceMs = 0L;
                 long lastReportAt = android.os.SystemClock.elapsedRealtime();
                 long audibleSamples = 0;
                 while (alive.get() && !Thread.currentThread().isInterrupted()) {
@@ -235,25 +236,35 @@ public final class SubtitlePlaybackSpeech {
                     for (int i = 0; i + 1 < n; i += 2) {
                         if (pcm[i] != 0 || pcm[i+1] != 0) { audibleSamples++; break; }
                     }
+                    long voiceNow = android.os.SystemClock.elapsedRealtime();
+                    // A very small PCM energy gate supplies sentence-boundary
+                    // hints only. It does NOT stop the ASR engine, so quiet
+                    // background audio never repeatedly restarts recognition.
+                    long absSum = 0L;
+                    int energySamples = 0;
+                    for (int i = 0; i + 1 < n; i += 16) {
+                        int sample = (short) ((pcm[i] & 0xff) | (pcm[i + 1] << 8));
+                        absSum += Math.abs(sample);
+                        energySamples++;
+                    }
+                    boolean quiet = energySamples > 0 &&
+                            absSum / energySamples < 230L;
+                    if (quiet) {
+                        if (quietSinceMs == 0L) quietSinceMs = voiceNow;
+                    } else quietSinceMs = 0L;
+
                     if (recognizer.acceptWaveForm(pcm, n)) {
-                        // Vosk final sentences still take priority for accuracy.
-                        // Partial text below is only an early subtitle preview.
                         String sentence = recognizeText(recognizer.getResult(), "text");
                         previousPartial = "";
-                        // Final hypotheses may correct or shorten earlier
-                        // speculative partial captions; preserve corrections.
-                        if (sentence.length() >= SubtitleSpeechModels.minFinalLength(language)
-                                && !sentence.equalsIgnoreCase(lastCandidate)) {
-                            lastCandidate = sentence;
-                            callback.onUtterance(sentence, utteranceId, true);
-                        }
-                        // Even an empty Vosk final segment ends the speech
-                        // group: the next words must occupy a NEW subtitle row.
-                        utteranceId++;
                         lastCandidate = "";
+                        quietSinceMs = 0L;
+                        for (SubtitleLivePhraseSegmenter.Phrase phrase :
+                                phrases.finish(sentence, voiceNow)) {
+                            callback.onUtterance(phrase.source, phrase.id,
+                                    phrase.isFinal, voiceNow);
+                        }
                     } else {
-                        long now = android.os.SystemClock.elapsedRealtime();
-                        if (now - lastPartialAt >= SubtitleSpeechEmissionPolicy.PARTIAL_POLL_MS) {
+                        if (voiceNow - lastPartialAt >= SubtitleSpeechEmissionPolicy.PARTIAL_POLL_MS) {
                             String partial = recognizeText(recognizer.getPartialResult(), "partial");
                             String stable = SubtitleSpeechEmissionPolicy.stablePartial(
                                     previousPartial, partial, language);
@@ -261,9 +272,22 @@ public final class SubtitlePlaybackSpeech {
                             if (SubtitleSpeechEmissionPolicy.meaningfulChange(
                                     lastCandidate, stable, language)) {
                                 lastCandidate = stable;
-                                callback.onUtterance(stable, utteranceId, false);
+                                for (SubtitleLivePhraseSegmenter.Phrase phrase :
+                                        phrases.partial(stable, voiceNow)) {
+                                    callback.onUtterance(phrase.source, phrase.id,
+                                            phrase.isFinal, voiceNow);
+                                }
                             }
-                            lastPartialAt = now;
+                            lastPartialAt = voiceNow;
+                        }
+                        if (quietSinceMs != 0L && phrases.hasPreview() &&
+                                voiceNow - quietSinceMs >=
+                                        SubtitleLivePhraseSegmenter.QUIET_BOUNDARY_MS) {
+                            for (SubtitleLivePhraseSegmenter.Phrase phrase :
+                                    phrases.silence(voiceNow)) {
+                                callback.onUtterance(phrase.source, phrase.id,
+                                        phrase.isFinal, voiceNow);
+                            }
                         }
                     }
                     long now = android.os.SystemClock.elapsedRealtime();
