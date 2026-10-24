@@ -119,6 +119,12 @@ public final class SubtitleTwoLineBuffer {
         return true;
     }
 
+    public boolean containsOcr(String source) {
+        if (source == null || source.trim().isEmpty()) return false;
+        String key = "ocr:" + source.trim();
+        return key.equals(firstKey) || key.equals(secondKey);
+    }
+
     public boolean hasCaptions() { return !firstKey.isEmpty(); }
     public String first() { return firstText; }
     public String second() { return secondText; }
