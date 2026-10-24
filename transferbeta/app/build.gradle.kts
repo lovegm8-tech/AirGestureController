@@ -13,8 +13,8 @@ android {
         applicationId = "tw.airgesture.transferbeta"
         minSdk = 29
         targetSdk = 35
-        versionCode = 55
-        versionName = "1.0.42"
+        versionCode = 56
+        versionName = "1.0.43"
         // S26 Ultra / S25 are arm64-v8a. Remove unused x86/x86_64/32-bit
         // copies of MediaPipe and Vosk without stripping needed functionality.
         ndk { abiFilters += setOf("arm64-v8a") }
@@ -48,6 +48,10 @@ dependencies {
     implementation("com.google.mlkit:text-recognition-korean:16.0.1")
     implementation("com.google.mlkit:translate:17.0.3")
     implementation("com.alphacephei:vosk-android:0.3.75")
+    // Official k2-fsa sherpa-onnx v1.13.8 AAR; pinned and SHA-256 checked by CI.
+    // Stored under app/libs at CI build time; not committed to public GitHub.
+    implementation(files("libs/sherpa-onnx-1.13.8.aar"))
+    implementation("org.apache.commons:commons-compress:1.27.1")
     // Official Google LiteRT-LM Android runtime. Model weights are NOT in APK.
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
