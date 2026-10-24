@@ -140,6 +140,27 @@ class TransferActivity : ComponentActivity() {
         refreshHome()
     }
     private var audioPermissionRequestedForSubtitleStart = false
+    // Supports models downloaded through Chrome or transferred from another
+    // Android phone. Android's system picker grants access without storage
+    // permissions or uploading the file.
+    private val aiModelImportPicker =
+        registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            if (uri != null) {
+                if (SubtitleCaptureService.running) {
+                    flash("請先關閉懸浮翻譯，再匯入本地 AI 模型")
+                } else {
+                    flash("正在從檔案匯入 Qwen（約 347 MB），完成後會顯示驗證結果")
+                    tw.airgesture.transferbeta.subtitle.SubtitleLocalAi.importModel(
+                        this, uri, java.util.function.Consumer { result ->
+                            runOnUiThread {
+                                flash(result)
+                                refreshHome()
+                            }
+                        })
+                }
+            }
+        }
+
     private val voiceAudioPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -703,7 +724,7 @@ class TransferActivity : ComponentActivity() {
             }
         }
         modePanel.addView(modeRow("本地 Qwen AI 中文潤飾（可關閉）",
-            "直接整合懸浮翻譯：快速中文字幕先顯示，完整句子由本機 AI 再修正同一行。模型約 347 MB，首次需 Wi-Fi 下載；可能增加記憶體與發熱，不使用付費雲端 API。",
+            "直接整合懸浮翻譯：中文字幕先快速顯示，AI 再修正同一行。模型約 347 MB，可用 Wi-Fi、手機熱點、行動數據下載，也可匯入其他手機已下載的模型；行動數據可能產生流量費用。",
             aiLocalSwitch))
         aiModelStatus = text("檢查 AI 模型…", 13f)
         modePanel.addView(aiModelStatus)
@@ -713,6 +734,23 @@ class TransferActivity : ComponentActivity() {
             setOnClickListener {
                 val state = tw.airgesture.transferbeta.subtitle.SubtitleLocalAi.download(this@TransferActivity)
                 flash(state)
+                refreshHome()
+            }
+        })
+        modePanel.addView(Button(this).apply {
+            text = "從手機檔案匯入 Qwen AI 模型（離線）"
+            isAllCaps = false
+            setOnClickListener {
+                if (SubtitleCaptureService.running) {
+                    flash("先關閉懸浮翻譯，再從檔案選擇 .litertlm 模型")
+                } else aiModelImportPicker.launch("*/*")
+            }
+        })
+        modePanel.addView(Button(this).apply {
+            text = "重新檢查本地 AI 下載狀態"
+            isAllCaps = false
+            setOnClickListener {
+                flash(tw.airgesture.transferbeta.subtitle.SubtitleLocalAi.status(this@TransferActivity))
                 refreshHome()
             }
         })
