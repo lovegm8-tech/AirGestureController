@@ -57,7 +57,8 @@ public final class SubtitleSpeechChunker {
      * subsequent final output will not replay that already consumed prefix.
      */
     public void onQuiet(long elapsedMs) {
-        if (current.isEmpty() || latestStableFull.isEmpty()) return;
+        if (current.isEmpty() || latestStableFull.isEmpty() ||
+                chunkStartMs < 0L || elapsedMs < chunkStartMs) return;
         listener.onChunk(current, currentId, true);
         consumedPrefix = latestStableFull;
         current = "";
