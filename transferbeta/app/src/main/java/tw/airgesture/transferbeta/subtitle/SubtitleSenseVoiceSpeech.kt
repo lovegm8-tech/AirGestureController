@@ -86,7 +86,9 @@ class SubtitleSenseVoiceSpeech(
             asr = OfflineRecognizer(config = config)
             callback.onStatus("SenseVoice 模型已載入，等待允許擷取的影片音訊")
             ready.countDown()
-            val audio = ArrayList<Float>(48_000)
+            val audio = ArrayList<Float>(64_000)
+            var quietSamples = 0
+            var voicedSamples = 0
             var utteranceId = 0L
             while (alive.get() && !Thread.currentThread().isInterrupted) {
                 val raw = queue.poll(250, TimeUnit.MILLISECONDS) ?: continue
@@ -95,10 +97,22 @@ class SubtitleSenseVoiceSpeech(
                     val hi = raw[i * 2 + 1].toInt()
                     val signed = (lo or (hi shl 8)).toShort()
                     audio.add(signed.toFloat() / 32768f)
+                    if (kotlin.math.abs(signed.toInt()) > 650) { voicedSamples++; quietSamples = 0 } else quietSamples++
                 }
-                if (audio.size < 44_800) continue // 2.8 seconds at 16 kHz
+                // End at a natural pause when possible, with a bounded latency fallback.
+                // RMS/energy is deliberately a lightweight endpoint heuristic,
+                // not a full neural VAD; silence-only windows are discarded.
+                val naturalPause = quietSamples >= 8_000 && audio.size >= 12_800
+                val maxWindow = audio.size >= 48_000
+                if (!naturalPause && !maxWindow) continue
+                if (voicedSamples < 1_600) {
+                    audio.clear(); quietSamples = 0; voicedSamples = 0
+                    continue
+                }
                 val samples = FloatArray(audio.size) { audio[it] }
                 audio.clear()  // no overlapping window, no repeated transcript
+                quietSamples = 0
+                voicedSamples = 0
                 val started = SystemClock.elapsedRealtime()
                 val stream = asr.createStream()
                 try {
@@ -112,7 +126,7 @@ class SubtitleSenseVoiceSpeech(
                         utteranceId++
                         callback.onHypothesis(original, true)
                         callback.onUtterance(original, utteranceId, true)
-                        callback.onStatus("SenseVoice 辨識完成：推論 ${cost}ms，語音片段 2.8 秒")
+                        callback.onStatus("SenseVoice 辨識完成：推論 ${cost}ms，語音片段依停頓或 3 秒上限")
                     }
                 } finally {
                     stream.release()
