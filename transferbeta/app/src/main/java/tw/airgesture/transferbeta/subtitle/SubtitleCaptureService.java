@@ -118,7 +118,14 @@ public final class SubtitleCaptureService extends Service {
     private boolean pendingVoiceIsFinal = false;
     private long lastSpokenUtteranceId = -1L;
     private boolean voiceRetryScheduled = false;
-    private static final long MIN_VOICE_CAPTION_SPACING_MS = 750L;
+    // 750 ms forced the latest phrase to appear after the next spoken line.
+    // ML Kit's single-flight queue still prevents overlap or UI congestion.
+    private static final long MIN_VOICE_CAPTION_SPACING_MS = 260L;
+    private long pendingVoiceQueuedAtMs = 0L;
+    private long lastVoiceTranslatedId = -1L;
+    private String lastVoiceFastChinese = "";
+    private long lastVoiceAiRequestedId = -1L;
+    private String lastVoiceAiRequestedSource = "";
     public static volatile String lastVoiceLatencyStatus = "尚無語音翻譯耗時";
     public static volatile String lastVoiceStatus = "語音補位未啟用";
     public static volatile String lastCaptureStatus = "尚未取得畫面";
@@ -642,13 +649,31 @@ public final class SubtitleCaptureService extends Service {
             if (pausedByUser || calibrating) pendingVoiceSource = "";
             return;
         }
-        if (utteranceId == lastSpokenUtteranceId &&
-                source.equalsIgnoreCase(lastSpokenSource)) return;
         if (utteranceId == pendingVoiceUtteranceId &&
-                source.equalsIgnoreCase(pendingVoiceSource)) return;
+                source.equalsIgnoreCase(pendingVoiceSource)) {
+            // A final version of the SAME preview must not be discarded: its
+            // stable sentence is what Qwen should correct in the existing row.
+            if (isFinal) pendingVoiceIsFinal = true;
+            return;
+        }
+        if (utteranceId == lastSpokenUtteranceId &&
+                source.equalsIgnoreCase(lastSpokenSource)) {
+            if (isFinal && !voiceTranslateBusy.get()
+                    && lastVoiceTranslatedId == utteranceId
+                    && !lastVoiceFastChinese.isEmpty())
+                requestVoiceAiRefinement(utteranceId, source, lastVoiceFastChinese);
+            else if (isFinal && voiceTranslateBusy.get()) {
+                pendingVoiceUtteranceId = utteranceId;
+                pendingVoiceIsFinal = true;
+                pendingVoiceSource = source;
+                pendingVoiceQueuedAtMs = now;
+            }
+            return;
+        }
         pendingVoiceUtteranceId = utteranceId;
         pendingVoiceIsFinal = isFinal;
         pendingVoiceSource = source;
+        pendingVoiceQueuedAtMs = now;
         drainVoiceTranslationQueue();
     }
 
@@ -675,6 +700,7 @@ public final class SubtitleCaptureService extends Service {
         final String source = pendingVoiceSource;
         final long sourceId = pendingVoiceUtteranceId;
         final boolean sourceFinal = pendingVoiceIsFinal;
+        final long queuedAt = pendingVoiceQueuedAtMs;
         pendingVoiceSource = "";
         lastSpokenSource = source;
         lastSpokenUtteranceId = sourceId;
@@ -696,29 +722,19 @@ public final class SubtitleCaptureService extends Service {
                         return;
                     }
                     lastVoiceCaptionMs = SystemClock.elapsedRealtime();
+                    lastVoiceTranslatedId = sourceId;
+                    lastVoiceFastChinese = zh;
                     lastTranslationResult = zh;
-                    lastVoiceLatencyStatus = "ASR文字送翻譯→顯示 " +
-                            (lastVoiceCaptionMs - translateStarted) + " ms（不含語音辨識）";
-                    lastVoiceStatus = sourceFinal ? "完整句修正已更新" : "語音中文字幕已更新";
+                    long mlKitMs = lastVoiceCaptionMs - translateStarted;
+                    long queueMs = Math.max(0, translateStarted - queuedAt);
+                    lastVoiceLatencyStatus = "新語音→字幕 " +
+                            (lastVoiceCaptionMs - queuedAt) + " ms（含佇列 " +
+                            queueMs + " ms、ML Kit " + mlKitMs +
+                            " ms，不含 Vosk 初始辨識）";
+                    lastVoiceStatus = sourceFinal ? "完整句已更新" : "語音字幕預覽已更新";
                     publishVoiceCaption(sourceId, zh);
                     positionVoiceCaption();
-                    if (sourceFinal && aiRefineEnabled) {
-                        // ML Kit must be shown FIRST. Background LiteRT-LM
-                        // is a best-effort refinement of THIS SAME row.
-                        final String previous = twoLineCaptions.count() >= 2
-                                ? twoLineCaptions.first() : "";
-                        final String sourceSentence = source;
-                        SubtitleLocalAi.refine(getApplicationContext(), sourceLanguage,
-                                sourceSentence, zh, previous, improved -> main.post(() -> {
-                                    if (!running || pausedByUser || calibrating ||
-                                            !aiRefineEnabled) return;
-                                    if (twoLineCaptions.putVoice(sourceId, improved)) {
-                                        renderTwoLineCaptions();
-                                        lastTranslationResult = improved;
-                                        lastAiStatus = "Qwen 已修正第 " + sourceId + " 句";
-                                    }
-                                }));
-                    }
+                    if (sourceFinal) requestVoiceAiRefinement(sourceId, source, zh);
                 })
                 .addOnFailureListener(error -> {
                     if (source.equals(lastSpokenSource)) lastSpokenSource = "";
@@ -731,6 +747,43 @@ public final class SubtitleCaptureService extends Service {
                     // translation, process the latest one instead of dropping it.
                     if (!pendingVoiceSource.isEmpty()) drainVoiceTranslationQueue();
                 });
+    }
+
+    private void requestVoiceAiRefinement(long id, String original, String quickChinese) {
+        if (!aiRefineEnabled || !SubtitleLocalAi.modelInstalled(this)) return;
+        if (id == lastVoiceAiRequestedId &&
+                original.equalsIgnoreCase(lastVoiceAiRequestedSource)) return;
+        lastVoiceAiRequestedId = id;
+        lastVoiceAiRequestedSource = original;
+        final String previous = twoLineCaptions.previousOfVoice(id);
+        SubtitleLocalAi.refine(getApplicationContext(), sourceLanguage,
+                original, quickChinese, previous, improved -> main.post(() -> {
+                    if (!running || pausedByUser || calibrating || !aiRefineEnabled) return;
+                    if (twoLineCaptions.reviseVoice(id, improved)) {
+                        renderTwoLineCaptions();
+                        lastTranslationResult = improved;
+                        lastAiStatus = "本地 Qwen 已修正語音字幕第 " + id + " 句";
+                    }
+                }));
+    }
+
+    private void requestOcrAiRefinement(String original, String quickChinese) {
+        if (!aiRefineEnabled || !SubtitleLocalAi.modelInstalled(this)) return;
+        final String language = sourceLanguage;
+        final String previous = twoLineCaptions.previousOfOcr(original);
+        SubtitleLocalAi.refine(getApplicationContext(), language,
+                original, quickChinese, previous, improved -> main.post(() -> {
+                    if (!running || pausedByUser || calibrating || !aiRefineEnabled) return;
+                    if (!SubtitleVoicePriority.mayDisplayOcr(voiceFallbackEnabled,
+                            SystemClock.elapsedRealtime(), lastVoiceCaptionMs)) return;
+                    // Do NOT insert missing captions: Qwen can be slower than
+                    // an entire next line and must not restore evicted text.
+                    if (twoLineCaptions.reviseOcr(original, improved)) {
+                        renderTwoLineCaptions();
+                        lastTranslationResult = improved;
+                        lastAiStatus = "本地 Qwen 已修正 OCR 中文字幕";
+                    }
+                }));
     }
 
     private void positionVoiceCaption() {
@@ -1341,6 +1394,9 @@ public final class SubtitleCaptureService extends Service {
                     lastOcrCaptionMs = SystemClock.elapsedRealtime();
                     publishOcrCaption(source, lastTranslation);
                     positionCaptionAbove(translatedCandidate);
+                    // Share the SAME downloaded Qwen model with voice
+                    // translation; ML Kit displays first, AI revises in place.
+                    requestOcrAiRefinement(source, lastTranslation);
                 })
                 .addOnFailureListener(error -> {
                     if (source.equals(lastSource)) lastSource = "";
