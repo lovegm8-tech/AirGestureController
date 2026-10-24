@@ -70,15 +70,20 @@ public final class SubtitleSpeechChunker {
         String suffix = suffixAfterCommitted(result);
         // Even when a partial and Vosk final are identical, send isFinal so
         // the local Qwen can refine without a second ML Kit translation.
+        boolean emittedNewPhrase = false;
         if (suffix != null && !suffix.isEmpty()) {
             listener.onChunk(suffix, currentId, true);
+            emittedNewPhrase = true;
         } else if (!current.isEmpty()) {
             listener.onChunk(current, currentId, true);
+            emittedNewPhrase = true;
         }
         consumedPrefix = "";
         current = "";
         latestStableFull = "";
-        currentId++;
+        // A quiet boundary may have already finalized and advanced the
+        // phrase ID. An empty Vosk final must not advance it AGAIN.
+        if (emittedNewPhrase) currentId++;
         chunkStartMs = -1L;
     }
 
