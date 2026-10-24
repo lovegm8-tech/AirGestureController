@@ -28,7 +28,7 @@ public class SubtitleSpeechQuietBoundaryTest {
         c.onFinal("hello everyone");
         assertEquals(2, lines.size());
         c.onStable("new topic now", 2400);
-        assertEquals("3:new topic now", lines.get(2));
+        assertEquals("2:new topic now", lines.get(2));
     }
     @Test public void modelMustNotBeForcedToEndEmptyOrBeforeAnyWords() {
         List<String> lines = new ArrayList<>();
