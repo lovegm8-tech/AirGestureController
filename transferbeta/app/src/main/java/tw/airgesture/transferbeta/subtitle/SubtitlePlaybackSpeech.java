@@ -220,6 +220,7 @@ public final class SubtitlePlaybackSpeech {
                         "語音補位已啟動（只聽允許擷取的播放聲音）");
                 byte[] pcm = new byte[3200]; // 100 ms of 16 kHz mono PCM 16-bit
                 long lastPartialAt = 0;
+                long quietSinceMs = 0L;
                 String previousPartial = "";
                 SubtitleSpeechChunker chunker = new SubtitleSpeechChunker(
                         language, (text, id, isFinal) -> {
@@ -238,9 +239,27 @@ public final class SubtitlePlaybackSpeech {
                     for (int i = 0; i + 1 < n; i += 2) {
                         if (pcm[i] != 0 || pcm[i+1] != 0) { audibleSamples++; break; }
                     }
+                    long nowMs = android.os.SystemClock.elapsedRealtime();
+                    // Cheap playback-energy hint, not a second neural model.
+                    // Never stops/restarts Vosk: only closes an already
+                    // recognized clause after sustained near-silence.
+                    long energy = 0L;
+                    int energyFrames = 0;
+                    for (int i = 0; i + 1 < n; i += 16) {
+                        short sample = (short) ((pcm[i] & 0xff) | (pcm[i + 1] << 8));
+                        energy += Math.abs(sample);
+                        energyFrames++;
+                    }
+                    boolean quiet = energyFrames > 0 &&
+                            energy / energyFrames < 230L;
+                    if (quiet) {
+                        if (quietSinceMs == 0L) quietSinceMs = nowMs;
+                    } else quietSinceMs = 0L;
+
                     if (recognizer.acceptWaveForm(pcm, n)) {
                         String result = recognizeText(recognizer.getResult(), "text");
                         previousPartial = "";
+                        quietSinceMs = 0L;
                         chunker.onFinal(result);
                     } else {
                         long now = android.os.SystemClock.elapsedRealtime();
@@ -251,6 +270,10 @@ public final class SubtitlePlaybackSpeech {
                             previousPartial = partial;
                             chunker.onStable(stable, now);
                             lastPartialAt = now;
+                        }
+                        if (quietSinceMs > 0L && nowMs - quietSinceMs >=
+                                SubtitleSpeechChunker.QUIET_BOUNDARY_MS) {
+                            chunker.onQuiet(nowMs);
                         }
                     }
                     long now = android.os.SystemClock.elapsedRealtime();

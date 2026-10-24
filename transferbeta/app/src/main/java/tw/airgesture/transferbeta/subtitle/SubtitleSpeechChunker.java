@@ -19,6 +19,8 @@ public final class SubtitleSpeechChunker {
     private long chunkStartMs = -1L;
     private String consumedPrefix = "";
     private String current = "";
+    private String latestStableFull = "";
+    public static final long QUIET_BOUNDARY_MS = 780L;
 
     public SubtitleSpeechChunker(String language, Listener listener) {
         this.language = language;
@@ -28,6 +30,7 @@ public final class SubtitleSpeechChunker {
     public void onStable(String fullHypothesis, long elapsedMs) {
         String currentHypothesis = normalize(fullHypothesis);
         if (currentHypothesis.isEmpty()) return;
+        latestStableFull = currentHypothesis;
         String suffix = suffixAfterCommitted(currentHypothesis);
         if (suffix == null || suffix.isEmpty()) return;
         if (chunkStartMs < 0) chunkStartMs = elapsedMs;
@@ -47,19 +50,41 @@ public final class SubtitleSpeechChunker {
         }
     }
 
+    /**
+     * Lightweight playback-energy boundary hint. Called after a real quiet
+     * interval, not after every sample; recognition itself continues running.
+     * The pending stable phrase is finalized only once. The recognizer's
+     * subsequent final output will not replay that already consumed prefix.
+     */
+    public void onQuiet(long elapsedMs) {
+        if (current.isEmpty() || latestStableFull.isEmpty() ||
+                chunkStartMs < 0L || elapsedMs < chunkStartMs) return;
+        listener.onChunk(current, currentId, true);
+        consumedPrefix = latestStableFull;
+        current = "";
+        currentId++;
+        chunkStartMs = -1L;
+    }
+
     public void onFinal(String fullResult) {
         String result = normalize(fullResult);
         String suffix = suffixAfterCommitted(result);
         // Even when a partial and Vosk final are identical, send isFinal so
         // the local Qwen can refine without a second ML Kit translation.
+        boolean emittedNewPhrase = false;
         if (suffix != null && !suffix.isEmpty()) {
             listener.onChunk(suffix, currentId, true);
+            emittedNewPhrase = true;
         } else if (!current.isEmpty()) {
             listener.onChunk(current, currentId, true);
+            emittedNewPhrase = true;
         }
         consumedPrefix = "";
         current = "";
-        currentId++;
+        latestStableFull = "";
+        // A quiet boundary may have already finalized and advanced the
+        // phrase ID. An empty Vosk final must not advance it AGAIN.
+        if (emittedNewPhrase) currentId++;
         chunkStartMs = -1L;
     }
 
