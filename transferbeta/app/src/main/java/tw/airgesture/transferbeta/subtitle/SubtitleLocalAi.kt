@@ -67,8 +67,29 @@ object SubtitleLocalAi {
                             DownloadManager.STATUS_RUNNING, DownloadManager.STATUS_PENDING ->
                                 "正在下載本地 AI：${current / 1_000_000} MB" +
                                         if (total > 0) " / ${total / 1_000_000} MB" else ""
-                            DownloadManager.STATUS_PAUSED -> "AI 模型下載暫停，可等待系統續傳"
-                            DownloadManager.STATUS_FAILED -> "AI 模型下載失敗；點下載重新嘗試"
+                            DownloadManager.STATUS_PAUSED -> {
+                                val why = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON))
+                                val reason = when (why) {
+                                    DownloadManager.PAUSED_QUEUED_FOR_WIFI ->
+                                        "目前排隊等待 Wi-Fi；新版可重新按下載使用熱點"
+                                    DownloadManager.PAUSED_WAITING_FOR_NETWORK ->
+                                        "正在等待可上網的連線"
+                                    DownloadManager.PAUSED_WAITING_TO_RETRY ->
+                                        "連線暫時失敗，系統會重試"
+                                    else -> "下載暫停（代碼 $why）"
+                                }
+                                reason
+                            }
+                            DownloadManager.STATUS_FAILED -> {
+                                val why = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON))
+                                val reason = when (why) {
+                                    DownloadManager.ERROR_INSUFFICIENT_SPACE -> "手機儲存空間不足"
+                                    DownloadManager.ERROR_HTTP_DATA_ERROR -> "下載站連線中斷"
+                                    DownloadManager.ERROR_TOO_MANY_REDIRECTS -> "下載站轉址過多"
+                                    else -> "下載錯誤代碼 $why"
+                                }
+                                "AI 模型下載失敗：$reason，請按下載重新嘗試"
+                            }
                             DownloadManager.STATUS_SUCCESSFUL -> "模型檔案待檢查；需約 347 MB"
                             else -> lastStatus
                         }
@@ -94,16 +115,88 @@ object SubtitleLocalAi {
             val req = DownloadManager.Request(Uri.parse(MODEL_URL))
                 .setTitle("懸浮操作 · 本地 Qwen AI 約 347 MB")
                 .setDescription("免費離線中文翻譯潤飾模型")
-                .setAllowedOverMetered(false) // Wi-Fi only
+                // Android commonly marks phone hotspots as metered Wi-Fi.
+                // The user explicitly clicked Download, so allow tethering
+                // and mobile data rather than silently waiting for unmetered Wi-Fi.
+                .setAllowedOverMetered(true)
+                .setAllowedOverRoaming(false)
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 .setDestinationUri(Uri.fromFile(target))
             val id = manager.enqueue(req)
             pref.edit().putLong(DOWNLOAD_ID, id)
                 .remove("ai_model_verified_sha").apply()
-            lastStatus = "已開始下載，請使用 Wi-Fi"
+            lastStatus = "已要求下載（約 347 MB），可使用 Wi-Fi／手機熱點／行動數據；請留意流量"
             lastStatus
         } catch (error: Exception) {
             "下載啟動失敗：${error.javaClass.simpleName} ${error.message ?: ""}"
+        }
+    }
+
+    /**
+     * Offline recovery: import the already-downloaded .litertlm file from
+     * Files/Downloads, e.g. one transferred from another Android phone via
+     * Nearby. Copy + verify on a worker thread; no network, no root access.
+     */
+    @JvmStatic fun importModel(context: Context, uri: Uri,
+                               callback: java.util.function.Consumer<String>) {
+        val app = context.applicationContext
+        executor.execute {
+            val target = modelFile(app)
+            val temp = File(target.parentFile, MODEL_NAME + ".importing")
+            try {
+                if (engine != null) {
+                    callback.accept("請先關閉懸浮翻譯，再匯入 AI 模型")
+                    return@execute
+                }
+                target.parentFile?.mkdirs()
+                temp.delete()
+                lastStatus = "正在匯入模型並檢查完整性…"
+                val digest = MessageDigest.getInstance("SHA-256")
+                var copied = 0L
+                val source = app.contentResolver.openInputStream(uri)
+                    ?: throw IllegalStateException("無法讀取選取的檔案")
+                source.buffered().use { input ->
+                    temp.outputStream().buffered().use { output ->
+                        val buffer = ByteArray(131072)
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            copied += read
+                            if (copied > MAX_MODEL_BYTES)
+                                throw IllegalArgumentException("檔案超過模型大小限制")
+                            digest.update(buffer, 0, read)
+                            output.write(buffer, 0, read)
+                        }
+                    }
+                }
+                if (copied !in MIN_MODEL_BYTES..MAX_MODEL_BYTES)
+                    throw IllegalArgumentException("不是完整的 Qwen 模型，大小：${copied / 1_000_000} MB")
+                val hash = digest.digest().joinToString("") { "%02x".format(it) }
+                if (!hash.equals(MODEL_SHA256, ignoreCase = true))
+                    throw IllegalArgumentException("模型 SHA256 不符，請確認選擇正確的 no-think .litertlm")
+                // Prevent a concurrent Android download from overwriting import.
+                val prefs = app.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+                val previous = prefs.getLong(DOWNLOAD_ID, -1L)
+                if (previous > 0) {
+                    val dm = app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                    dm.remove(previous)
+                }
+                if (target.exists() && !target.delete())
+                    throw IllegalStateException("無法替換舊的 AI 模型")
+                if (!temp.renameTo(target))
+                    throw IllegalStateException("無法儲存已驗證的 AI 模型")
+                val stamp = target.length().toString() + ":" + target.lastModified()
+                prefs.edit().remove(DOWNLOAD_ID)
+                    .putString("ai_model_verified_sha", stamp).apply()
+                permanentlyInvalid = false
+                lastStatus = "模型已匯入且 SHA256 驗證通過，可啟用離線 AI"
+                callback.accept(lastStatus)
+            } catch (e: Exception) {
+                lastStatus = "模型匯入失敗：${e.message ?: e.javaClass.simpleName}"
+                callback.accept(lastStatus)
+            } finally {
+                temp.delete()
+            }
         }
     }
 
