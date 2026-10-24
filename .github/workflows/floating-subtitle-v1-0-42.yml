@@ -5,10 +5,11 @@ name: Floating Control v1.0.42 OCR Signed Test APK
 on:
   push:
     branches:
-      - feature/floating-subtitle-vad-thermal-v1-0-42
+      - feature/floating-subtitle-diagnostics-ocr-arbitration-v1-0-42
     paths:
       - '.github/workflows/floating-subtitle-v1-0-42.yml'
       - 'transferbeta/app/src/main/**'
+      - 'transferbeta/app/src/test/**'
       - 'transferbeta/app/build.gradle.kts'
   workflow_dispatch:
 
@@ -17,7 +18,7 @@ permissions:
 
 jobs:
   signed-release:
-    if: github.ref == 'refs/heads/feature/floating-subtitle-vad-thermal-v1-0-42' && github.event.repository.full_name == 'lovegm8-tech/AirGestureController'
+    if: github.ref == 'refs/heads/feature/floating-subtitle-diagnostics-ocr-arbitration-v1-0-42' && github.event.repository.full_name == 'lovegm8-tech/AirGestureController'
     runs-on: ubuntu-latest
     timeout-minutes: 50
     defaults:
