@@ -16,6 +16,7 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import android.os.SystemClock
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -45,6 +46,8 @@ object SubtitleLocalAi {
                                   val callback: java.util.function.Consumer<String>)
     private val latestRefinement = AtomicReference<Refinement?>(null)
     private val aiWorkerActive = AtomicBoolean(false)
+    @Volatile private var lastRefinementAcceptedMs = 0L
+    private const val MIN_REFINEMENT_INTERVAL_MS = 7000L
     private val lock = Any()
     @Volatile private var preparing = false
     @Volatile private var permanentlyInvalid = false
@@ -227,6 +230,13 @@ object SubtitleLocalAi {
         if (!enabled(context) || !modelInstalled(context) || permanentlyInvalid) return
         if (sourceLanguage !in setOf("en", "ja", "ko")) return
         if (original.length !in 5..260 || fastChinese.isBlank()) return
+        // Keep local LLM from monopolizing CPU while a video and live Vosk
+        // recognizer run together. ML Kit captions remain immediate; Qwen
+        // is optional polish only, never a per-fragment requirement.
+        val now = SystemClock.elapsedRealtime()
+        if (lastRefinementAcceptedMs > 0L &&
+            now - lastRefinementAcceptedMs < MIN_REFINEMENT_INTERVAL_MS) return
+        lastRefinementAcceptedMs = now
         // Enqueue only newest finished sentence. Inference runs on another
         // thread; Vosk, ML Kit and the overlay are never blocked by the LLM.
         latestRefinement.set(Refinement(context.applicationContext, sourceLanguage,
@@ -243,9 +253,9 @@ object SubtitleLocalAi {
                     if (!enabled(task.context)) continue
                     try {
                         if (!ensureInitialized(task.context)) continue
-                        val instruction = "你是台灣繁體中文字幕校對者。只輸出一行自然、簡短、準確的台灣繁體中文譯文。" +
-                                "不得添加解釋、引號、英文原文、人物資訊或換行。保留原文意義與人名。" +
-                                "上一句僅供理解語境，不可將上一句重複輸出。"
+                        val instruction = "你是台灣繁體中文字幕翻譯員。以英日韓辨識原文作為翻譯主依據。" +
+                                "快速翻譯只是可能出錯的參考，禁止照抄錯譯；前一句僅供理解語境。" +
+                                "只輸出一行簡潔自然的台灣繁體中文，不增加沒說出的內容或解釋。"
                         val source = when (task.language) {
                             "ja" -> "日文"
                             "ko" -> "韓文"
