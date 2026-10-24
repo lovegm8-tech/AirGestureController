@@ -15,6 +15,8 @@ import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Genuine, on-device Qwen3-0.6B INT4 post-editor. Never sends transcripts to
@@ -35,6 +37,14 @@ object SubtitleLocalAi {
     private val executor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "floating-local-qwen").apply { priority = Thread.NORM_PRIORITY - 2 }
     }
+    // Only keep the most recent unfinished AI request. A small CPU model can
+    // take longer than a spoken sentence: old requests must NEVER form a queue.
+    private data class Refinement(val context: Context, val language: String,
+                                  val original: String, val quick: String,
+                                  val previous: String,
+                                  val callback: java.util.function.Consumer<String>)
+    private val latestRefinement = AtomicReference<Refinement?>(null)
+    private val aiWorkerActive = AtomicBoolean(false)
     private val lock = Any()
     @Volatile private var preparing = false
     @Volatile private var permanentlyInvalid = false
@@ -201,6 +211,7 @@ object SubtitleLocalAi {
     }
 
     @JvmStatic fun release() {
+        latestRefinement.set(null)
         // Closing while a generation runs risks native crashes; enqueue
         // cleanup on the engine's serial executor, not on the Android UI.
         executor.execute {
@@ -209,40 +220,63 @@ object SubtitleLocalAi {
         }
     }
 
-    /** Call only for finalized ASR sentences, never every 520ms partial. */
+    /** Called for finalized voice or OCR lines only; one CPU inference at a time. */
     @JvmStatic fun refine(context: Context, sourceLanguage: String, original: String,
                           fastChinese: String, previousChinese: String,
                           callback: java.util.function.Consumer<String>) {
         if (!enabled(context) || !modelInstalled(context) || permanentlyInvalid) return
-        if (sourceLanguage != "en" && sourceLanguage != "ja") return
+        if (sourceLanguage !in setOf("en", "ja", "ko")) return
         if (original.length !in 5..260 || fastChinese.isBlank()) return
-        val app = context.applicationContext
+        // Enqueue only newest finished sentence. Inference runs on another
+        // thread; Vosk, ML Kit and the overlay are never blocked by the LLM.
+        latestRefinement.set(Refinement(context.applicationContext, sourceLanguage,
+                original, fastChinese, previousChinese, callback))
+        runNewestRefinement()
+    }
+
+    private fun runNewestRefinement() {
+        if (!aiWorkerActive.compareAndSet(false, true)) return
         executor.execute {
-            if (!enabled(app)) return@execute
             try {
-                if (!ensureInitialized(app)) return@execute
-                val instruction = "你是繁體中文字幕校對者。只輸出一行自然、簡短、準確的台灣繁體中文譯文。" +
-                        "嚴禁添加說明、引號、英文原文、說話者、標記或換行。保留人名專有名詞。" +
-                        "參考上一句以理解上下文，勿憑空增加劇情。"
-                val prompt = "來源語言：" + (if (sourceLanguage == "ja") "日文" else "英文") +
-                        "\n上一句中文字幕：${previousChinese.take(90)}" +
-                        "\n語音辨識原文：${original.take(260)}" +
-                        "\n快速譯文：${fastChinese.take(130)}" +
-                        "\n請直接輸出修正後的繁體中文字幕："
-                val cfg = ConversationConfig(
-                    systemInstruction = Contents.of(instruction),
-                    samplerConfig = SamplerConfig(topK = 8, topP = 0.8, temperature = 0.15),
-                    maxOutputToken = 90,
-                )
-                val output = engine!!.createConversation(cfg).use { conversation ->
-                    conversation.sendMessage(prompt).toString()
+                while (true) {
+                    val task = latestRefinement.getAndSet(null) ?: break
+                    if (!enabled(task.context)) continue
+                    try {
+                        if (!ensureInitialized(task.context)) continue
+                        val instruction = "你是台灣繁體中文字幕校對者。只輸出一行自然、簡短、準確的台灣繁體中文譯文。" +
+                                "不得添加解釋、引號、英文原文、人物資訊或換行。保留原文意義與人名。" +
+                                "上一句僅供理解語境，不可將上一句重複輸出。"
+                        val source = when (task.language) {
+                            "ja" -> "日文"
+                            "ko" -> "韓文"
+                            else -> "英文"
+                        }
+                        val prompt = "來源語言：$source" +
+                                "\n上一句中文字幕：${task.previous.take(90)}" +
+                                "\n辨識原文：${task.original.take(260)}" +
+                                "\n快速譯文：${task.quick.take(130)}" +
+                                "\n請直接輸出修正後的繁體中文字幕："
+                        val cfg = ConversationConfig(
+                            systemInstruction = Contents.of(instruction),
+                            samplerConfig = SamplerConfig(topK = 8, topP = 0.8, temperature = 0.15),
+                            maxOutputToken = 90,
+                        )
+                        val output = engine!!.createConversation(cfg).use { conversation ->
+                            conversation.sendMessage(prompt).toString()
+                        }
+                        val normalized = SubtitleAiOutputPolicy.normalize(output)
+                        if (SubtitleAiOutputPolicy.accept(normalized, task.quick))
+                            task.callback.accept(normalized)
+                        lastStatus = "Qwen AI 已完成本機中文潤飾"
+                    } catch (e: Throwable) {
+                        lastStatus = "AI 無法潤飾，仍使用快速翻譯：${e.javaClass.simpleName}"
+                    }
                 }
-                val normalized = SubtitleAiOutputPolicy.normalize(output)
-                if (SubtitleAiOutputPolicy.accept(normalized, fastChinese))
-                    callback.accept(normalized)
-                lastStatus = "Qwen AI 文字潤飾運作中"
-            } catch (e: Throwable) {
-                lastStatus = "AI 暫停，仍使用快速翻譯：${e.javaClass.simpleName}"
+            } finally {
+                aiWorkerActive.set(false)
+                // Fix race if a new sentence was received between the last
+                // getAndSet(null) and clearing the running flag.
+                if (latestRefinement.get() != null) runNewestRefinement()
             }
         }
     }
