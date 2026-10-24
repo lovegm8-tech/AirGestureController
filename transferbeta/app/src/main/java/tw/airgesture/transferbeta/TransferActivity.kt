@@ -766,10 +766,10 @@ class TransferActivity : ComponentActivity() {
         voiceFallbackSwitch = Switch(this).apply {
             isChecked = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
                 .getBoolean("enable_voice_fallback", true) &&
-                    getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                    (getSharedPreferences("floating_subtitle", MODE_PRIVATE)
                         .getString("source_language", "en") != "ko" ||
-                    getSharedPreferences("floating_subtitle", MODE_PRIVATE)
-                        .getString("asr_engine", "vosk") == "sensevoice"
+                     getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                        .getString("asr_engine", "vosk") == "sensevoice")
             contentDescription = "離線播放語音辨識開關"
             setOnCheckedChangeListener { _, checked ->
                 if (updatingModeControls) return@setOnCheckedChangeListener
