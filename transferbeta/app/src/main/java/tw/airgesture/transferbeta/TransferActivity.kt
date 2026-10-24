@@ -724,7 +724,7 @@ class TransferActivity : ComponentActivity() {
             }
         }
         modePanel.addView(modeRow("本地 Qwen AI 中文潤飾（可關閉）",
-            "直接整合懸浮翻譯：中文字幕先快速顯示，AI 再修正同一行。模型約 347 MB，可用 Wi-Fi、手機熱點、行動數據下載，也可匯入其他手機已下載的模型；行動數據可能產生流量費用。",
+            "中文字幕先快速顯示，完整句由本地 Qwen 修正同一行；省電優化後最多約每 7 秒接受一次 AI 潤飾，避免影片播放時持續高負載。模型約 347 MB，可使用 Wi-Fi／手機熱點／行動數據下載，亦能從檔案匯入。",
             aiLocalSwitch))
         aiModelStatus = text("檢查 AI 模型…", 13f)
         modePanel.addView(aiModelStatus)
