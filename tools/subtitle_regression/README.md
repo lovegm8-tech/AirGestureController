@@ -23,8 +23,8 @@ python3 tools/subtitle_regression/compare.py baseline.json candidate.json
 
 Use the **same video/audio source and settings** for baseline and candidate.
 Do not publish recordings or transcriptions containing private information.
-The current app keeps only the most recent 60 trace events in memory and uses
-**one-second timestamps**, so imported traces can check segmentation and caption
+Older builds keep only the most recent 60 events with one-second timestamps;
+the diagnostic instrumentation branch keeps up to 300 events with millisecond timestamps, so imported traces can check segmentation and caption
 lifecycle, but latency comparisons are coarse and cannot measure end-to-end
 speech latency. The comparator currently treats coarse timestamps as if they
 were precise; do **not** use its latency gate for release decisions with these
@@ -79,3 +79,22 @@ Use `"tokenization":"character"` for Chinese/Japanese character error rate
 (CER); English defaults to word error rate (WER). This gate does not measure
 translation correctness, endpoint timing, or device thermals. **No real model
 outputs have yet been collected or scored.**
+
+## Bridge Android diagnostics to WER/CER
+
+When a tested build includes `ASR 片語 #N final` in its diagnostic panel,
+copy the diagnostic text to a local file and run:
+
+```bash
+python3 tools/subtitle_regression/export_asr.py baseline-diagnostics.txt baseline.json --recording-id fixed-001
+python3 tools/subtitle_regression/export_asr.py candidate-diagnostics.txt candidate.json --recording-id fixed-001
+python3 tools/subtitle_regression/score_asr.py reference.json baseline.json candidate.json --fail-on-regression
+```
+
+`reference.json` must contain `recording_id`, `reference`, and `tokenization`.
+Both runs must play the same audio from the beginning with matching language and
+audio settings. The exporter uses **final** ASR utterances only, ordered by
+their timestamps, and deduplicates repeated IDs. This is a convenience bridge:
+bounded diagnostic snapshots may omit earlier speech; verify coverage before
+interpreting WER/CER. Older versions without this diagnostic label cannot
+be scored with this exporter. No APK is built by this workflow.
