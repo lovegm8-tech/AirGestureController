@@ -25,7 +25,12 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
-    packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
+    packaging {
+        resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+        // Both sherpa-onnx and standalone ORT ship libonnxruntime.so.
+        // Packaging workaround only; runtime compatibility requires device verification.
+        jniLibs { pickFirsts += "**/libonnxruntime.so" }
+    }
     testOptions { unitTests.isReturnDefaultValues = true }
 }
 dependencies {
