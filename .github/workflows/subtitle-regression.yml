@@ -35,3 +35,13 @@ jobs:
         run: |
           python3 tools/subtitle_regression/import_diagnostics.py tools/subtitle_regression/fixtures/diagnostic_sample.txt /tmp/subtitle-import.json
           python3 tools/subtitle_regression/replay.py /tmp/subtitle-import.json
+      - name: Verify millisecond diagnostic import and measured latency
+        run: |
+          python3 tools/subtitle_regression/import_diagnostics.py tools/subtitle_regression/fixtures/diagnostic_milliseconds.txt /tmp/subtitle-ms.json
+          python3 tools/subtitle_regression/replay.py /tmp/subtitle-ms.json
+          python3 - <<'PY'
+          import json
+          data=json.load(open('/tmp/subtitle-ms.json'))
+          assert data['metadata']['timestamp_resolution_ms']==1
+          assert data['events'][1]['timestamp_ms']-data['events'][0]['timestamp_ms']==230
+          PY
