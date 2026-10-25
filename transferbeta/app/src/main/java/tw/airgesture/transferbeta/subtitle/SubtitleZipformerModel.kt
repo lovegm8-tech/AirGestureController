@@ -81,12 +81,6 @@ object SubtitleZipformerModel {
                 }
                 pending.deleteRecursively()
                 require(pending.mkdirs()) { "無法建立模型目錄" }
-                val wanted = mapOf(
-                    "encoder-epoch-99-avg-1.int8.onnx" to "encoder.onnx",
-                    "decoder-epoch-99-avg-1.onnx" to "decoder.onnx",
-                    "joiner-epoch-99-avg-1.onnx" to "joiner.onnx",
-                    "tokens.txt" to "tokens.txt"
-                )
                 // Accept other encoder epoch names within this pinned official archive.
                 val found = mutableSetOf<String>()
                 BZip2CompressorInputStream(input.inputStream().buffered()).use { bz ->
