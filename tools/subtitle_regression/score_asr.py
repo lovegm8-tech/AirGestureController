@@ -10,6 +10,7 @@ import argparse
 import json
 import re
 from pathlib import Path
+from validate_coverage import validate
 
 
 def tokenize(text, mode):
@@ -75,6 +76,10 @@ def main():
     for label, item in (("baseline", old), ("candidate", new)):
         if item.get("recording_id") != reference.get("recording_id"):
             raise ValueError(f"{label} recording_id mismatch")
+    if old.get("diagnostic_only") or new.get("diagnostic_only"):
+        coverage = validate(reference, old, new)
+        if not coverage["pass"]:
+            raise SystemExit("Diagnostic coverage gate failed: " + "; ".join(coverage["problems"]))
     report = evaluate(reference["reference"], old["hypothesis"], new["hypothesis"],
                       reference.get("tokenization", "word"))
     print(json.dumps(report, ensure_ascii=False, indent=2))
