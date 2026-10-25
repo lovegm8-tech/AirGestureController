@@ -914,7 +914,7 @@ public final class SubtitleCaptureService extends Service {
                     "\n翻譯延遲診斷：" + lastVoiceLatencyStatus +
                     "\n本地 Qwen：" + lastAiStatus +
                     "\n模型狀態：" + SubtitleLocalAi.status(this) +
-                    "\n\n【最近 60 筆逐階段診斷（僅記憶體）】\n" +
+                    "\n\n【最近 300 筆逐階段診斷（毫秒時間戳，僅記憶體）】\n" +
                     pipelineTrace.snapshot());
             contents.addView(details);
 
