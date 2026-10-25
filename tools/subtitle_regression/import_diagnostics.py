@@ -17,13 +17,13 @@ QWEN = re.compile(r"^Qwen 語音 #(\d+)$")
 
 def convert(text):
     events = []
-    translated = {}
+    translated = {}\n    precise = True
     for line in text.splitlines():
         match = LINE.match(line.strip())
         if not match:
             continue
-        second, stage, payload = match.groups()
-        timestamp_ms = int(second) * 1000
+        amount, unit, stage, payload = match.groups()
+        timestamp_ms = int(amount) * (1000 if unit == "s" else 1)\n        if unit == "s":\n            precise = False
         a = ASR.match(stage)
         m = MLKIT.match(stage)
         q = QWEN.match(stage)
@@ -45,8 +45,8 @@ def convert(text):
                            "text": payload})
     return {"events": events, "metadata": {
         "source": "in-app diagnostic snapshot",
-        "timestamp_resolution_ms": 1000,
-        "limitations": "bounded to last 60 events; timestamps truncated; no true audio-to-caption latency"
+        "timestamp_resolution_ms": 1 if precise else 1000,
+        "limitations": "bounded in-memory trace; no true audio-to-caption latency"
     }}
 
 
