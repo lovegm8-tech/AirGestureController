@@ -31,3 +31,7 @@ jobs:
           fi
       - name: Verify identical baseline passes
         run: python3 tools/subtitle_regression/compare.py tools/subtitle_regression/fixtures/baseline_sample.json tools/subtitle_regression/fixtures/baseline_sample.json
+      - name: Verify diagnostic import can replay real app trace format
+        run: |
+          python3 tools/subtitle_regression/import_diagnostics.py tools/subtitle_regression/fixtures/diagnostic_sample.txt /tmp/subtitle-import.json
+          python3 tools/subtitle_regression/replay.py /tmp/subtitle-import.json
