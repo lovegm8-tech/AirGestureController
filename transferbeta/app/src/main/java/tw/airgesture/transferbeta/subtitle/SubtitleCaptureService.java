@@ -119,6 +119,10 @@ public final class SubtitleCaptureService extends Service {
     private volatile long lastVoiceUtteranceMs = 0L;
     private long lastOcrCaptionMs = 0L;
     private long lastVoiceCaptionMs = 0L;
+    // Hidden speculative translation: never display partial ASR as a final caption.
+    private long voicePreviewId = -1L;
+    private String voicePreviewSource = "";
+    private String voicePreviewChinese = "";
     private String lastSpokenSource = "";
     private String pendingVoiceSource = "";
     private long pendingVoiceUtteranceId = -1L;
@@ -696,6 +700,16 @@ public final class SubtitleCaptureService extends Service {
             if (pausedByUser || calibrating) pendingVoiceSource = "";
             return;
         }
+        if (isFinal && utteranceId == voicePreviewId &&
+                source.equalsIgnoreCase(voicePreviewSource) && !voicePreviewChinese.isEmpty()) {
+            lastVoiceTranslatedId = utteranceId;
+            lastVoiceFastChinese = voicePreviewChinese;
+            lastVoiceCaptionMs = SystemClock.elapsedRealtime();
+            publishVoiceCaption(utteranceId, voicePreviewChinese);
+            positionVoiceCaption();
+            requestVoiceAiRefinement(utteranceId, source, voicePreviewChinese);
+            return;
+        }
         if (utteranceId == pendingVoiceUtteranceId &&
                 source.equalsIgnoreCase(pendingVoiceSource)) {
             // A final version of the SAME preview must not be discarded: its
@@ -705,6 +719,16 @@ public final class SubtitleCaptureService extends Service {
         }
         if (utteranceId == lastSpokenUtteranceId &&
                 source.equalsIgnoreCase(lastSpokenSource)) {
+            if (isFinal && utteranceId == voicePreviewId &&
+                    source.equalsIgnoreCase(voicePreviewSource) && !voicePreviewChinese.isEmpty()) {
+                lastVoiceTranslatedId = utteranceId;
+                lastVoiceFastChinese = voicePreviewChinese;
+                lastVoiceCaptionMs = SystemClock.elapsedRealtime();
+                publishVoiceCaption(utteranceId, voicePreviewChinese);
+                positionVoiceCaption();
+                requestVoiceAiRefinement(utteranceId, source, voicePreviewChinese);
+                return;
+            }
             if (isFinal && !voiceTranslateBusy.get()
                     && lastVoiceTranslatedId == utteranceId
                     && !lastVoiceFastChinese.isEmpty())
@@ -766,6 +790,14 @@ public final class SubtitleCaptureService extends Service {
                     }
                     if (!chinese) {
                         lastVoiceStatus = "語音已辨識，但中文翻譯沒有輸出";
+                        return;
+                    }
+                    if (!sourceFinal) {
+                        // Speculative partial result is retained for a matching final.
+                        voicePreviewId = sourceId;
+                        voicePreviewSource = source;
+                        voicePreviewChinese = zh;
+                        trace("ML Kit 背景預翻譯 #" + sourceId, source + " → " + zh);
                         return;
                     }
                     lastVoiceCaptionMs = SystemClock.elapsedRealtime();
@@ -959,6 +991,7 @@ public final class SubtitleCaptureService extends Service {
         main.post(() -> {
             if (!running || captionView == null || captionFirstLine == null) return;
             if (twoLineCaptions.hasCaptions() && !"翻譯已暫停".equals(text)) return;
+            captionFirstLine.setAlpha(1f);
             captionFirstLine.setText(text);
             captionSecondLine.setText("");
             captionSecondLine.setVisibility(View.GONE);
@@ -969,6 +1002,7 @@ public final class SubtitleCaptureService extends Service {
         if (!running || captionFirstLine == null || captionSecondLine == null) return;
         if (twoLineCaptions.count() == 0) return;
         captionFirstLine.setText(twoLineCaptions.first());
+        captionFirstLine.setAlpha(0.10f);
         captionSecondLine.setText(twoLineCaptions.second());
         captionSecondLine.setVisibility(twoLineCaptions.count() == 2 ?
                 View.VISIBLE : View.GONE);
