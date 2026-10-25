@@ -57,3 +57,5 @@ jobs:
         run: python3 tools/subtitle_regression/test_export_asr.py
       - name: Verify diagnostic transcript completeness gate
         run: python3 tools/subtitle_regression/test_validate_coverage.py
+      - name: Compare actual v1.0.43 and v1.0.44 SenseVoice segmentation
+        run: python3 tools/subtitle_regression/test_compare_versions.py
