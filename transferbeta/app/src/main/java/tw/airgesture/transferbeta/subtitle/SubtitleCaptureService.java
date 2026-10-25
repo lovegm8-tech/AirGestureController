@@ -670,12 +670,9 @@ public final class SubtitleCaptureService extends Service {
         if (useSenseVoice) {
             // English-only streaming preview: both recognizers receive the
             // identical AudioRecord frames; SenseVoice owns final captions.
-            java.io.File zipFolder = new java.io.File(getFilesDir(), "zipformer-en");
+            java.io.File zipFolder = SubtitleZipformerModel.modelFolder(this);
             boolean zipReady = "en".equals(sourceLanguage)
-                    && new java.io.File(zipFolder, "encoder.onnx").isFile()
-                    && new java.io.File(zipFolder, "decoder.onnx").isFile()
-                    && new java.io.File(zipFolder, "joiner.onnx").isFile()
-                    && new java.io.File(zipFolder, "tokens.txt").isFile();
+                    && SubtitleZipformerModel.installed(this);
             SubtitleSenseVoiceSpeech.PcmObserver observer = null;
             if (zipReady) {
                 SubtitlePlaybackSpeech.Callback streamingListener =
