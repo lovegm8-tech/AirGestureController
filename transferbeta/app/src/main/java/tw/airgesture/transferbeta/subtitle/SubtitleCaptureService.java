@@ -125,6 +125,7 @@ public final class SubtitleCaptureService extends Service {
     private String voicePreviewSource = "";
     private String voicePreviewChinese = "";
     private long voicePreviewAtMs = 0L;
+    private long voiceConfirmedAtMs = 0L;
     private static final long DUAL_ASR_PREVIEW_TTL_MS = 4500L;
     private String lastSpokenSource = "";
     private String pendingVoiceSource = "";
@@ -735,6 +736,7 @@ public final class SubtitleCaptureService extends Service {
         // Zipformer uses negative IDs and SenseVoice uses positive IDs.
         // Reuse a recent speculative translation only for exactly matching text.
         // Otherwise the authoritative SenseVoice final must be translated anew.
+        if (isFinal) voiceConfirmedAtMs = now;
         if (isFinal && !voicePreviewChinese.isEmpty()
                 && source.equalsIgnoreCase(voicePreviewSource)
                 && now - voicePreviewAtMs <= DUAL_ASR_PREVIEW_TTL_MS) {
@@ -826,6 +828,7 @@ public final class SubtitleCaptureService extends Service {
         lastSpokenSource = source;
         lastSpokenUtteranceId = sourceId;
         final long translateStarted = SystemClock.elapsedRealtime();
+        final long confirmedWhenStarted = voiceConfirmedAtMs;
         translator.translate(source)
                 .addOnSuccessListener(translated -> {
                     if (!running || pausedByUser || calibrating) return;
@@ -840,6 +843,11 @@ public final class SubtitleCaptureService extends Service {
                     }
                     if (!chinese) {
                         lastVoiceStatus = "語音已辨識，但中文翻譯沒有輸出";
+                        return;
+                    }
+                    if (!sourceFinal && confirmedWhenStarted != voiceConfirmedAtMs) {
+                        // A SenseVoice final arrived while this speculative request ran.
+                        // Discard its result; never replace the confirmed sentence.
                         return;
                     }
                     if (!sourceFinal && !(pendingVoiceIsFinal &&
