@@ -124,6 +124,8 @@ public final class SubtitleCaptureService extends Service {
     private long voicePreviewId = -1L;
     private String voicePreviewSource = "";
     private String voicePreviewChinese = "";
+    private long voicePreviewAtMs = 0L;
+    private static final long DUAL_ASR_PREVIEW_TTL_MS = 4500L;
     private String lastSpokenSource = "";
     private String pendingVoiceSource = "";
     private long pendingVoiceUtteranceId = -1L;
@@ -730,6 +732,24 @@ public final class SubtitleCaptureService extends Service {
             if (pausedByUser || calibrating) pendingVoiceSource = "";
             return;
         }
+        // Zipformer uses negative IDs and SenseVoice uses positive IDs.
+        // Reuse a recent speculative translation only for exactly matching text.
+        // Otherwise the authoritative SenseVoice final must be translated anew.
+        if (isFinal && !voicePreviewChinese.isEmpty()
+                && source.equalsIgnoreCase(voicePreviewSource)
+                && now - voicePreviewAtMs <= DUAL_ASR_PREVIEW_TTL_MS) {
+            lastVoiceTranslatedId = utteranceId;
+            lastVoiceFastChinese = voicePreviewChinese;
+            lastVoiceCaptionMs = now;
+            publishVoiceCaption(utteranceId, voicePreviewChinese);
+            positionVoiceCaption();
+            requestVoiceAiRefinement(utteranceId, source, voicePreviewChinese);
+            voicePreviewChinese = "";
+            return;
+        }
+        // Never let a speculative Zipformer hypothesis replace a queued
+        // SenseVoice final, even when ML Kit is currently busy.
+        if (!isFinal && pendingVoiceIsFinal && !pendingVoiceSource.isEmpty()) return;
         if (isFinal && utteranceId == voicePreviewId &&
                 source.equalsIgnoreCase(voicePreviewSource) && !voicePreviewChinese.isEmpty()) {
             lastVoiceTranslatedId = utteranceId;
@@ -829,6 +849,7 @@ public final class SubtitleCaptureService extends Service {
                         voicePreviewId = sourceId;
                         voicePreviewSource = source;
                         voicePreviewChinese = zh;
+                        voicePreviewAtMs = SystemClock.elapsedRealtime();
                         trace("ML Kit 背景預翻譯 #" + sourceId, source + " → " + zh);
                         return;
                     }
