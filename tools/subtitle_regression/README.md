@@ -50,3 +50,32 @@ with an experimental frame-energy heuristic. It does **not** reproduce v1.0.43,
 run SenseVoice inference, or measure WER/translation quality. A passing report
 is not sufficient for an APK release. Keep private audio and transcripts off
 public GitHub; use locally sourced files only.
+
+## ASR accuracy gate (WER/CER)
+
+This does not execute SenseVoice. It evaluates text emitted by two ASR runs
+on the **same** consented recording against one verified transcript.
+
+```json
+// reference.json (remove this comment before saving)
+{"recording_id":"sample-001","tokenization":"word","reference":"we are testing the subtitle engine"}
+```
+
+```json
+// baseline.json
+{"recording_id":"sample-001","hypothesis":"we testing subtitle engine"}
+```
+
+```json
+// candidate.json
+{"recording_id":"sample-001","hypothesis":"we are testing the subtitle engine"}
+```
+
+```bash
+python3 tools/subtitle_regression/score_asr.py reference.json baseline.json candidate.json --fail-on-regression
+```
+
+Use `"tokenization":"character"` for Chinese/Japanese character error rate
+(CER); English defaults to word error rate (WER). This gate does not measure
+translation correctness, endpoint timing, or device thermals. **No real model
+outputs have yet been collected or scored.**
