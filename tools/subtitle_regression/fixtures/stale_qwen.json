@@ -1,0 +1,55 @@
+{
+  "name": "stale-qwen-and-row-rotation",
+  "events": [
+    {
+      "timestamp_ms": 100,
+      "kind": "translation",
+      "id": 1,
+      "text": "第一句"
+    },
+    {
+      "timestamp_ms": 200,
+      "kind": "translation",
+      "id": 2,
+      "text": "第二句"
+    },
+    {
+      "timestamp_ms": 300,
+      "kind": "translation",
+      "id": 3,
+      "text": "第三句"
+    },
+    {
+      "timestamp_ms": 400,
+      "kind": "ai",
+      "id": 1,
+      "expected": "第一句",
+      "text": "舊的 AI 回覆"
+    },
+    {
+      "timestamp_ms": 500,
+      "kind": "ai",
+      "id": 3,
+      "expected": "第三句",
+      "text": "第三句完整翻譯"
+    }
+  ],
+  "expected": {
+    "rows": [
+      {
+        "id": "2",
+        "text": "第二句"
+      },
+      {
+        "id": "3",
+        "text": "第三句完整翻譯"
+      }
+    ],
+    "metrics": {
+      "stale_rejected": 1,
+      "updates": 1,
+      "rotations": 1,
+      "flicker_changes": 1
+    }
+  }
+}
