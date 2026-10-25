@@ -37,6 +37,22 @@ public final class DualAsrArbitration {
         return shared >= 12 && shared * 5 >= Math.min(a.length(), b.length()) * 3;
     }
 
+    /** A streaming model may revise its hypothesis repeatedly. Use a stable
+     * prefix to prefetch translation, but never treat it as final text. */
+    public static String stablePrefix(String previous, String current) {
+        String a = normalize(previous);
+        String b = normalize(current);
+        if (a.isEmpty() || b.isEmpty()) return "";
+        int n = Math.min(a.length(), b.length());
+        int i = 0;
+        while (i < n && Character.toLowerCase(a.charAt(i)) ==
+                Character.toLowerCase(b.charAt(i))) i++;
+        if (i < 12) return "";
+        if (i == b.length()) return b;
+        int boundary = b.lastIndexOf(' ', i - 1);
+        return boundary >= 12 ? b.substring(0, boundary).trim() : "";
+    }
+
     public static boolean shouldRevise(String preview, String confirmed) {
         return !normalize(preview).equalsIgnoreCase(normalize(confirmed))
                 && samePhrase(preview, confirmed);
