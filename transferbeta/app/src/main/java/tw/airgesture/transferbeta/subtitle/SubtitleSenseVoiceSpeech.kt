@@ -37,6 +37,7 @@ class SubtitleSenseVoiceSpeech(
     private val app = context.applicationContext
     private val alive = AtomicBoolean(false)
     private val captureDone = AtomicBoolean(false)
+    @Volatile private var stopDeadlineMs = Long.MAX_VALUE
     private val queue = ArrayBlockingQueue<ByteArray>(80)
     private val ready = CountDownLatch(1)
     private val executor = Executors.newFixedThreadPool(2) { job ->
@@ -56,11 +57,13 @@ class SubtitleSenseVoiceSpeech(
         }
         if (!alive.compareAndSet(false, true)) return
         captureDone.set(false)
+        stopDeadlineMs = Long.MAX_VALUE
         executor.execute(::decodeLoop)
         executor.execute(::captureLoop)
     }
 
     fun stop() {
+        stopDeadlineMs = SystemClock.elapsedRealtime() + 1_500L
         alive.set(false)
         capture?.let { try { it.stop() } catch (_: Exception) {} }
         ready.countDown()
@@ -94,7 +97,8 @@ class SubtitleSenseVoiceSpeech(
             var voicedSamples = 0
             var utteranceId = 0L
             while ((alive.get() || !captureDone.get() || queue.isNotEmpty()) &&
-                !Thread.currentThread().isInterrupted) {
+                !Thread.currentThread().isInterrupted &&
+                SystemClock.elapsedRealtime() < stopDeadlineMs) {
                 val raw = queue.poll(100, TimeUnit.MILLISECONDS) ?: continue
                 for (i in 0 until raw.size / 2) {
                     val lo = raw[i * 2].toInt() and 0xff
@@ -144,7 +148,8 @@ class SubtitleSenseVoiceSpeech(
             // A user stop must not discard the final 0.1–2.9 seconds.
             // Ignore tiny or nearly silent tails, and decode at most one final
             // partial window using the same offline model and callbacks.
-            if (audio.size >= 1_600 && voicedSamples >= 1_600) {
+            if (captureDone.get() && audio.size >= 1_600 && voicedSamples >= 1_600 &&
+                SystemClock.elapsedRealtime() < stopDeadlineMs) {
                 val tail = FloatArray(audio.size) { audio[it] }
                 val stream = asr.createStream()
                 try {
