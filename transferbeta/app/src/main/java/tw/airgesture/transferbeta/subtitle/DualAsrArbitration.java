@@ -11,6 +11,15 @@ public final class DualAsrArbitration {
         return text == null ? "" : text.trim().replaceAll("\\s+", " ");
     }
 
+    /** Never promote a speculative preview to a confirmed sentence merely
+     * because both engines share a short prefix. Confirmation remains the
+     * responsibility of the final recognizer. */
+    public static boolean canReuseTranslation(String preview, String confirmed) {
+        String a = normalize(preview).toLowerCase(java.util.Locale.ROOT);
+        String b = normalize(confirmed).toLowerCase(java.util.Locale.ROOT);
+        return !a.isEmpty() && a.equals(b);
+    }
+
     public static boolean stablePreview(String previous, String current) {
         String a = normalize(previous).toLowerCase(java.util.Locale.ROOT);
         String b = normalize(current).toLowerCase(java.util.Locale.ROOT);
