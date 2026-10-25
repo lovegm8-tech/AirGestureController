@@ -11,7 +11,7 @@ internal object AppReleaseNotes {
     internal data class Entry(val version: String, val summary: String)
 
     val entries: List<Entry> = listOf(
-        Entry("1.0.48", "新增 Zipformer 模型下載與安裝介面，串流英文辨識接入 SenseVoice 共用音訊；待實機驗證雙引擎字幕。"),
+        Entry("1.0.48", "雙 AI 測試進度：已加入 Zipformer 英文模型下載／安裝／狀態檢查，與 SenseVoice 共用播放音訊；Zipformer 預翻譯與 SenseVoice 最終確認可依相同原文重用結果，加入 4.5 秒有效期限、過期結果防護及 1.2 秒預翻譯節流。保留 ML Kit／Qwen、NFC／Nearby／手勢；雙引擎模型啟動、字幕品質與 S26 Ultra 實機效果仍待驗證。"),
         Entry("1.0.47", "新增英文 Zipformer 串流辨識實驗及共用 SenseVoice 音訊管線，模型需自行安裝；雙 AI 尚待實機驗證。"),
         Entry("1.0.46", "語音部分辨識先在背景預翻譯，確認語句後立即顯示匹配的中文結果；歷史字幕降低不透明度，SenseVoice 最長切段縮短至 2.4 秒。"),
         Entry("1.0.45", "SenseVoice 停止時保留有效音訊尾段並處理待辨識佇列，加入停止期限及關閉後字幕回傳防護；尚待 S26 Ultra 實測。"),
