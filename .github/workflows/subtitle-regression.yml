@@ -23,3 +23,11 @@ jobs:
           python-version: '3.12'
       - name: Check fixture schema and replay regression gates
         run: python3 tools/subtitle_regression/replay.py tools/subtitle_regression/fixtures/*.json
+      - name: Verify regression gate rejects deliberately degraded trace
+        run: |
+          if python3 tools/subtitle_regression/compare.py tools/subtitle_regression/fixtures/baseline_sample.json tools/subtitle_regression/fixtures/regression_sample.json; then
+            echo "Regression gate unexpectedly accepted a degraded trace" >&2
+            exit 1
+          fi
+      - name: Verify identical baseline passes
+        run: python3 tools/subtitle_regression/compare.py tools/subtitle_regression/fixtures/baseline_sample.json tools/subtitle_regression/fixtures/baseline_sample.json
