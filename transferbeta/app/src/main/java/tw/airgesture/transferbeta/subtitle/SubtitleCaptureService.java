@@ -1001,7 +1001,7 @@ public final class SubtitleCaptureService extends Service {
             contents.addView(title);
 
             TextView explain = new TextView(this);
-            explain.setText("下方影像就是 OCR 真正讀取的裁切畫面。此面板開啟期間辨識暫停；可直接截圖傳送，關閉後恢復。");
+            explain.setText("下方影像就是 OCR 真正讀取的裁切畫面。此面板開啟期間辨識暫停；可長按選取文字或點擊「複製全部診斷文字」，不必截圖。關閉後恢復。");
             explain.setTextColor(Color.LTGRAY);
             explain.setPadding(0, dp(8), 0, dp(8));
             contents.addView(explain);
@@ -1040,7 +1040,23 @@ public final class SubtitleCaptureService extends Service {
                     "\n模型狀態：" + SubtitleLocalAi.status(this) +
                     "\n\n【最近 60 筆逐階段診斷（僅記憶體）】\n" +
                     pipelineTrace.snapshot());
+            // Keep diagnostics selectable even when the video player blocks screenshots.
+            details.setTextIsSelectable(true);
             contents.addView(details);
+
+            Button copyDiagnostics = new Button(this);
+            copyDiagnostics.setText("複製全部診斷文字");
+            copyDiagnostics.setOnClickListener(v -> {
+                android.content.ClipboardManager clipboard =
+                        (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                if (clipboard != null) {
+                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText(
+                            "字幕 OCR 診斷", details.getText().toString()));
+                    android.widget.Toast.makeText(this, "診斷文字已複製，可直接貼上回報",
+                            android.widget.Toast.LENGTH_SHORT).show();
+                }
+            });
+            contents.addView(copyDiagnostics);
 
             Button dismiss = new Button(this);
             dismiss.setText("關閉診斷，繼續翻譯");
