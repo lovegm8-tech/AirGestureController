@@ -692,69 +692,6 @@ class TransferActivity : ComponentActivity() {
             }
         }
         modePanel.addView(subtitleLanguage)
-        modePanel.addView(text("Zipformer 英文串流 AI（與 SenseVoice 雙引擎）", 15f))
-        modePanel.addView(Button(this).apply {
-            text = "下載 Zipformer 英文模型（約 108 MB）"
-            isAllCaps = false
-            setOnClickListener {
-                if (SubtitleCaptureService.running) {
-                    flash("請先停止翻譯再下載模型")
-                } else {
-                    try {
-                        flash(tw.airgesture.transferbeta.subtitle.SubtitleZipformerModel.download(this@TransferActivity))
-                    } catch (error: Exception) {
-                        flash("Zipformer 下載失敗：" + error.javaClass.simpleName)
-                    }
-                }
-            }
-        })
-        modePanel.addView(Button(this).apply {
-            text = "驗證並安裝 Zipformer 模型"
-            isAllCaps = false
-            setOnClickListener {
-                tw.airgesture.transferbeta.subtitle.SubtitleZipformerModel.install(
-                    this@TransferActivity, java.util.function.Consumer { status ->
-                        runOnUiThread { flash(status); refreshHome() }
-                    })
-            }
-        })
-        modePanel.addView(Button(this).apply {
-            text = "檢查 Zipformer 模型狀態"
-            isAllCaps = false
-            setOnClickListener {
-                flash(tw.airgesture.transferbeta.subtitle.SubtitleZipformerModel.status(this@TransferActivity))
-            }
-        })
-        modePanel.addView(text("ReazonSpeech 日語專用 AI（與 SenseVoice 雙引擎）", 15f))
-        modePanel.addView(Button(this).apply {
-            text = "下載 ReazonSpeech 日語 INT8 模型"
-            isAllCaps = false
-            setOnClickListener {
-                if (SubtitleCaptureService.running) flash("請先停止翻譯再下載模型")
-                else try {
-                    flash(tw.airgesture.transferbeta.subtitle.SubtitleJapaneseModel.download(this@TransferActivity))
-                } catch (error: Exception) {
-                    flash("日語模型下載失敗：" + error.javaClass.simpleName)
-                }
-            }
-        })
-        modePanel.addView(Button(this).apply {
-            text = "驗證並安裝 ReazonSpeech 日語模型"
-            isAllCaps = false
-            setOnClickListener {
-                tw.airgesture.transferbeta.subtitle.SubtitleJapaneseModel.install(
-                    this@TransferActivity, java.util.function.Consumer { status ->
-                        runOnUiThread { flash(status); refreshHome() }
-                    })
-            }
-        })
-        modePanel.addView(Button(this).apply {
-            text = "檢查 ReazonSpeech 日語模型狀態"
-            isAllCaps = false
-            setOnClickListener {
-                flash(tw.airgesture.transferbeta.subtitle.SubtitleJapaneseModel.status(this@TransferActivity))
-            }
-        })
         modePanel.addView(text("播放語音辨識引擎（需先停止翻譯再切換）", 13f))
         asrEngineSpinner = Spinner(this).apply {
             adapter = ArrayAdapter(this@TransferActivity,
@@ -959,6 +896,96 @@ class TransferActivity : ComponentActivity() {
         modeDescription = text(modeLabel(), 14f)
         modePanel.addView(modeDescription)
         root.addView(modePanel)
+        val aiPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(20, 16, 20, 20)
+            background = GradientDrawable().apply {
+                cornerRadius = 22f
+                setColor(0xffe8f1fb.toInt())
+                setStroke(2, 0xffb8cff1.toInt())
+            }
+        }
+        val aiDetails = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        aiDetails.addView(text("模型下載與安裝（進階設定）", 16f))
+        aiDetails.addView(text("英文 Zipformer：" +
+            tw.airgesture.transferbeta.subtitle.SubtitleZipformerModel.status(this), 13f))
+        aiDetails.addView(text("日文 ReazonSpeech：" +
+            tw.airgesture.transferbeta.subtitle.SubtitleJapaneseModel.status(this), 13f))
+        aiDetails.addView(text("SenseVoice：" +
+            tw.airgesture.transferbeta.subtitle.SubtitleSenseVoiceModel.status(this), 13f))
+        aiDetails.visibility = View.GONE
+        aiPanel.addView(Button(this).apply {
+            text = "AI 模型管理（點擊展開／收合）"
+            isAllCaps = false
+            setOnClickListener {
+                aiDetails.visibility = if (aiDetails.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+            }
+        })
+        aiDetails.addView(text("Zipformer 英文串流 AI（與 SenseVoice 雙引擎）", 15f))
+        aiDetails.addView(Button(this).apply {
+            text = "下載 Zipformer 英文模型（約 108 MB）"
+            isAllCaps = false
+            setOnClickListener {
+                if (SubtitleCaptureService.running) {
+                    flash("請先停止翻譯再下載模型")
+                } else {
+                    try {
+                        flash(tw.airgesture.transferbeta.subtitle.SubtitleZipformerModel.download(this@TransferActivity))
+                    } catch (error: Exception) {
+                        flash("Zipformer 下載失敗：" + error.javaClass.simpleName)
+                    }
+                }
+            }
+        })
+        aiDetails.addView(Button(this).apply {
+            text = "驗證並安裝 Zipformer 模型"
+            isAllCaps = false
+            setOnClickListener {
+                tw.airgesture.transferbeta.subtitle.SubtitleZipformerModel.install(
+                    this@TransferActivity, java.util.function.Consumer { status ->
+                        runOnUiThread { flash(status); refreshHome() }
+                    })
+            }
+        })
+        aiDetails.addView(Button(this).apply {
+            text = "檢查 Zipformer 模型狀態"
+            isAllCaps = false
+            setOnClickListener {
+                flash(tw.airgesture.transferbeta.subtitle.SubtitleZipformerModel.status(this@TransferActivity))
+            }
+        })
+        aiDetails.addView(text("ReazonSpeech 日語專用 AI（與 SenseVoice 雙引擎）", 15f))
+        aiDetails.addView(Button(this).apply {
+            text = "下載 ReazonSpeech 日語 INT8 模型"
+            isAllCaps = false
+            setOnClickListener {
+                if (SubtitleCaptureService.running) flash("請先停止翻譯再下載模型")
+                else try {
+                    flash(tw.airgesture.transferbeta.subtitle.SubtitleJapaneseModel.download(this@TransferActivity))
+                } catch (error: Exception) {
+                    flash("日語模型下載失敗：" + error.javaClass.simpleName)
+                }
+            }
+        })
+        aiDetails.addView(Button(this).apply {
+            text = "驗證並安裝 ReazonSpeech 日語模型"
+            isAllCaps = false
+            setOnClickListener {
+                tw.airgesture.transferbeta.subtitle.SubtitleJapaneseModel.install(
+                    this@TransferActivity, java.util.function.Consumer { status ->
+                        runOnUiThread { flash(status); refreshHome() }
+                    })
+            }
+        })
+        aiDetails.addView(Button(this).apply {
+            text = "檢查 ReazonSpeech 日語模型狀態"
+            isAllCaps = false
+            setOnClickListener {
+                flash(tw.airgesture.transferbeta.subtitle.SubtitleJapaneseModel.status(this@TransferActivity))
+            }
+        })
+        aiPanel.addView(aiDetails)
+        root.addView(aiPanel)
         setupGuide = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(20, 14, 20, 18)
