@@ -98,3 +98,13 @@ their timestamps, and deduplicates repeated IDs. This is a convenience bridge:
 bounded diagnostic snapshots may omit earlier speech; verify coverage before
 interpreting WER/CER. Older versions without this diagnostic label cannot
 be scored with this exporter. No APK is built by this workflow.
+
+### Coverage safety gate
+
+When either transcript was exported from Android diagnostics, `score_asr.py`
+now rejects missing or noncontiguous final utterance IDs, an empty transcript,
+and recording ID mismatches. Different utterance counts across versions are
+allowed because segmentation may differ. A pass does **not** guarantee the
+recording was fully captured: verify the start/end manually and do not use
+truncated in-memory traces to claim an accuracy improvement. The diagnostic
+snapshot is still limited to recent events.
