@@ -628,9 +628,9 @@ public final class SubtitleCaptureService extends Service {
     private void startPlaybackSpeech() {
         String selection = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
                 .getString("asr_engine", "vosk");
-        boolean useSenseVoice = "sensevoice".equals(selection)
+        boolean useSenseVoice = ("sensevoice".equals(selection) || "dual".equals(selection))
                 && SubtitleSenseVoiceModel.installed(this);
-        if ("sensevoice".equals(selection) && !useSenseVoice) {
+        if (("sensevoice".equals(selection) || "dual".equals(selection)) && !useSenseVoice) {
             lastVoiceStatus = "SenseVoice 未安裝，"
                     + (SubtitleSpeechModels.supports(sourceLanguage)
                         ? "暫以 Vosk 辨識" : "本語言改用 OCR");
@@ -675,6 +675,7 @@ public final class SubtitleCaptureService extends Service {
             // identical AudioRecord frames; SenseVoice owns final captions.
             java.io.File zipFolder = SubtitleZipformerModel.modelFolder(this);
             boolean zipReady = "en".equals(sourceLanguage)
+                    && ("sensevoice".equals(selection) || "dual".equals(selection))
                     && SubtitleZipformerModel.installed(this);
             SubtitleSenseVoiceSpeech.PcmObserver observer = null;
             if (zipReady) {
