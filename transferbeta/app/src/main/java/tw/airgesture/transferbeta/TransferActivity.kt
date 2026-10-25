@@ -725,11 +725,41 @@ class TransferActivity : ComponentActivity() {
                 flash(tw.airgesture.transferbeta.subtitle.SubtitleZipformerModel.status(this@TransferActivity))
             }
         })
+        modePanel.addView(text("ReazonSpeech 日語專用 AI（與 SenseVoice 雙引擎）", 15f))
+        modePanel.addView(Button(this).apply {
+            text = "下載 ReazonSpeech 日語 INT8 模型"
+            isAllCaps = false
+            setOnClickListener {
+                if (SubtitleCaptureService.running) flash("請先停止翻譯再下載模型")
+                else try {
+                    flash(tw.airgesture.transferbeta.subtitle.SubtitleJapaneseModel.download(this@TransferActivity))
+                } catch (error: Exception) {
+                    flash("日語模型下載失敗：" + error.javaClass.simpleName)
+                }
+            }
+        })
+        modePanel.addView(Button(this).apply {
+            text = "驗證並安裝 ReazonSpeech 日語模型"
+            isAllCaps = false
+            setOnClickListener {
+                tw.airgesture.transferbeta.subtitle.SubtitleJapaneseModel.install(
+                    this@TransferActivity, java.util.function.Consumer { status ->
+                        runOnUiThread { flash(status); refreshHome() }
+                    })
+            }
+        })
+        modePanel.addView(Button(this).apply {
+            text = "檢查 ReazonSpeech 日語模型狀態"
+            isAllCaps = false
+            setOnClickListener {
+                flash(tw.airgesture.transferbeta.subtitle.SubtitleJapaneseModel.status(this@TransferActivity))
+            }
+        })
         modePanel.addView(text("播放語音辨識引擎（需先停止翻譯再切換）", 13f))
         asrEngineSpinner = Spinner(this).apply {
             adapter = ArrayAdapter(this@TransferActivity,
                 android.R.layout.simple_spinner_dropdown_item,
-                listOf("Vosk（原版／英文日文）", "SenseVoice INT8 AI（英文日文韓文）", "雙 AI 實驗（英文 Zipformer＋SenseVoice；日文暫用 SenseVoice）"))
+                listOf("Vosk（原版／英文日文）", "SenseVoice INT8 AI（英文日文韓文）", "雙 AI 實驗（英文 Zipformer＋SenseVoice；日文 ReazonSpeech＋SenseVoice（需安裝模型））"))
             setSelection(when (getSharedPreferences("floating_subtitle", MODE_PRIVATE)
                     .getString("asr_engine", "vosk")) {
                     "dual" -> 2
