@@ -652,10 +652,14 @@ public final class SubtitleCaptureService extends Service {
                                                       boolean isFinal) {
                         // Vosk audio runs off the main thread; serialize speech
                         // queue and UI/caption updates on the main looper.
+                        if (!running) return;
                         lastVoiceUtteranceMs = SystemClock.elapsedRealtime();
                         trace("ASR 片語 #" + utteranceId + (isFinal ? " final" : " 預覽"), original);
                         voiceUnavailable = false;
-                        main.post(() -> translateVoiceFallback(original, utteranceId, isFinal));
+                        main.post(() -> {
+                            if (running && !pausedByUser)
+                                translateVoiceFallback(original, utteranceId, isFinal);
+                        });
                     }
                 };
         if (useSenseVoice) {
