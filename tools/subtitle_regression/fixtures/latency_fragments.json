@@ -1,0 +1,55 @@
+{
+  "name": "fragmentation-and-latency-gate",
+  "events": [
+    {
+      "timestamp_ms": 0,
+      "kind": "asr",
+      "id": 1,
+      "text": "Today we are discussing the weather"
+    },
+    {
+      "timestamp_ms": 900,
+      "kind": "translation",
+      "id": 1,
+      "text": "今天我們討論天氣"
+    },
+    {
+      "timestamp_ms": 1200,
+      "kind": "asr",
+      "id": 2,
+      "text": "This afternoon temperatures will rise"
+    },
+    {
+      "timestamp_ms": 2200,
+      "kind": "translation",
+      "id": 2,
+      "text": "今天下午氣溫將上升"
+    }
+  ],
+  "limits": {
+    "short_asr_fragments": 0,
+    "translation_latency_p95_ms": 1500,
+    "flicker_changes": 0
+  },
+  "expected": {
+    "rows": [
+      {
+        "id": "1",
+        "text": "今天我們討論天氣"
+      },
+      {
+        "id": "2",
+        "text": "今天下午氣溫將上升"
+      }
+    ],
+    "metrics": {
+      "stale_rejected": 0,
+      "updates": 0,
+      "rotations": 0,
+      "flicker_changes": 0,
+      "short_asr_fragments": 0,
+      "asr_events": 2,
+      "translation_latency_p95_ms": 1000
+    }
+  }
+}
