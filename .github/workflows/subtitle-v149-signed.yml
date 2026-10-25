@@ -6,7 +6,7 @@ name: Floating Control v1.0.49 Signed Candidate
 on:
   push:
     branches:
-      - feature/subtitle-dual-asr-japanese-dual-asr-v1-0-49
+      - feature/subtitle-japanese-dual-asr-v1-0-49
     paths:
       - '.github/workflows/subtitle-v149-signed.yml'
       - 'transferbeta/app/src/main/java/tw/airgesture/transferbeta/subtitle/**'
@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   signed-release:
-    if: github.ref == 'refs/heads/feature/subtitle-dual-asr-japanese-dual-asr-v1-0-49' && github.event.repository.full_name == 'lovegm8-tech/AirGestureController'
+    if: github.ref == 'refs/heads/feature/subtitle-japanese-dual-asr-v1-0-49' && github.event.repository.full_name == 'lovegm8-tech/AirGestureController'
     runs-on: ubuntu-latest
     timeout-minutes: 50
     defaults:
