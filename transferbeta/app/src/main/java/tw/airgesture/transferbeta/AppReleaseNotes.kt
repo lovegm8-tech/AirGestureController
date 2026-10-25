@@ -11,6 +11,7 @@ internal object AppReleaseNotes {
     internal data class Entry(val version: String, val summary: String)
 
     val entries: List<Entry> = listOf(
+        Entry("1.0.45", "SenseVoice 停止時保留有效音訊尾段並處理待辨識佇列，加入停止期限及關閉後字幕回傳防護；尚待 S26 Ultra 實測。"),
         Entry("1.0.44", "SenseVoice 改為停頓感知的有界切段，降低固定切句；阻止過期 Qwen 修正覆蓋新字幕，修正延遲診斷說明。"),
         Entry("1.0.43", "新增可切換 Vosk／SenseVoice INT8 離線語音辨識，模型下載經 SHA-256 驗證；保留舊引擎回退，英日韓分段語音翻譯進入實測。"),
         Entry("1.0.42", "新增翻譯逐階段診斷紀錄，可信的畫面原文字幕可優先翻譯；Qwen 過期結果不得蓋掉新字幕。"),
