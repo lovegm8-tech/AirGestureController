@@ -72,6 +72,8 @@ class SubtitleZipformerSpeech(
             var lastPrefetchText = ""
             var lastDeliveredText = ""
             var lastDeliveredNs = 0L
+            var streamSamples = 0L
+            val maxStreamSamples = 16_000L * 9L
             callback.onStatus("Zipformer 英文串流辨識已啟動")
             try {
                 while (running.get() || frames.isNotEmpty()) {
@@ -82,6 +84,7 @@ class SubtitleZipformerSpeech(
                         ((lo or (hi shl 8)).toShort().toFloat()) / 32768f
                     }
                     stream.acceptWaveform(samples, 16_000)
+                    streamSamples += samples.size
                     while (recognizer.isReady(stream)) recognizer.decode(stream)
                     val current = recognizer.getResult(stream).text.trim()
                     if (current.isNotEmpty() && current != lastText) {
@@ -105,12 +108,16 @@ class SubtitleZipformerSpeech(
                         }
                         lastText = current
                     }
-                    if (recognizer.isEndpoint(stream)) {
+                    // Some videos never trigger the model endpoint. Bound the
+                    // hypothesis history so old sentences cannot accumulate forever.
+                    if (recognizer.isEndpoint(stream) || streamSamples >= maxStreamSamples) {
                         recognizer.reset(stream)
+                        streamSamples = 0L
                         lastText = ""
                         utteranceId++
                         lastPrefetchNs = 0L
                         lastPrefetchText = ""
+                        lastDeliveredText = ""
                     }
                 }
             } finally {
