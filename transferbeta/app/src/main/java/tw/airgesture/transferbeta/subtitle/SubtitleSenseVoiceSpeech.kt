@@ -36,6 +36,7 @@ class SubtitleSenseVoiceSpeech(
 ) {
     private val app = context.applicationContext
     private val alive = AtomicBoolean(false)
+    private val captureDone = AtomicBoolean(false)
     private val queue = ArrayBlockingQueue<ByteArray>(80)
     private val ready = CountDownLatch(1)
     private val executor = Executors.newFixedThreadPool(2) { job ->
@@ -54,6 +55,7 @@ class SubtitleSenseVoiceSpeech(
             return
         }
         if (!alive.compareAndSet(false, true)) return
+        captureDone.set(false)
         executor.execute(::decodeLoop)
         executor.execute(::captureLoop)
     }
@@ -62,8 +64,9 @@ class SubtitleSenseVoiceSpeech(
         alive.set(false)
         capture?.let { try { it.stop() } catch (_: Exception) {} }
         ready.countDown()
-        queue.clear()
-        executor.shutdownNow()
+        // Let the decoder drain queued PCM and flush the final partial window.
+        // Interrupting it here would silently discard the last spoken words.
+        executor.shutdown()
     }
 
     private fun decodeLoop() {
@@ -90,8 +93,9 @@ class SubtitleSenseVoiceSpeech(
             var quietSamples = 0
             var voicedSamples = 0
             var utteranceId = 0L
-            while (alive.get() && !Thread.currentThread().isInterrupted) {
-                val raw = queue.poll(250, TimeUnit.MILLISECONDS) ?: continue
+            while ((alive.get() || !captureDone.get() || queue.isNotEmpty()) &&
+                !Thread.currentThread().isInterrupted) {
+                val raw = queue.poll(100, TimeUnit.MILLISECONDS) ?: continue
                 for (i in 0 until raw.size / 2) {
                     val lo = raw[i * 2].toInt() and 0xff
                     val hi = raw[i * 2 + 1].toInt()
@@ -135,6 +139,28 @@ class SubtitleSenseVoiceSpeech(
                 if (queue.size > 50) {
                     queue.clear()
                     callback.onStatus("SenseVoice 推論速度跟不上影片，已丟棄過期音訊（防止字幕積壓）")
+                }
+            }
+            // A user stop must not discard the final 0.1–2.9 seconds.
+            // Ignore tiny or nearly silent tails, and decode at most one final
+            // partial window using the same offline model and callbacks.
+            if (audio.size >= 1_600 && voicedSamples >= 1_600) {
+                val tail = FloatArray(audio.size) { audio[it] }
+                val stream = asr.createStream()
+                try {
+                    stream.acceptWaveform(tail, 16_000)
+                    asr.decode(stream)
+                    val original = asr.getResult(stream).text
+                        .replace(Regex("<\\\\|[^>]+\\\\|>"), "")
+                        .replace(Regex("\\\\s+"), " ").trim()
+                    if (original.isNotBlank()) {
+                        utteranceId++
+                        callback.onHypothesis(original, true)
+                        callback.onUtterance(original, utteranceId, true)
+                        callback.onStatus("SenseVoice 已處理停止時剩餘音訊")
+                    }
+                } finally {
+                    stream.release()
                 }
             }
         } catch (error: Throwable) {
@@ -190,6 +216,7 @@ class SubtitleSenseVoiceSpeech(
                 record.release()
             }
             alive.set(false)
+            captureDone.set(true)
         }
     }
 }
