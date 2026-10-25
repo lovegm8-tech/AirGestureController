@@ -729,21 +729,29 @@ class TransferActivity : ComponentActivity() {
         asrEngineSpinner = Spinner(this).apply {
             adapter = ArrayAdapter(this@TransferActivity,
                 android.R.layout.simple_spinner_dropdown_item,
-                listOf("Vosk（原版／英文日文）", "SenseVoice INT8 AI（英文日文韓文）"))
-            setSelection(if (getSharedPreferences("floating_subtitle", MODE_PRIVATE)
-                    .getString("asr_engine", "vosk") == "sensevoice") 1 else 0)
+                listOf("Vosk（原版／英文日文）", "SenseVoice INT8 AI（英文日文韓文）", "雙 AI 實驗（英文 Zipformer＋SenseVoice；日文暫用 SenseVoice）"))
+            setSelection(when (getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                    .getString("asr_engine", "vosk")) {
+                    "dual" -> 2
+                    "sensevoice" -> 1
+                    else -> 0
+                })
             onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
                 override fun onNothingSelected(parent: AdapterView<*>?) = Unit
                 override fun onItemSelected(parent: AdapterView<*>?, view: View?,
                                             position: Int, id: Long) {
                     if (SubtitleCaptureService.running || subtitlePendingPermission) return
-                    val selection = if (position == 1) "sensevoice" else "vosk"
+                    val selection = when (position) {
+                        2 -> "dual"
+                        1 -> "sensevoice"
+                        else -> "vosk"
+                    }
                     getSharedPreferences("floating_subtitle", MODE_PRIVATE)
                         .edit().putString("asr_engine", selection).apply()
                     if (::voiceFallbackSwitch.isInitialized) {
                         val lang = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
                             .getString("source_language", "en")
-                        voiceFallbackSwitch.isEnabled = (lang != "ko" || selection == "sensevoice")
+                        voiceFallbackSwitch.isEnabled = (lang != "ko" || (selection == "sensevoice" || selection == "dual"))
                         if (lang == "ko" && selection != "sensevoice") {
                             updatingModeControls = true
                             voiceFallbackSwitch.isChecked = false
