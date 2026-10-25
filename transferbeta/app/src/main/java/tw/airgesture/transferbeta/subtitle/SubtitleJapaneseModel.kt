@@ -10,7 +10,7 @@ import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 
 /** User-initiated offline model installation. No model weights are bundled in APK. */
 object SubtitleJapaneseModel {
-    private const val ARCHIVE = "sherpa-onnx-streaming-reazonspeech-ja-20M-2023-02-17-mobile.tar.bz2"
+    private const val ARCHIVE = "sherpa-onnx-zipformer-ja-reazonspeech-2024-08-01.tar.bz2"
     private const val URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/" + ARCHIVE
     private const val PREFS = "japanese_reazon_asr"
     private val worker = Executors.newSingleThreadExecutor()
