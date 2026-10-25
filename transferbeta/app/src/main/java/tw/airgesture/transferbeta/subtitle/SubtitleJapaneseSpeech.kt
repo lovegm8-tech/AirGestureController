@@ -24,7 +24,7 @@ class SubtitleJapaneseSpeech(
     override fun onPcm16kMono(pcm: ByteArray) {
         if (!running.get()) return
         if (!frames.offer(pcm.copyOf())) {
-            frames.clear()
+            frames.poll() // Drop only the oldest chunk to limit audio loss.
             frames.offer(pcm.copyOf())
         }
     }
@@ -70,6 +70,8 @@ class SubtitleJapaneseSpeech(
                     audio.add((lo or (hi shl 8)).toShort().toFloat() / 32768f)
                 }
                 if (audio.size < 40_000) continue
+                // Bound offline chunks to ~2.5 seconds to avoid growing memory
+                // while the recognizer processes speech on a busy device.
                 val samples = FloatArray(audio.size) { audio[it] }
                 audio.clear()
                 val stream = recognizer.createStream()
