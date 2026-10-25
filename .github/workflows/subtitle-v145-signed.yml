@@ -11,6 +11,7 @@ on:
       - '.github/workflows/subtitle-v145-signed.yml'
       - 'transferbeta/app/src/main/java/tw/airgesture/transferbeta/subtitle/**'
       - 'transferbeta/app/build.gradle.kts'
+      - 'transferbeta/app/src/main/java/tw/airgesture/transferbeta/AppReleaseNotes.kt'
   workflow_dispatch:
 
 permissions:
