@@ -10,3 +10,22 @@ Next steps before using this as an APK release gate:
 3. Measure word error rate (WER), phrase split count, median and P95 subtitle delay, revision frequency, repeated/expired captions.
 4. Add thresholds to CI and run on-device playback capture/thermal checks before signed APK release.
 5. Preserve the v1.0.43 baseline until measured improvements are demonstrated.
+
+## Import real device diagnostic snapshots (without changing APK)
+
+Copy the in-app subtitle diagnostics text into a local UTF-8 file, then run:
+
+```bash
+python3 tools/subtitle_regression/import_diagnostics.py diagnosis.txt trace.json
+python3 tools/subtitle_regression/replay.py trace.json
+python3 tools/subtitle_regression/compare.py baseline.json candidate.json
+```
+
+Use the **same video/audio source and settings** for baseline and candidate.
+Do not publish recordings or transcriptions containing private information.
+The current app keeps only the most recent 60 trace events in memory and uses
+**one-second timestamps**, so imported traces can check segmentation and caption
+lifecycle, but latency comparisons are coarse and cannot measure end-to-end
+speech latency. The comparator currently treats coarse timestamps as if they
+were precise; do **not** use its latency gate for release decisions with these
+imports. This importer is an interim bridge, not a complete real-audio harness.
