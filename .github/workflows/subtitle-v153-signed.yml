@@ -1,0 +1,131 @@
+
+name: Floating Control v1.0.53 Signed Candidate
+
+# Build signed NFC/Nearby reliability release on the integration branch.
+# Later builds can be started manually in GitHub Actions without changing YAML.
+on:
+  push:
+    branches:
+      - feature/subtitle-nllb-evaluation-v1-0-53
+    paths:
+      - '.github/workflows/subtitle-v153-signed.yml'
+      - 'transferbeta/app/src/main/java/tw/airgesture/transferbeta/subtitle/**'
+      - 'transferbeta/app/build.gradle.kts'
+      - 'transferbeta/app/src/main/java/tw/airgesture/transferbeta/AppReleaseNotes.kt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  signed-release:
+    if: github.ref == 'refs/heads/feature/subtitle-nllb-evaluation-v1-0-53' && github.event.repository.full_name == 'lovegm8-tech/AirGestureController'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    defaults:
+      run:
+        working-directory: transferbeta
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Install Android SDK
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+      - name: Download pinned sherpa-onnx AAR
+        run: |
+          mkdir -p app/libs
+          curl --fail --location --retry 4 --connect-timeout 30 --max-time 240 \
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar" \
+            --output app/libs/sherpa-onnx-1.13.8.aar
+          echo "633c24321e06b1fe79feafa03ea16cbc0f8a286641e2da3559bac91bdb13bd96  app/libs/sherpa-onnx-1.13.8.aar" | sha256sum -c -
+      - name: Run tests and assemble release APK
+        run: gradle :app:testDebugUnitTest :app:assembleRelease --no-daemon
+      - name: Read app version automatically
+        id: app_version
+        shell: bash
+        run: |
+          set -euo pipefail
+          CODE=$(sed -nE 's/^[[:space:]]*versionCode[[:space:]]*=[[:space:]]*([0-9]+).*$/\1/p' app/build.gradle.kts | head -n 1)
+          NAME=$(sed -nE 's/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"([^"]+)".*$/\1/p' app/build.gradle.kts | head -n 1)
+          if [[ -z "$CODE" || -z "$NAME" ]]; then
+            echo 'Could not read versionCode/versionName from app/build.gradle.kts' >&2
+            exit 1
+          fi
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+      - name: Sign release APK with repository secret
+        shell: bash
+        env:
+          SIGNING_BUNDLE_B64: ${{ secrets.AIRGESTURE_SIGNING_BUNDLE_B64 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${SIGNING_BUNDLE_B64}" ]]; then
+            echo 'Missing secret AIRGESTURE_SIGNING_BUNDLE_B64' >&2
+            exit 1
+          fi
+          umask 077
+          python3 - <<'PY'
+          import base64, json, os, pathlib, subprocess
+          import re
+          encoded = os.environ.pop("SIGNING_BUNDLE_B64").strip().lstrip("\ufeff")
+          if encoded.startswith("AIRGESTURE_SIGNING_BUNDLE_B64="):
+              encoded = encoded.split("=", 1)[1]
+          encoded = encoded.strip().strip("'\"")
+          encoded = "".join(encoded.split())
+          candidates = [encoded] + re.findall(r"[A-Za-z0-9+/=]{2000,}", encoded)
+          bundle = None
+          for candidate in candidates:
+              try:
+                  decoded = json.loads(base64.b64decode(candidate, validate=True))
+                  if isinstance(decoded, dict) and decoded.get("key_alias") == "airgesture":
+                      bundle = decoded
+                      break
+              except (ValueError, KeyError, json.JSONDecodeError):
+                  pass
+          if bundle is None:
+              raise SystemExit("Invalid signing Secret format. Re-copy the entire Base64 text file into AIRGESTURE_SIGNING_BUNDLE_B64.")
+          assert bundle["key_alias"] == "airgesture"
+          keyfile = pathlib.Path(os.environ["RUNNER_TEMP"]) / "release-signing.jks"
+          output = pathlib.Path("app/build/outputs/apk/release/app-release.apk")
+          unsigned = pathlib.Path("app/build/outputs/apk/release/app-release-unsigned.apk")
+          try:
+              keyfile.write_bytes(base64.b64decode(bundle["keystore_base64"], validate=True))
+              assert unsigned.is_file(), "Unsigned APK is missing"
+              env = os.environ.copy()
+              env["STORE_PASSWORD"] = bundle["store_password"]
+              env["KEY_PASSWORD"] = bundle["key_password"]
+              subprocess.run([
+                  str(pathlib.Path(os.environ["ANDROID_HOME"]) / "build-tools" / "35.0.0" / "apksigner"),
+                  "sign", "--ks", str(keyfile), "--ks-key-alias", bundle["key_alias"],
+                  "--ks-pass", "env:STORE_PASSWORD", "--key-pass", "env:KEY_PASSWORD",
+                  "--out", str(output), str(unsigned)
+              ], env=env, check=True)
+          finally:
+              keyfile.unlink(missing_ok=True)
+          PY
+      - name: Verify version, upgrade package, and permanent signature
+        shell: bash
+        env:
+          EXPECTED_CODE: ${{ steps.app_version.outputs.code }}
+          EXPECTED_NAME: ${{ steps.app_version.outputs.name }}
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/release/app-release.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" > "$RUNNER_TEMP/badging.txt"
+          PACKAGE_LINE=$(sed -n '1p' "$RUNNER_TEMP/badging.txt")
+          echo "$PACKAGE_LINE"
+          [[ "$PACKAGE_LINE" == *"package: name='tw.airgesture.transferbeta' versionCode='$EXPECTED_CODE' versionName='$EXPECTED_NAME'"* ]]
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" > "$RUNNER_TEMP/cert.txt"
+          grep -qiF '05e77197d2ad73ac4a255e4c40b868a5c26c539b9aea3c1abd53100ff484f19e' "$RUNNER_TEMP/cert.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FloatingControl-v${{ steps.app_version.outputs.name }}-test-signed
+          path: transferbeta/app/build/outputs/apk/release/app-release.apk
+          retention-days: 30
