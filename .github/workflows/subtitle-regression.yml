@@ -1,0 +1,25 @@
+name: Subtitle regression replay
+on:
+  push:
+    branches:
+      - feature/subtitle-regression-harness
+    paths:
+      - 'tools/subtitle_regression/**'
+      - '.github/workflows/subtitle-regression.yml'
+  pull_request:
+    paths:
+      - 'tools/subtitle_regression/**'
+      - '.github/workflows/subtitle-regression.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check fixture schema and replay regression gates
+        run: python3 tools/subtitle_regression/replay.py tools/subtitle_regression/fixtures/*.json
