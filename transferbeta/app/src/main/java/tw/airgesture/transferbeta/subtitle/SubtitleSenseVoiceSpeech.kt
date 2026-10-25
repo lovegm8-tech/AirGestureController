@@ -151,8 +151,8 @@ class SubtitleSenseVoiceSpeech(
                     stream.acceptWaveform(tail, 16_000)
                     asr.decode(stream)
                     val original = asr.getResult(stream).text
-                        .replace(Regex("<\\\\|[^>]+\\\\|>"), "")
-                        .replace(Regex("\\\\s+"), " ").trim()
+                        .replace(Regex("<\\|[^>]+\\|>"), "")
+                        .replace(Regex("\\s+"), " ").trim()
                     if (original.isNotBlank()) {
                         utteranceId++
                         callback.onHypothesis(original, true)
