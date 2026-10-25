@@ -4,7 +4,7 @@ import java.util.ArrayDeque;
 
 /** In-memory bounded diagnostics: no network, logcat, or persistent transcripts. */
 public final class SubtitlePipelineTrace {
-    private static final int MAX_EVENTS = 60;
+    private static final int MAX_EVENTS = 300;
     private static final int MAX_TEXT_CHARS = 160;
     private final ArrayDeque<String> recent = new ArrayDeque<>();
 
@@ -13,7 +13,7 @@ public final class SubtitlePipelineTrace {
         if (safe.length() > MAX_TEXT_CHARS) safe = safe.substring(0, MAX_TEXT_CHARS) + "…";
         String label = stage == null ? "" : stage.replaceAll("[\\r\\n]+", " ");
         if (recent.size() == MAX_EVENTS) recent.removeFirst();
-        recent.addLast("t+" + (elapsedMs / 1000L) + "s [" + label + "] " + safe);
+        recent.addLast("t+" + elapsedMs + "ms [" + label + "] " + safe);
     }
 
     public synchronized String snapshot() {
