@@ -29,3 +29,24 @@ lifecycle, but latency comparisons are coarse and cannot measure end-to-end
 speech latency. The comparator currently treats coarse timestamps as if they
 were precise; do **not** use its latency gate for release decisions with these
 imports. This importer is an interim bridge, not a complete real-audio harness.
+
+## Same-audio endpoint comparison (local WAV)
+
+Prepare a **mono 16-bit PCM, 16 kHz WAV** from a recording you are allowed to use. Create a local JSON file:
+
+```json
+{"speech_intervals_ms": [[200, 1400], [1900, 3100]]}
+```
+
+The intervals must be manually annotated against that recording. Run:
+
+```bash
+python3 tools/subtitle_regression/compare_audio.py recording.wav intervals.json
+```
+
+The report includes uncovered speech and how often a reference speech interval is
+split into multiple windows. This compares the **v1.0.44 endpoint heuristic**
+with an experimental frame-energy heuristic. It does **not** reproduce v1.0.43,
+run SenseVoice inference, or measure WER/translation quality. A passing report
+is not sufficient for an APK release. Keep private audio and transcripts off
+public GitHub; use locally sourced files only.
