@@ -11,6 +11,7 @@ internal object AppReleaseNotes {
     internal data class Entry(val version: String, val summary: String)
 
     val entries: List<Entry> = listOf(
+        Entry("1.0.47", "新增英文 Zipformer 串流辨識實驗及共用 SenseVoice 音訊管線，模型需自行安裝；雙 AI 尚待實機驗證。"),
         Entry("1.0.46", "語音部分辨識先在背景預翻譯，確認語句後立即顯示匹配的中文結果；歷史字幕降低不透明度，SenseVoice 最長切段縮短至 2.4 秒。"),
         Entry("1.0.45", "SenseVoice 停止時保留有效音訊尾段並處理待辨識佇列，加入停止期限及關閉後字幕回傳防護；尚待 S26 Ultra 實測。"),
         Entry("1.0.44", "SenseVoice 改為停頓感知的有界切段，降低固定切句；阻止過期 Qwen 修正覆蓋新字幕，修正延遲診斷說明。"),
