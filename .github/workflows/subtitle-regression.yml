@@ -51,3 +51,5 @@ jobs:
         run: python3 tools/subtitle_regression/test_legacy_v144.py
       - name: Verify same-audio comparison regression report
         run: python3 tools/subtitle_regression/test_compare_audio.py
+      - name: Verify reference-based ASR word and character error rates
+        run: python3 tools/subtitle_regression/test_score_asr.py
