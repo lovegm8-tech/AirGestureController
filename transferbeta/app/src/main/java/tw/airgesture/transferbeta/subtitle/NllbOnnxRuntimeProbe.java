@@ -2,6 +2,9 @@ package tw.airgesture.transferbeta.subtitle;
 
 import android.content.Context;
 import java.io.File;
+import java.util.Map;
+import ai.onnxruntime.NodeInfo;
+import ai.onnxruntime.TensorInfo;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtSession;
 
@@ -24,6 +27,45 @@ public final class NllbOnnxRuntimeProbe {
             if (!f.isFile() || f.length() == 0) return "MISSING: " + name;
         }
         return "FILES_PRESENT_NOT_VALIDATED";
+    }
+    /** Read actual graph I/O signatures before implementing token-by-token decoding.
+     * Invoke only on a worker thread: loading four large ONNX graphs is expensive.
+     * Diagnostic output contains model tensor metadata, never user subtitle text.
+     */
+    public static String describeGraphSignatures(Context context) {
+        String check = inspect(context);
+        if (!"FILES_PRESENT_NOT_VALIDATED".equals(check)) return check;
+        StringBuilder report = new StringBuilder();
+        try {
+            OrtEnvironment env = OrtEnvironment.getEnvironment();
+            File dir = new File(context.getFilesDir(), "nllb");
+            for (int i = 0; i < 4; i++) {
+                try (OrtSession.SessionOptions options = new OrtSession.SessionOptions()) {
+                    options.setCPUArenaAllocator(false);
+                    options.setMemoryPatternOptimization(false);
+                    try (OrtSession session = env.createSession(new File(dir, REQUIRED[i]).getAbsolutePath(), options)) {
+                        report.append(REQUIRED[i]).append('\\n');
+                        appendNodes(report, "INPUT", session.getInputInfo());
+                        appendNodes(report, "OUTPUT", session.getOutputInfo());
+                    }
+                }
+            }
+            return report.toString();
+        } catch (Exception e) {
+            return "GRAPH_SIGNATURE_FAILED: " + e.getClass().getSimpleName() + ": " + e.getMessage();
+        }
+    }
+    private static void appendNodes(StringBuilder report, String direction, Map<String, NodeInfo> nodes) {
+        for (Map.Entry<String, NodeInfo> entry : nodes.entrySet()) {
+            report.append(direction).append(' ').append(entry.getKey()).append(": ");
+            if (entry.getValue().getInfo() instanceof TensorInfo) {
+                TensorInfo tensor = (TensorInfo) entry.getValue().getInfo();
+                report.append(tensor.type).append(' ').append(java.util.Arrays.toString(tensor.getShape()));
+            } else {
+                report.append(entry.getValue().getInfo().toString());
+            }
+            report.append('\\n');
+        }
     }
     public static String validateGraphs(Context context) {
         String check = inspect(context);
