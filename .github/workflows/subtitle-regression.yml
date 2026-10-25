@@ -49,3 +49,5 @@ jobs:
         run: python3 tools/subtitle_regression/test_audio_windows.py
       - name: Compare legacy v1.0.44 endpoint with candidate heuristic
         run: python3 tools/subtitle_regression/test_legacy_v144.py
+      - name: Verify same-audio comparison regression report
+        run: python3 tools/subtitle_regression/test_compare_audio.py
