@@ -68,6 +68,7 @@ class SubtitleZipformerSpeech(
             var stream = recognizer.createStream()
             var lastText = ""
             var utteranceId = 1L
+            var lastPrefetchNs = 0L
             callback.onStatus("Zipformer 英文串流辨識已啟動")
             try {
                 while (running.get() || frames.isNotEmpty()) {
@@ -82,13 +83,21 @@ class SubtitleZipformerSpeech(
                     val current = recognizer.getResult(stream).text.trim()
                     if (current.isNotEmpty() && current != lastText) {
                         callback.onHypothesis(current, false)
-                        callback.onUtterance(current, utteranceId, false)
+                        // Rate-limit speculative ML Kit requests. Every decoder
+                        // hypothesis still reaches diagnostics, not translation.
+                        val nowNs = System.nanoTime()
+                        if (current.length >= 12 &&
+                            (lastPrefetchNs == 0L || nowNs - lastPrefetchNs >= 1_200_000_000L)) {
+                            callback.onUtterance(current, utteranceId, false)
+                            lastPrefetchNs = nowNs
+                        }
                         lastText = current
                     }
                     if (recognizer.isEndpoint(stream)) {
                         recognizer.reset(stream)
                         lastText = ""
                         utteranceId++
+                        lastPrefetchNs = 0L
                     }
                 }
             } finally {
