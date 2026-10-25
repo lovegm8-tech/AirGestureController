@@ -69,6 +69,9 @@ class SubtitleZipformerSpeech(
             var lastText = ""
             var utteranceId = 1L
             var lastPrefetchNs = 0L
+            var lastPrefetchText = ""
+            var lastDeliveredText = ""
+            var lastDeliveredNs = 0L
             callback.onStatus("Zipformer 英文串流辨識已啟動")
             try {
                 while (running.get() || frames.isNotEmpty()) {
@@ -86,10 +89,19 @@ class SubtitleZipformerSpeech(
                         // Rate-limit speculative ML Kit requests. Every decoder
                         // hypothesis still reaches diagnostics, not translation.
                         val nowNs = System.nanoTime()
-                        if (current.length >= 12 &&
+                        val normalized = current.lowercase().replace(Regex("[^a-z0-9]+"), " ").trim()
+                        val changedEnough = normalized != lastPrefetchText &&
+                            (lastPrefetchText.isEmpty() || !normalized.startsWith(lastPrefetchText) ||
+                                normalized.length - lastPrefetchText.length >= 18)
+                        val recentDuplicate = normalized == lastDeliveredText &&
+                            nowNs - lastDeliveredNs < 8_000_000_000L
+                        if (current.length >= 12 && changedEnough && !recentDuplicate &&
                             (lastPrefetchNs == 0L || nowNs - lastPrefetchNs >= 1_200_000_000L)) {
                             callback.onUtterance(current, utteranceId, false)
                             lastPrefetchNs = nowNs
+                            lastPrefetchText = normalized
+                            lastDeliveredText = normalized
+                            lastDeliveredNs = nowNs
                         }
                         lastText = current
                     }
@@ -98,6 +110,7 @@ class SubtitleZipformerSpeech(
                         lastText = ""
                         utteranceId++
                         lastPrefetchNs = 0L
+                        lastPrefetchText = ""
                     }
                 }
             } finally {
