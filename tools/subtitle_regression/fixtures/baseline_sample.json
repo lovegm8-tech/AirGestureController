@@ -1,0 +1,28 @@
+{
+  "events": [
+    {
+      "timestamp_ms": 0,
+      "kind": "asr",
+      "id": 1,
+      "text": "We need to build a stable system"
+    },
+    {
+      "timestamp_ms": 800,
+      "kind": "translation",
+      "id": 1,
+      "text": "我們需要建立穩定的系統"
+    },
+    {
+      "timestamp_ms": 1000,
+      "kind": "asr",
+      "id": 2,
+      "text": "And test it against recordings"
+    },
+    {
+      "timestamp_ms": 1700,
+      "kind": "translation",
+      "id": 2,
+      "text": "並以錄音測試"
+    }
+  ]
+}
