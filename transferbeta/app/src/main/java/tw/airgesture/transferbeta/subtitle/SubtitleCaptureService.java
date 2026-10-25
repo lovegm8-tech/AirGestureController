@@ -256,6 +256,8 @@ public final class SubtitleCaptureService extends Service {
                     .getString("source_language", "en");
             boolean usingSenseVoice = "sensevoice".equals(
                     getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                            .getString("asr_engine", "vosk")) || "dual".equals(
+                    getSharedPreferences("floating_subtitle", MODE_PRIVATE)
                             .getString("asr_engine", "vosk"));
             voiceFallbackEnabled = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
                     .getBoolean("enable_voice_fallback", true)
@@ -679,6 +681,9 @@ public final class SubtitleCaptureService extends Service {
                     && ("sensevoice".equals(selection) || "dual".equals(selection))
                     && SubtitleZipformerModel.installed(this);
             SubtitleSenseVoiceSpeech.PcmObserver observer = null;
+            if ("en".equals(sourceLanguage) && "dual".equals(selection) && !zipReady) {
+                trace("Zipformer", "英文雙 AI 未完整啟動：Zipformer 模型未安裝；SenseVoice 單引擎運作");
+            }
             if (zipReady) {
                 SubtitlePlaybackSpeech.Callback streamingListener =
                         new SubtitlePlaybackSpeech.Callback() {
@@ -701,6 +706,10 @@ public final class SubtitleCaptureService extends Service {
                 zipformerSpeech = new SubtitleZipformerSpeech(zipFolder, streamingListener);
                 observer = zipformerSpeech;
                 zipformerSpeech.start();
+            }
+            if ("ja".equals(sourceLanguage) && "dual".equals(selection)
+                    && !SubtitleJapaneseModel.installed(this)) {
+                trace("ReazonSpeech", "日語雙 AI 未完整啟動：ReazonSpeech 模型未安裝；SenseVoice 單引擎運作");
             }
             if ("ja".equals(sourceLanguage) && "dual".equals(selection)
                     && SubtitleJapaneseModel.installed(this)) {
