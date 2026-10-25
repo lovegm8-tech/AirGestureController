@@ -113,6 +113,7 @@ public final class SubtitleCaptureService extends Service {
     private SubtitleBubbleController translationBubble;
     private SubtitlePlaybackSpeech playbackSpeech;
     private SubtitleSenseVoiceSpeech senseVoiceSpeech;
+    private SubtitleZipformerSpeech zipformerSpeech;
     private volatile boolean voiceFallbackEnabled = false;
     private volatile boolean voiceUnavailable = false;
     private volatile long voiceStartedAtMs = 0L;
@@ -667,8 +668,40 @@ public final class SubtitleCaptureService extends Service {
                     }
                 };
         if (useSenseVoice) {
+            // English-only streaming preview: both recognizers receive the
+            // identical AudioRecord frames; SenseVoice owns final captions.
+            java.io.File zipFolder = new java.io.File(getFilesDir(), "zipformer-en");
+            boolean zipReady = "en".equals(sourceLanguage)
+                    && new java.io.File(zipFolder, "encoder.onnx").isFile()
+                    && new java.io.File(zipFolder, "decoder.onnx").isFile()
+                    && new java.io.File(zipFolder, "joiner.onnx").isFile()
+                    && new java.io.File(zipFolder, "tokens.txt").isFile();
+            SubtitleSenseVoiceSpeech.PcmObserver observer = null;
+            if (zipReady) {
+                SubtitlePlaybackSpeech.Callback streamingListener =
+                        new SubtitlePlaybackSpeech.Callback() {
+                    @Override public void onStatus(String status) {
+                        trace("Zipformer", status);
+                    }
+                    @Override public void onHypothesis(String original, boolean isFinal) {
+                        trace("Zipformer 原始 partial", original);
+                    }
+                    @Override public void onUtterance(String original, long id, boolean isFinal) {
+                        // Speculative English is prefetched only; do not render
+                        // an unconfirmed translation as a final caption.
+                        if (!running || isFinal) return;
+                        main.post(() -> {
+                            if (running && !pausedByUser)
+                                translateVoiceFallback(original, -id, false);
+                        });
+                    }
+                };
+                zipformerSpeech = new SubtitleZipformerSpeech(zipFolder, streamingListener);
+                observer = zipformerSpeech;
+                zipformerSpeech.start();
+            }
             senseVoiceSpeech = new SubtitleSenseVoiceSpeech(this, mediaProjection,
-                    sourceLanguage, listener);
+                    sourceLanguage, listener, observer);
             senseVoiceSpeech.start();
         } else {
             playbackSpeech = new SubtitlePlaybackSpeech(this, mediaProjection,
