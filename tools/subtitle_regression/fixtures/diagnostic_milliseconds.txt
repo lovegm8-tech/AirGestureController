@@ -1,0 +1,5 @@
+t+100000ms [ASR 片語 #1 final] Today we are testing
+t+100230ms [ML Kit 語音 #1（230ms）] Today we are testing → 今天我們正在測試
+t+101000ms [ASR 片語 #2 final] The second sentence
+t+101210ms [ML Kit 語音 #2（210ms）] The second sentence → 第二句
+t+101350ms [Qwen 語音 #2] 第二句完整翻譯
