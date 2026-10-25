@@ -756,7 +756,7 @@ public final class SubtitleCaptureService extends Service {
         if (source.length() < minLength) return;
         // Ignore isolated punctuation and Japanese grammatical endings.
         // These are fragments of adjacent phrases, not standalone subtitles.
-        if (source.replaceAll("[\\\p{Punct}\\\p{IsPunctuation}\\\s。！？、]+", "").isEmpty()) {
+        if (!source.codePoints().anyMatch(Character::isLetterOrDigit)) {
             trace("ASR 片語過濾", "略過單獨標點：" + source);
             return;
         }
