@@ -1,0 +1,40 @@
+{
+  "events": [
+    {
+      "timestamp_ms": 0,
+      "kind": "asr",
+      "id": 1,
+      "text": "We need"
+    },
+    {
+      "timestamp_ms": 900,
+      "kind": "translation",
+      "id": 1,
+      "text": "我們需要"
+    },
+    {
+      "timestamp_ms": 1000,
+      "kind": "asr",
+      "id": 2,
+      "text": "to build"
+    },
+    {
+      "timestamp_ms": 1900,
+      "kind": "translation",
+      "id": 2,
+      "text": "建立"
+    },
+    {
+      "timestamp_ms": 2000,
+      "kind": "asr",
+      "id": 3,
+      "text": "a stable system"
+    },
+    {
+      "timestamp_ms": 3100,
+      "kind": "translation",
+      "id": 3,
+      "text": "穩定系統"
+    }
+  ]
+}
