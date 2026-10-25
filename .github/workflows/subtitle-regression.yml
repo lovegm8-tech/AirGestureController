@@ -45,3 +45,5 @@ jobs:
           assert data['metadata']['timestamp_resolution_ms']==1
           assert data['events'][1]['timestamp_ms']-data['events'][0]['timestamp_ms']==230
           PY
+      - name: Verify deterministic WAV segmentation benchmark
+        run: python3 tools/subtitle_regression/test_audio_windows.py
