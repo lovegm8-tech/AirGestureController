@@ -9,7 +9,7 @@ import json
 import re
 from pathlib import Path
 
-LINE = re.compile(r"^t\+(\d+)s \[([^]]+)\] (.*)$")
+LINE = re.compile(r"^t\+(\d+)(ms|s) \[([^]]+)\] (.*)$")
 ASR = re.compile(r"^ASR 片語 #(\d+) (?:final|預覽)$")
 MLKIT = re.compile(r"^ML Kit 語音 #(\d+)")
 QWEN = re.compile(r"^Qwen 語音 #(\d+)$")
@@ -17,13 +17,16 @@ QWEN = re.compile(r"^Qwen 語音 #(\d+)$")
 
 def convert(text):
     events = []
-    translated = {}\n    precise = True
+    translated = {}
+    precise = True
     for line in text.splitlines():
         match = LINE.match(line.strip())
         if not match:
             continue
         amount, unit, stage, payload = match.groups()
-        timestamp_ms = int(amount) * (1000 if unit == "s" else 1)\n        if unit == "s":\n            precise = False
+        timestamp_ms = int(amount) * (1000 if unit == "s" else 1)
+        if unit == "s":
+            precise = False
         a = ASR.match(stage)
         m = MLKIT.match(stage)
         q = QWEN.match(stage)
