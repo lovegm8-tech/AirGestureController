@@ -792,7 +792,9 @@ public final class SubtitleCaptureService extends Service {
                         lastVoiceStatus = "語音已辨識，但中文翻譯沒有輸出";
                         return;
                     }
-                    if (!sourceFinal) {
+                    if (!sourceFinal && !(pendingVoiceIsFinal &&
+                            pendingVoiceUtteranceId == sourceId &&
+                            source.equalsIgnoreCase(pendingVoiceSource))) {
                         // Speculative partial result is retained for a matching final.
                         voicePreviewId = sourceId;
                         voicePreviewSource = source;
@@ -800,6 +802,8 @@ public final class SubtitleCaptureService extends Service {
                         trace("ML Kit 背景預翻譯 #" + sourceId, source + " → " + zh);
                         return;
                     }
+                    if (pendingVoiceUtteranceId == sourceId &&
+                            source.equalsIgnoreCase(pendingVoiceSource)) pendingVoiceSource = "";
                     lastVoiceCaptionMs = SystemClock.elapsedRealtime();
                     lastVoiceTranslatedId = sourceId;
                     lastVoiceFastChinese = zh;
