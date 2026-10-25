@@ -111,7 +111,7 @@ class SubtitleSenseVoiceSpeech(
                 // RMS/energy is deliberately a lightweight endpoint heuristic,
                 // not a full neural VAD; silence-only windows are discarded.
                 val naturalPause = quietSamples >= 8_000 && audio.size >= 12_800
-                val maxWindow = audio.size >= 48_000
+                val maxWindow = audio.size >= 38_400
                 if (!naturalPause && !maxWindow) continue
                 if (voicedSamples < 1_600) {
                     audio.clear(); quietSamples = 0; voicedSamples = 0
