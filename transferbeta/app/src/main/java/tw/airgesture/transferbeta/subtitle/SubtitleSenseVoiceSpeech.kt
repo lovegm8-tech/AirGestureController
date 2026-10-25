@@ -32,8 +32,15 @@ class SubtitleSenseVoiceSpeech(
     context: Context,
     private val projection: MediaProjection,
     private val language: String,
-    private val callback: SubtitlePlaybackSpeech.Callback
+    private val callback: SubtitlePlaybackSpeech.Callback,
+    private val pcmObserver: PcmObserver? = null
 ) {
+    /** Non-blocking PCM fan-out hook for a future streaming recognizer.
+     * Called on the capture thread; implementations must copy the buffer if retained. */
+    fun interface PcmObserver {
+        fun onPcm16kMono(pcm: ByteArray)
+    }
+
     private val app = context.applicationContext
     private val alive = AtomicBoolean(false)
     private val captureDone = AtomicBoolean(false)
@@ -206,9 +213,16 @@ class SubtitleSenseVoiceSpeech(
                 val n = record.read(pcm, 0, pcm.size, AudioRecord.READ_BLOCKING)
                 if (n < 0) throw IllegalStateException("AudioRecord.read=$n")
                 if (n == 0) continue
-                if (!queue.offer(pcm.copyOf(n))) {
+                val frame = pcm.copyOf(n)
+                // Feed the same captured frame to both ASR engines. A slow or
+                // failing observer must never block playback capture.
+                if (pcmObserver != null) {
+                    try { pcmObserver.onPcm16kMono(frame) }
+                    catch (_: Exception) { /* SenseVoice remains available */ }
+                }
+                if (!queue.offer(frame)) {
                     queue.clear()
-                    queue.offer(pcm.copyOf(n))
+                    queue.offer(frame)
                     callback.onStatus("SenseVoice 音訊佇列已清空，避免長時間字幕落後")
                 }
             }
