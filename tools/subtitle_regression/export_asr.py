@@ -15,6 +15,7 @@ LINE = re.compile(r"^t\+(\d+)(ms|s) \[ASR 片語 #(\d+) (final|預覽)\] (.*)$")
 def export(text, recording_id):
     finals = {}
     timestamps = {}
+    first_seen = {}
     seen_ids = set()
     for line in text.splitlines():
         m = LINE.match(line.strip())
@@ -26,10 +27,12 @@ def export(text, recording_id):
         if state != "final":
             continue
         timestamp = int(amount) * (1000 if unit == "s" else 1)
+        if ident not in first_seen:
+            first_seen[ident] = timestamp
         if ident not in finals or timestamp >= timestamps[ident]:
             finals[ident] = words.strip()
             timestamps[ident] = timestamp
-    ordered = sorted(finals, key=lambda ident: (timestamps[ident], ident))
+    ordered = sorted(finals, key=lambda ident: (first_seen[ident], ident))
     return {"recording_id": recording_id,
             "hypothesis": " ".join(finals[ident] for ident in ordered if finals[ident]),
             "utterance_count": len(ordered),
