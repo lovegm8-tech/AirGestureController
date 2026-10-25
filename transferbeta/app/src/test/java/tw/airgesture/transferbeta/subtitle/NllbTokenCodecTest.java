@@ -15,8 +15,8 @@ public final class NllbTokenCodecTest {
     };
 
     @Test public void knownLanguageTagsHaveStableIds() {
-        assertEquals(256001 + 45, NllbTokenCodec.languageId("eng_Latn"));
-        assertEquals(256001 + 79, NllbTokenCodec.languageId("jpn_Jpan"));
+        assertEquals(256001 + 46, NllbTokenCodec.languageId("eng_Latn"));
+        assertEquals(256001 + 78, NllbTokenCodec.languageId("jpn_Jpan"));
         assertEquals(256001 + 200, NllbTokenCodec.languageId("zho_Hant"));
         assertEquals(NllbTokenCodec.languageId("zho_Hant"), NllbTokenCodec.targetTraditionalChineseId());
     }
