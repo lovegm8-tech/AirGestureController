@@ -114,6 +114,7 @@ public final class SubtitleCaptureService extends Service {
     private SubtitlePlaybackSpeech playbackSpeech;
     private SubtitleSenseVoiceSpeech senseVoiceSpeech;
     private SubtitleZipformerSpeech zipformerSpeech;
+    private SubtitleJapaneseSpeech japaneseSpeech;
     private volatile boolean voiceFallbackEnabled = false;
     private volatile boolean voiceUnavailable = false;
     private volatile long voiceStartedAtMs = 0L;
@@ -700,6 +701,29 @@ public final class SubtitleCaptureService extends Service {
                 zipformerSpeech = new SubtitleZipformerSpeech(zipFolder, streamingListener);
                 observer = zipformerSpeech;
                 zipformerSpeech.start();
+            }
+            if ("ja".equals(sourceLanguage) && "dual".equals(selection)
+                    && SubtitleJapaneseModel.installed(this)) {
+                SubtitlePlaybackSpeech.Callback japaneseListener =
+                        new SubtitlePlaybackSpeech.Callback() {
+                    @Override public void onStatus(String status) {
+                        trace("ReazonSpeech", status);
+                    }
+                    @Override public void onHypothesis(String original, boolean isFinal) {
+                        trace("ReazonSpeech 日語預辨識", original);
+                    }
+                    @Override public void onUtterance(String original, long id, boolean isFinal) {
+                        if (!running || isFinal) return;
+                        main.post(() -> {
+                            if (running && !pausedByUser)
+                                translateVoiceFallback(original, -id, false);
+                        });
+                    }
+                };
+                japaneseSpeech = new SubtitleJapaneseSpeech(
+                        SubtitleJapaneseModel.modelFolder(this), japaneseListener);
+                observer = japaneseSpeech;
+                japaneseSpeech.start();
             }
             senseVoiceSpeech = new SubtitleSenseVoiceSpeech(this, mediaProjection,
                     sourceLanguage, listener, observer);
@@ -1637,6 +1661,10 @@ public final class SubtitleCaptureService extends Service {
         if (zipformerSpeech != null) {
             zipformerSpeech.stop();
             zipformerSpeech = null;
+        }
+        if (japaneseSpeech != null) {
+            japaneseSpeech.stop();
+            japaneseSpeech = null;
         }
         // Do not run a large model once subtitles have been stopped.
         SubtitleLocalAi.release();
