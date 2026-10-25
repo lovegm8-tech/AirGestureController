@@ -754,6 +754,17 @@ public final class SubtitleCaptureService extends Service {
         String source = original.replaceAll("\\s+", " ").trim();
         int minLength = "ja".equals(sourceLanguage) ? 3 : 5;
         if (source.length() < minLength) return;
+        // Ignore isolated punctuation and Japanese grammatical endings.
+        // These are fragments of adjacent phrases, not standalone subtitles.
+        if (source.replaceAll("[\\p{Punct}\\p{IsPunctuation}\\s。！？、]+", "").isEmpty()) {
+            trace("ASR 片語過濾", "略過單獨標點：" + source);
+            return;
+        }
+        if ("ja".equals(sourceLanguage) &&
+                source.matches("^(?:ます|です|ました|でした|ません|でしょう|ください)[。！？、\\s]*$")) {
+            trace("ASR 片語過濾", "略過獨立日語詞尾：" + source);
+            return;
+        }
         lastSpokenOriginal = source;
         long now = SystemClock.elapsedRealtime();
         if (SubtitleOcrVoiceArbitration.prefersOcr(now, lastTrustedOcrAtMs)) {
