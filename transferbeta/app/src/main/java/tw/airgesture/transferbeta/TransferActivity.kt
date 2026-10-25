@@ -692,6 +692,39 @@ class TransferActivity : ComponentActivity() {
             }
         }
         modePanel.addView(subtitleLanguage)
+        modePanel.addView(text("Zipformer 英文串流 AI（與 SenseVoice 雙引擎）", 15f))
+        modePanel.addView(Button(this).apply {
+            text = "下載 Zipformer 英文模型（約 108 MB）"
+            isAllCaps = false
+            setOnClickListener {
+                if (SubtitleCaptureService.running) {
+                    flash("請先停止翻譯再下載模型")
+                } else {
+                    try {
+                        flash(tw.airgesture.transferbeta.subtitle.SubtitleZipformerModel.download(this@TransferActivity))
+                    } catch (error: Exception) {
+                        flash("Zipformer 下載失敗：" + error.javaClass.simpleName)
+                    }
+                }
+            }
+        })
+        modePanel.addView(Button(this).apply {
+            text = "驗證並安裝 Zipformer 模型"
+            isAllCaps = false
+            setOnClickListener {
+                tw.airgesture.transferbeta.subtitle.SubtitleZipformerModel.install(
+                    this@TransferActivity, java.util.function.Consumer { status ->
+                        runOnUiThread { flash(status); refreshHome() }
+                    })
+            }
+        })
+        modePanel.addView(Button(this).apply {
+            text = "檢查 Zipformer 模型狀態"
+            isAllCaps = false
+            setOnClickListener {
+                flash(tw.airgesture.transferbeta.subtitle.SubtitleZipformerModel.status(this@TransferActivity))
+            }
+        })
         modePanel.addView(text("播放語音辨識引擎（需先停止翻譯再切換）", 13f))
         asrEngineSpinner = Spinner(this).apply {
             adapter = ArrayAdapter(this@TransferActivity,
