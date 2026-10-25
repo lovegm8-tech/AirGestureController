@@ -907,18 +907,26 @@ class TransferActivity : ComponentActivity() {
         }
         val aiDetails = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         aiDetails.addView(text("模型下載與安裝（進階設定）", 16f))
-        aiDetails.addView(text("英文 Zipformer：" +
-            tw.airgesture.transferbeta.subtitle.SubtitleZipformerModel.status(this), 13f))
-        aiDetails.addView(text("日文 ReazonSpeech：" +
-            tw.airgesture.transferbeta.subtitle.SubtitleJapaneseModel.status(this), 13f))
-        aiDetails.addView(text("SenseVoice：" +
-            tw.airgesture.transferbeta.subtitle.SubtitleSenseVoiceModel.status(this), 13f))
+        val zipState = text("英文 Zipformer：" +
+            tw.airgesture.transferbeta.subtitle.SubtitleZipformerModel.status(this), 13f)
+        aiDetails.addView(zipState)
+        val japaneseState = text("日文 ReazonSpeech：" +
+            tw.airgesture.transferbeta.subtitle.SubtitleJapaneseModel.status(this), 13f)
+        aiDetails.addView(japaneseState)
+        val senseState = text("SenseVoice：" +
+            tw.airgesture.transferbeta.subtitle.SubtitleSenseVoiceModel.status(this), 13f)
+        aiDetails.addView(senseState)
         aiDetails.visibility = View.GONE
         aiPanel.addView(Button(this).apply {
             text = "AI 模型管理（點擊展開／收合）"
             isAllCaps = false
             setOnClickListener {
                 aiDetails.visibility = if (aiDetails.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+                if (aiDetails.visibility == View.VISIBLE) {
+                    zipState.text = "英文 Zipformer：" + tw.airgesture.transferbeta.subtitle.SubtitleZipformerModel.status(this@TransferActivity)
+                    japaneseState.text = "日文 ReazonSpeech：" + tw.airgesture.transferbeta.subtitle.SubtitleJapaneseModel.status(this@TransferActivity)
+                    senseState.text = "SenseVoice：" + tw.airgesture.transferbeta.subtitle.SubtitleSenseVoiceModel.status(this@TransferActivity)
+                }
             }
         })
         aiDetails.addView(text("Zipformer 英文串流 AI（與 SenseVoice 雙引擎）", 15f))
