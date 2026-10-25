@@ -30,7 +30,7 @@ object SubtitleJapaneseModel {
     @JvmStatic fun status(context: Context): String {
         if (installed(context)) return "日語 ReazonSpeech 日語專用模型已安裝"
         if (installing) return "日語 ReazonSpeech 模型解壓安裝中"
-        if (archive(context).length() > 100_000_000L) return "下載完成，可驗證並安裝"
+        if (archive(context).length() in 700_000_000L..730_000_000L) return "下載完成，可驗證並安裝"
         val id = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong("download_id", -1L)
         if (id > 0L) {
             val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
@@ -43,7 +43,7 @@ object SubtitleJapaneseModel {
                 }
             }
         }
-        return "日語 ReazonSpeech 日語專用模型未安裝（日語 INT8）"
+        return "日語 ReazonSpeech 模型未安裝（下載約 713 MB）"
     }
 
     @JvmStatic fun download(context: Context): String {
@@ -56,7 +56,7 @@ object SubtitleJapaneseModel {
         archive(context).delete()
         val request = DownloadManager.Request(android.net.Uri.parse(URL))
             .setTitle("日語 ReazonSpeech 日語專用辨識模型")
-            .setDescription("官方離線模型，日語 INT8")
+            .setDescription("官方離線模型，約 713 MB")
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             .setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, ARCHIVE)
         prefs.edit().putLong("download_id", dm.enqueue(request)).apply()
@@ -76,7 +76,7 @@ object SubtitleJapaneseModel {
             val pending = File(app.filesDir, "reazonspeech-ja.pending")
             try {
                 val input = archive(app)
-                require(input.isFile && input.length() in 100_000_000L..1_000_000_000L) {
+                require(input.isFile && input.length() == 713_097_333L) {
                     "模型壓縮包不完整或大小異常"
                 }
                 pending.deleteRecursively()
@@ -104,7 +104,7 @@ object SubtitleJapaneseModel {
                                             val n = tar.read(buffer)
                                             if (n < 0) break
                                             total += n
-                                            require(total < 300_000_000L) { "模型檔超過安全上限" }
+                                            require(total < 1_000_000_000L) { "模型檔超過安全上限" }
                                             out.write(buffer, 0, n)
                                         }
                                     }
