@@ -55,3 +55,5 @@ jobs:
         run: python3 tools/subtitle_regression/test_score_asr.py
       - name: Verify final-only ASR export from diagnostic logs
         run: python3 tools/subtitle_regression/test_export_asr.py
+      - name: Verify diagnostic transcript completeness gate
+        run: python3 tools/subtitle_regression/test_validate_coverage.py
