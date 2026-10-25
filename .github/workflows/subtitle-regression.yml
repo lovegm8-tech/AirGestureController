@@ -53,3 +53,5 @@ jobs:
         run: python3 tools/subtitle_regression/test_compare_audio.py
       - name: Verify reference-based ASR word and character error rates
         run: python3 tools/subtitle_regression/test_score_asr.py
+      - name: Verify final-only ASR export from diagnostic logs
+        run: python3 tools/subtitle_regression/test_export_asr.py
