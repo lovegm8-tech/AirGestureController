@@ -11,6 +11,7 @@ internal object AppReleaseNotes {
     internal data class Entry(val version: String, val summary: String)
 
     val entries: List<Entry> = listOf(
+        Entry("1.0.52", "修正 Zipformer 長句持續累積，過濾日語孤立詞尾與標點；英日雙 AI 自動連動沿用 v1.0.51。"),
         Entry("1.0.51", "主畫面選英文自動啟用 Zipformer＋SenseVoice＋本地 Qwen；選日語自動啟用 ReazonSpeech＋SenseVoice＋本地 Qwen，保留韓語設定。未安裝模型顯示狀態，仍需 S26 Ultra 實機驗證。"),
         Entry("1.0.50", "字幕診斷文字可長按選取或一鍵複製全部，方便禁止截圖的影片回報；日語 ReazonSpeech 離線雙 AI 改善音訊佇列與分段記憶體上限，保留 SenseVoice 最終字幕及英文/NFC/手勢功能，待實機驗證。"),
         Entry("1.0.49", "日語雙 AI 測試版：加入 ReazonSpeech 日語 INT8 模型下載／安裝／狀態、日語離線辨識與 SenseVoice 共用音訊，SenseVoice 保留最終字幕權限；英文雙 AI 維持不變，仍待編譯與實機驗證。"),
