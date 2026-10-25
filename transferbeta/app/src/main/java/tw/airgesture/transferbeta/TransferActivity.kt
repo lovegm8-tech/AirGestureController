@@ -292,6 +292,11 @@ class TransferActivity : ComponentActivity() {
         if (SubtitleCaptureService.running || subtitlePendingPermission) return
         val prefs = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
         val language = prefs.getString("source_language", "en")
+        if (language == "en" || language == "ja") {
+            prefs.edit().putString("asr_engine", "dual")
+                .putBoolean("ai_local_enabled", true)
+                .putBoolean("enable_voice_fallback", true).apply()
+        }
         val engine = prefs.getString("asr_engine", "vosk")
         if ((language == "en" || language == "ja" ||
                 (language == "ko" && engine == "sensevoice")) &&
@@ -675,8 +680,24 @@ class TransferActivity : ComponentActivity() {
                     position: Int, id: Long) {
                     if (SubtitleCaptureService.running || subtitlePendingPermission) return
                     val lang = arrayOf("en", "ja", "ko")[position.coerceIn(0, 2)]
-                    getSharedPreferences("floating_subtitle", MODE_PRIVATE)
-                        .edit().putString("source_language", lang).apply()
+                    val languagePrefs = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                    val autoDual = lang == "en" || lang == "ja"
+                    languagePrefs.edit().putString("source_language", lang).apply {
+                        if (autoDual) {
+                            putString("asr_engine", "dual")
+                            putBoolean("ai_local_enabled", true)
+                            putBoolean("enable_voice_fallback", true)
+                        }
+                    }.apply()
+                    if (autoDual) {
+                        updatingModeControls = true
+                        if (::asrEngineSpinner.isInitialized) asrEngineSpinner.setSelection(2)
+                        if (::aiLocalSwitch.isInitialized) aiLocalSwitch.isChecked = true
+                        if (::voiceFallbackSwitch.isInitialized) voiceFallbackSwitch.isChecked = true
+                        updatingModeControls = false
+                        flash(if (lang == "en") "英文：Zipformer＋SenseVoice＋Qwen 已連動（須先安裝模型）"
+                              else "日語：ReazonSpeech＋SenseVoice＋Qwen 已連動（須先安裝模型）")
+                    }
                     if (::voiceFallbackSwitch.isInitialized) {
                         val koreanSupported = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
                             .getString("asr_engine", "vosk") == "sensevoice"
