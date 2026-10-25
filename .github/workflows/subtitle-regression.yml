@@ -59,3 +59,5 @@ jobs:
         run: python3 tools/subtitle_regression/test_validate_coverage.py
       - name: Compare actual v1.0.43 and v1.0.44 SenseVoice segmentation
         run: python3 tools/subtitle_regression/test_compare_versions.py
+      - name: Verify unprocessed audio tail analysis
+        run: python3 tools/subtitle_regression/test_analyze_tail.py
