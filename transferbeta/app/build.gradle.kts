@@ -47,6 +47,8 @@ dependencies {
     implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
     implementation("com.google.mlkit:text-recognition-korean:16.0.1")
     implementation("com.google.mlkit:translate:17.0.3")
+    // Android CPU ONNX Runtime for dedicated offline NLLB graph evaluation.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
     implementation("com.alphacephei:vosk-android:0.3.75")
     // Official k2-fsa sherpa-onnx v1.13.8 AAR; pinned and SHA-256 checked by CI.
     // Stored under app/libs at CI build time; not committed to public GitHub.
