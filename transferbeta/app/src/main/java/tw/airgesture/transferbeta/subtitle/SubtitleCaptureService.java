@@ -1607,6 +1607,10 @@ public final class SubtitleCaptureService extends Service {
             senseVoiceSpeech.stop();
             senseVoiceSpeech = null;
         }
+        if (zipformerSpeech != null) {
+            zipformerSpeech.stop();
+            zipformerSpeech = null;
+        }
         // Do not run a large model once subtitles have been stopped.
         SubtitleLocalAi.release();
         if (virtualDisplay != null) { virtualDisplay.release(); virtualDisplay = null; }
