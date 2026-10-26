@@ -235,7 +235,7 @@ public final class SubtitleCaptureService extends Service {
                 }
                 if (version != nllbRequestVersion.get() || !running) return;
                 OfflineTranslationEngine.Result result = engine.translate(original, language);
-                final String improved = result.translatedText;
+                final String improved = result.translatedTraditionalChinese;
                 main.post(() -> {
                     if (version != nllbRequestVersion.get() || !running || pausedByUser
                             || calibrating || improved == null || improved.trim().isEmpty()
