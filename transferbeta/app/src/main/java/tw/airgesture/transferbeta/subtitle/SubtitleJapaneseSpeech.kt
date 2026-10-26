@@ -89,7 +89,7 @@ class SubtitleJapaneseSpeech(
                 }
             }
         } catch (error: Throwable) {
-            callback.onStatus("ReazonSpeech 無法啟動：" + error.javaClass.simpleName + "；SenseVoice 繼續運作")
+            callback.onStatus("ReazonSpeech 無法啟動：" + (error.javaClass.simpleName + ": " + (error.message ?: error.cause?.message ?: "no detail").take(240)) + "；SenseVoice 繼續運作")
         } finally {
             running.set(false)
             recognizer?.release()
