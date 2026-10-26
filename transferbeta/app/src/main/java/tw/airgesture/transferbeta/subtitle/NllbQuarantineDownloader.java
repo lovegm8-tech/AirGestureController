@@ -16,6 +16,32 @@ public final class NllbQuarantineDownloader {
     public interface Progress {
         void update(String file, long received, long total);
     }
+    /**
+     * Promote quarantined graphs only after comparing all four SHA-256 values
+     * against a separately trusted publisher manifest. Never self-pin hashes.
+     */
+    public static void promoteVerified(Context context, Map<String, String> trustedHashes)
+            throws Exception {
+        if (trustedHashes == null || trustedHashes.size() != NllbModelStore.RELEASE_ASSET_SIZES.size())
+            throw new SecurityException("Four independently trusted graph hashes required");
+        File quarantine = new File(context.getFilesDir(), "nllb-unverified");
+        for (Map.Entry<String, Long> entry : NllbModelStore.RELEASE_ASSET_SIZES.entrySet()) {
+            File candidate = new File(quarantine, entry.getKey());
+            String trusted = trustedHashes.get(entry.getKey());
+            if (trusted == null || !trusted.matches("[a-fA-F0-9]{64}"))
+                throw new SecurityException("Missing trusted hash: " + entry.getKey());
+            if (!candidate.isFile() || candidate.length() != entry.getValue())
+                throw new java.io.IOException("Missing or incomplete: " + entry.getKey());
+            if (!NllbModelStore.sha256(candidate).equalsIgnoreCase(trusted))
+                throw new SecurityException("Publisher SHA-256 mismatch: " + entry.getKey());
+        }
+        for (String name : NllbModelStore.RELEASE_ASSET_SIZES.keySet()) {
+            try (InputStream input = new java.io.FileInputStream(new File(quarantine, name))) {
+                NllbModelStore.installVerified(context, name, input, trustedHashes.get(name));
+            }
+        }
+    }
+
     public static String download(Context context, Progress progress) throws Exception {
         File quarantine = new File(context.getFilesDir(), "nllb-unverified");
         if (!quarantine.isDirectory() && !quarantine.mkdirs())
