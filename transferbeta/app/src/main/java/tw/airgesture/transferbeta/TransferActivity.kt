@@ -931,6 +931,35 @@ class TransferActivity : ComponentActivity() {
         modePanel.addView(aiModelStatus)
         modePanel.addView(text("NLLB 離線翻譯測試（實驗功能；不影響現有 ML Kit）", 17f))
         modePanel.addView(Button(this).apply {
+            text = "下載官方 NLLB Tokenizer（4.85 MB；來源已固定）"
+            isAllCaps = false
+            setOnClickListener {
+                if (SubtitleCaptureService.running) {
+                    flash("請先停止懸浮翻譯")
+                } else {
+                    isEnabled = false
+                    val button = this
+                    io.execute {
+                        val message = try {
+                            tw.airgesture.transferbeta.subtitle.NllbOfficialTokenizerDownloader
+                                .download(applicationContext)
+                        } catch (error: Exception) {
+                            "Tokenizer 下載失敗：${error.message}"
+                        }
+                        runOnUiThread {
+                            button.isEnabled = true
+                            AlertDialog.Builder(this@TransferActivity)
+                                .setTitle("NLLB Tokenizer")
+                                .setMessage(message)
+                                .setPositiveButton("確定", null)
+                                .show()
+                        }
+                    }
+                }
+            }
+        })
+
+        modePanel.addView(Button(this).apply {
             text = "匯入可信 SHA-256 清單並安裝 NLLB"
             isAllCaps = false
             setOnClickListener {
