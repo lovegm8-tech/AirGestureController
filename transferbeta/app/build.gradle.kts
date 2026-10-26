@@ -13,8 +13,8 @@ android {
         applicationId = "tw.airgesture.transferbeta"
         minSdk = 29
         targetSdk = 35
-        versionCode = 67
-        versionName = "1.0.54"
+        versionCode = 68
+        versionName = "1.0.55"
         // S26 Ultra / S25 are arm64-v8a. Remove unused x86/x86_64/32-bit
         // copies of MediaPipe and Vosk without stripping needed functionality.
         ndk { abiFilters += setOf("arm64-v8a") }
@@ -29,9 +29,6 @@ android {
     kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
     packaging {
         resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" }
-        // Both sherpa-onnx and standalone ORT ship libonnxruntime.so.
-        // Packaging workaround only; runtime compatibility requires device verification.
-        jniLibs { pickFirsts += "**/libonnxruntime.so" }
     }
     testOptions { unitTests.isReturnDefaultValues = true }
 }
