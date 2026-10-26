@@ -8,6 +8,8 @@ on:
       - fix/nllb-empty-cache-buffer-v1-0-54
     paths:
       - '.github/workflows/subtitle-v153-signed.yml'
+      - 'transferbeta/app/src/**'
+      - 'transferbeta/app/build.gradle.kts'
   workflow_dispatch:
 
 permissions:
