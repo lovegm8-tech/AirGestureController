@@ -11,6 +11,7 @@ on:
       - '.github/workflows/subtitle-v153-signed.yml'
       - 'transferbeta/app/src/main/java/tw/airgesture/transferbeta/subtitle/**'
       - 'transferbeta/app/build.gradle.kts'
+      - 'transferbeta/app/src/main/cpp/**'
       - 'transferbeta/app/src/main/java/tw/airgesture/transferbeta/AppReleaseNotes.kt'
   workflow_dispatch:
 
@@ -36,7 +37,14 @@ jobs:
           gradle-version: '8.9'
       - name: Install Android SDK
         run: |
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
+      - name: Checkout pinned SentencePiece v0.2.0 sources
+        run: |
+          set -euo pipefail
+          mkdir -p native-deps
+          git clone --depth 1 --branch v0.2.0 https://github.com/google/sentencepiece.git native-deps/sentencepiece
+          test -f native-deps/sentencepiece/src/sentencepiece_processor.h
+          git -C native-deps/sentencepiece rev-parse HEAD
       - name: Download pinned sherpa-onnx AAR
         run: |
           mkdir -p app/libs
