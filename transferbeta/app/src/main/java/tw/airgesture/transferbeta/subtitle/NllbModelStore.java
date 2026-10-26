@@ -36,6 +36,56 @@ public final class NllbModelStore {
         }
         return true;
     }
+    /**
+     * Installs a single model from a caller-owned stream without exposing partially
+     * downloaded files to the inference engine. Call on a worker thread.
+     * A pinned SHA-256 is mandatory; never trust filename or content length alone.
+     */
+    public static synchronized void installVerified(
+            Context context, String filename, java.io.InputStream source,
+            String expectedSha256) throws Exception {
+        if (context == null || source == null) throw new IllegalArgumentException("Missing installation input");
+        if (expectedSha256 == null || !expectedSha256.matches("[a-fA-F0-9]{64}"))
+            throw new IllegalArgumentException("Expected SHA-256 is required");
+        boolean allowed = false;
+        for (String name : NllbOnnxRuntimeProbe.REQUIRED) {
+            if (name.equals(filename)) { allowed = true; break; }
+        }
+        if (!allowed) throw new IllegalArgumentException("Unknown NLLB model file");
+        File dir = directory(context);
+        if (!dir.isDirectory() && !dir.mkdirs())
+            throw new java.io.IOException("Cannot create NLLB directory");
+        File destination = new File(dir, filename);
+        File staging = new File(dir, filename + ".part");
+        java.security.MessageDigest sha = java.security.MessageDigest.getInstance("SHA-256");
+        long bytes = 0;
+        try {
+            try (java.io.InputStream in = source;
+                 java.io.FileOutputStream out = new java.io.FileOutputStream(staging)) {
+                byte[] buffer = new byte[65536];
+                int n;
+                while ((n = in.read(buffer)) != -1) {
+                    if (n == 0) continue;
+                    bytes += n;
+                    if (bytes > 1_200_000_000L)
+                        throw new java.io.IOException("NLLB file exceeds safety limit");
+                    sha.update(buffer, 0, n);
+                    out.write(buffer, 0, n);
+                }
+                out.getFD().sync();
+            }
+            StringBuilder hex = new StringBuilder(64);
+            for (byte b : sha.digest())
+                hex.append(String.format(java.util.Locale.ROOT, "%02x", b & 0xff));
+            if (bytes == 0 || !hex.toString().equalsIgnoreCase(expectedSha256))
+                throw new SecurityException("NLLB model SHA-256 mismatch: " + filename);
+            if (!staging.renameTo(destination))
+                throw new java.io.IOException("Unable to promote verified model");
+        } finally {
+            if (staging.exists()) staging.delete();
+        }
+    }
+
     public static File directory(Context context) { return new File(context.getFilesDir(), MODEL_DIR); }
     public static boolean verify(Context context, Map<String,String> expectedSha256) throws Exception {
         if (expectedSha256 == null || expectedSha256.size() != NllbOnnxRuntimeProbe.REQUIRED.length)
