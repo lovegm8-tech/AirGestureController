@@ -11,6 +11,7 @@ internal object AppReleaseNotes {
     internal data class Entry(val version: String, val summary: String)
 
     val entries: List<Entry> = listOf(
+        Entry("1.0.57", "NLLB 新增日文語意驗證，錯譯時不啟用模型；SenseVoice、Zipformer、ReazonSpeech 顯示更完整的原生庫與類別載入錯誤，保留 NFC／Nearby／手勢及 ML Kit 備援。待實機排錯。"),
         Entry("1.0.56", "修正 NLLB Decoder 初始零長度快取張量的建立方式，避免 Java 多維陣列零維度錯誤；保留 NFC／Nearby／手勢、ML Kit 備援與原有 AI 模型。NLLB 英日推論仍待 S26 Ultra 實測。"),
         Entry("1.0.55", "修正 NLLB 推論載入失敗：移除重複的 ONNX Runtime 原生庫，改以官方 ONNX Runtime 提供 OrtGetApiBase；保留已安裝模型、ML Kit 備援及 NFC／Nearby／手勢功能。待 S26 Ultra 實測。"),
         Entry("1.0.54", "NLLB 取代 Qwen 測試版：使用手機已下載模型進行 SHA-256 比對、正式安裝與英日推論測試；成功後才啟用 NLLB，失敗保留 ML Kit 翻譯。保留 NFC／Nearby／手勢功能，實機推論仍待驗證。"),
