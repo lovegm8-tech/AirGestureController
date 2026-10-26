@@ -17,6 +17,15 @@ set(SPM_BUILD_TEST OFF CACHE BOOL "" FORCE)
 set(SPM_ENABLE_NFKC_COMPILE OFF CACHE BOOL "" FORCE)
 add_subdirectory("${SENTENCEPIECE_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/sentencepiece" EXCLUDE_FROM_ALL)
 
+# Gradle's externalNativeBuild may request every CMake target. The upstream
+# spm_* command-line tools are host utilities and must not be cross-linked
+# as Android executables; only the static library and JNI wrapper are needed.
+foreach(tool spm_encode spm_decode spm_export_vocab spm_train)
+    if(TARGET ${tool})
+        set_target_properties(${tool} PROPERTIES EXCLUDE_FROM_ALL TRUE)
+    endif()
+endforeach()
+
 add_library(nllb_sentencepiece SHARED nllb_sentencepiece_jni.cpp)
 target_link_libraries(nllb_sentencepiece PRIVATE sentencepiece-static log)
 target_include_directories(nllb_sentencepiece PRIVATE "${SENTENCEPIECE_SOURCE_DIR}/src")
