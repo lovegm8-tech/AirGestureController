@@ -55,6 +55,13 @@ jobs:
           echo "633c24321e06b1fe79feafa03ea16cbc0f8a286641e2da3559bac91bdb13bd96  app/libs/sherpa-onnx-1.13.8.aar" | sha256sum -c -
       - name: Run tests and assemble release APK
         run: gradle :app:testDebugUnitTest :app:assembleRelease --no-daemon
+      - name: Verify SentencePiece native library packaged in APK
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/release/app-release-unsigned.apk
+          test -s "$APK"
+          unzip -l "$APK" | grep -F 'lib/arm64-v8a/libnllb_sentencepiece.so'
+          echo "NLLB SentencePiece native library present in ARM64 APK"
       - name: Read app version automatically
         id: app_version
         shell: bash
