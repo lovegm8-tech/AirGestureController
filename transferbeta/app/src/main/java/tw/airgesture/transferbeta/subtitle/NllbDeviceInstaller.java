@@ -91,6 +91,14 @@ public final class NllbDeviceInstaller {
                       .append(translation.translatedTraditionalChinese).append(" (")
                       .append(translation.inferenceMillis).append(" ms)\n");
             }
+            // Successful graph execution is not evidence of correct translation.
+            // Reject the known broken Japanese output rather than silently enabling it.
+            OfflineTranslationEngine.Result japaneseCheck = engine.translate(
+                    "きをつけてね", OfflineTranslationEngine.SourceLanguage.JAPANESE);
+            String ja = japaneseCheck.translatedTraditionalChinese;
+            if (!(ja.contains("小心") || ja.contains("注意") || ja.contains("保重"))) {
+                throw new IllegalStateException("日文語意驗證失敗：きをつけてね → " + ja);
+            }
             prefs.edit().putBoolean("nllb_enabled", true).commit();
             result.append("英文與日文推論均成功，已啟用 NLLB；重新啟動懸浮翻譯後生效。");
         } catch (Exception | LinkageError failure) {
