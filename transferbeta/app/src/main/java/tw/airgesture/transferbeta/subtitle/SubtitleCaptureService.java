@@ -187,6 +187,66 @@ public final class SubtitleCaptureService extends Service {
     public static volatile String lastCandidateSummary = "尚無 OCR 候選字幕";
     public static volatile String lastTranslationQuality = "尚無翻譯結果";
     private String sourceLanguage = "en";
+    // NLLB runs independently of ML Kit and OCR; only the newest completed
+    // sentence is eligible for a slow second-pass translation.
+    private final java.util.concurrent.ExecutorService nllbExecutor =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread thread = new Thread(r, "floating-nllb-translation");
+                thread.setPriority(Thread.MIN_PRIORITY);
+                return thread;
+            });
+    private final java.util.concurrent.atomic.AtomicLong nllbRequestVersion =
+            new java.util.concurrent.atomic.AtomicLong();
+    private volatile NllbOfflineTranslationEngine nllbEngine;
+
+    private java.util.Map<String, String> trustedNllbHashes() {
+        android.content.SharedPreferences prefs =
+                getSharedPreferences("floating_subtitle", MODE_PRIVATE);
+        java.util.Map<String, String> hashes = new java.util.HashMap<>();
+        for (String name : NllbOnnxRuntimeProbe.REQUIRED) {
+            String hash = prefs.getString("nllb_sha256_" + name, "");
+            if (!hash.matches("[a-fA-F0-9]{64}")) return null;
+            hashes.put(name, hash);
+        }
+        return hashes;
+    }
+
+    private void refineWithNllb(String original, String quickChinese,
+                                java.util.function.Consumer<String> apply) {
+        if (!running || original == null || original.trim().isEmpty()) return;
+        java.util.Map<String, String> hashes = trustedNllbHashes();
+        if (hashes == null) {
+            lastAiStatus = "NLLB 尚未驗證完整模型；使用 ML Kit";
+            return;
+        }
+        final OfflineTranslationEngine.SourceLanguage language =
+                "ja".equals(sourceLanguage) ? OfflineTranslationEngine.SourceLanguage.JAPANESE
+                : "en".equals(sourceLanguage) ? OfflineTranslationEngine.SourceLanguage.ENGLISH : null;
+        if (language == null) return;
+        final long version = nllbRequestVersion.incrementAndGet();
+        nllbExecutor.execute(() -> {
+            if (version != nllbRequestVersion.get() || !running) return;
+            try {
+                NllbOfflineTranslationEngine engine = nllbEngine;
+                if (engine == null) {
+                    engine = new NllbOfflineTranslationEngine(getApplicationContext(), hashes);
+                    engine.initialize();
+                    nllbEngine = engine;
+                }
+                if (version != nllbRequestVersion.get() || !running) return;
+                OfflineTranslationEngine.Result result = engine.translate(original, language);
+                final String improved = result.translatedText;
+                main.post(() -> {
+                    if (version != nllbRequestVersion.get() || !running || pausedByUser
+                            || calibrating || improved == null || improved.trim().isEmpty()
+                            || improved.equals(quickChinese)) return;
+                    apply.accept(improved);
+                });
+            } catch (Exception | LinkageError error) {
+                lastAiStatus = "NLLB 尚不可用，維持 ML Kit：" + error.getClass().getSimpleName();
+            }
+        });
+    }
 
     @Override public void onCreate() {
         super.onCreate();
@@ -269,10 +329,8 @@ public final class SubtitleCaptureService extends Service {
                 foregroundTypes |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
             startForeground(NOTIFICATION_ID, makeNotification(), foregroundTypes);
             running = true;
-            aiRefineEnabled = SubtitleLocalAi.enabled(this) &&
-                    SubtitleLocalAi.modelInstalled(this);
-            lastAiStatus = aiRefineEnabled ? "本地 Qwen 已安裝，等待完整台詞進行潤飾" :
-                    "使用 ML Kit 快速翻譯（本地 AI 尚未安裝／停用）";
+            aiRefineEnabled = false; // Qwen paused; NLLB owns second-pass translation.
+            lastAiStatus = "NLLB 待模型驗證；ML Kit 即時翻譯持續運作";
             // Voice-first starts immediately; picking an OCR rectangle is
             // optional and must never gate AudioPlaybackCapture callbacks.
             calibrating = false;
@@ -941,44 +999,34 @@ public final class SubtitleCaptureService extends Service {
     }
 
     private void requestVoiceAiRefinement(long id, String original, String quickChinese) {
-        if (!aiRefineEnabled || !SubtitleLocalAi.modelInstalled(this)) return;
         if (id == lastVoiceAiRequestedId &&
                 original.equalsIgnoreCase(lastVoiceAiRequestedSource)) return;
         lastVoiceAiRequestedId = id;
         lastVoiceAiRequestedSource = original;
-        final String previous = twoLineCaptions.previousOfVoice(id);
-        SubtitleLocalAi.refine(getApplicationContext(), sourceLanguage,
-                original, quickChinese, previous, improved -> main.post(() -> {
-                    if (!running || pausedByUser || calibrating || !aiRefineEnabled) return;
-                    if (id == lastVoiceTranslatedId && twoLineCaptions.reviseVoiceIfUnchanged(id, quickChinese, improved)) {
-                        trace("Qwen 語音 #" + id, improved);
-                        renderTwoLineCaptions();
-                        lastTranslationResult = improved;
-                        lastAiStatus = "本地 Qwen 已修正語音字幕第 " + id + " 句";
-                    }
-                }));
+        refineWithNllb(original, quickChinese, improved -> {
+            if (id == lastVoiceTranslatedId
+                    && twoLineCaptions.reviseVoiceIfUnchanged(id, quickChinese, improved)) {
+                trace("NLLB 語音 #" + id, improved);
+                renderTwoLineCaptions();
+                lastTranslationResult = improved;
+                lastAiStatus = "NLLB 已修正語音字幕第 " + id + " 句";
+            }
+        });
     }
 
     private void requestOcrAiRefinement(String original, String quickChinese) {
-        if (!aiRefineEnabled || !SubtitleLocalAi.modelInstalled(this)) return;
-        final String language = sourceLanguage;
-        final String previous = twoLineCaptions.previousOfOcr(original);
-        SubtitleLocalAi.refine(getApplicationContext(), language,
-                original, quickChinese, previous, improved -> main.post(() -> {
-                    if (!running || pausedByUser || calibrating || !aiRefineEnabled) return;
-                    if (!SubtitleOcrVoiceArbitration.prefersOcr(
-                            SystemClock.elapsedRealtime(), lastTrustedOcrAtMs)
-                            && !SubtitleVoicePriority.mayDisplayOcr(voiceFallbackEnabled,
-                                    SystemClock.elapsedRealtime(), lastVoiceCaptionMs)) return;
-                    // Do NOT insert missing captions: Qwen can be slower than
-                    // an entire next line and must not restore evicted text.
-                    if (twoLineCaptions.reviseOcrIfUnchanged(original, quickChinese, improved)) {
-                        trace("Qwen OCR", original + " → " + improved);
-                        renderTwoLineCaptions();
-                        lastTranslationResult = improved;
-                        lastAiStatus = "本地 Qwen 已修正 OCR 中文字幕";
-                    }
-                }));
+        refineWithNllb(original, quickChinese, improved -> {
+            if (!SubtitleOcrVoiceArbitration.prefersOcr(
+                    SystemClock.elapsedRealtime(), lastTrustedOcrAtMs)
+                    && !SubtitleVoicePriority.mayDisplayOcr(voiceFallbackEnabled,
+                            SystemClock.elapsedRealtime(), lastVoiceCaptionMs)) return;
+            if (twoLineCaptions.reviseOcrIfUnchanged(original, quickChinese, improved)) {
+                trace("NLLB OCR", original + " → " + improved);
+                renderTwoLineCaptions();
+                lastTranslationResult = improved;
+                lastAiStatus = "NLLB 已修正 OCR 中文字幕";
+            }
+        });
     }
 
     private void positionVoiceCaption() {
@@ -1703,7 +1751,9 @@ public final class SubtitleCaptureService extends Service {
             japaneseSpeech = null;
         }
         // Do not run a large model once subtitles have been stopped.
-        SubtitleLocalAi.release();
+        nllbRequestVersion.incrementAndGet();
+        nllbExecutor.execute(() -> { if (nllbEngine != null) nllbEngine.close(); nllbEngine = null; });
+        nllbExecutor.shutdown();
         if (virtualDisplay != null) { virtualDisplay.release(); virtualDisplay = null; }
         if (imageReader != null) { imageReader.close(); imageReader = null; }
         if (mediaProjection != null) {
