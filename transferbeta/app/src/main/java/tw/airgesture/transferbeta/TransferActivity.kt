@@ -163,6 +163,46 @@ class TransferActivity : ComponentActivity() {
             }
         }
 
+    private val nllbTokenizerPicker =
+        registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            if (uri != null) {
+                io.execute {
+                    val result = try {
+                        val directory = File(filesDir, "nllb-unverified")
+                        if (!directory.isDirectory && !directory.mkdirs())
+                            throw java.io.IOException("無法建立模型暫存資料夾")
+                        val temporary = File(directory, "sentencepiece_bpe.model.partial")
+                        val target = File(directory, "sentencepiece_bpe.model")
+                        try {
+                            contentResolver.openInputStream(uri)?.use { input ->
+                                temporary.outputStream().use { output ->
+                                    input.copyTo(output, 65536)
+                                }
+                            } ?: throw java.io.IOException("無法讀取選取的檔案")
+                            if (temporary.length() == 0L || temporary.length() > 20_000_000L)
+                                throw java.io.IOException("Tokenizer 檔案大小不合理")
+                            if (!temporary.renameTo(target))
+                                throw java.io.IOException("無法儲存 Tokenizer")
+                        } finally {
+                            if (temporary.exists()) temporary.delete()
+                        }
+                        "Tokenizer 已暫存（尚未驗證）：\\nSHA-256=" +
+                            tw.airgesture.transferbeta.subtitle.NllbModelStore.sha256(target) +
+                            "\\n須與 ONNX 模型版本相容且經可信來源驗證後才能啟用"
+                    } catch (error: Exception) {
+                        "Tokenizer 匯入失敗：${error.message}"
+                    }
+                    runOnUiThread {
+                        AlertDialog.Builder(this@TransferActivity)
+                            .setTitle("NLLB Tokenizer")
+                            .setMessage(result)
+                            .setPositiveButton("確定", null)
+                            .show()
+                    }
+                }
+            }
+        }
+
     private val voiceAudioPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -863,6 +903,15 @@ class TransferActivity : ComponentActivity() {
         aiModelStatus = text("NLLB：檢查模型…", 13f)
         modePanel.addView(aiModelStatus)
         modePanel.addView(text("NLLB 離線翻譯測試（實驗功能；不影響現有 ML Kit）", 17f))
+        modePanel.addView(Button(this).apply {
+            text = "從手機匯入 NLLB SentencePiece Tokenizer（待驗證）"
+            isAllCaps = false
+            setOnClickListener {
+                if (SubtitleCaptureService.running) flash("請先停止懸浮翻譯")
+                else nllbTokenizerPicker.launch("*/*")
+            }
+        })
+
         modePanel.addView(Button(this).apply {
             text = "下載 NLLB ONNX 模型（約 995 MB；暫存待驗證）"
             isAllCaps = false
