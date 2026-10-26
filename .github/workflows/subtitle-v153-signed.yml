@@ -1,18 +1,9 @@
 
 name: Floating Control v1.0.53 Signed Candidate
 
-# Build signed NFC/Nearby reliability release on the integration branch.
-# Later builds can be started manually in GitHub Actions without changing YAML.
+# Signed APK builds are manual during NLLB development.
+# Commit changes without triggering a costly release build.
 on:
-  push:
-    branches:
-      - feature/subtitle-nllb-evaluation-v1-0-53
-    paths:
-      - '.github/workflows/subtitle-v153-signed.yml'
-      - 'transferbeta/app/src/main/java/tw/airgesture/transferbeta/subtitle/**'
-      - 'transferbeta/app/build.gradle.kts'
-      - 'transferbeta/app/src/main/cpp/**'
-      - 'transferbeta/app/src/main/java/tw/airgesture/transferbeta/AppReleaseNotes.kt'
   workflow_dispatch:
 
 permissions:
