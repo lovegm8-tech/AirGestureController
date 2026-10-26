@@ -18,5 +18,5 @@ set(SPM_ENABLE_NFKC_COMPILE OFF CACHE BOOL "" FORCE)
 add_subdirectory("${SENTENCEPIECE_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/sentencepiece" EXCLUDE_FROM_ALL)
 
 add_library(nllb_sentencepiece SHARED nllb_sentencepiece_jni.cpp)
-target_link_libraries(nllb_sentencepiece PRIVATE sentencepiece-static)
+target_link_libraries(nllb_sentencepiece PRIVATE sentencepiece-static log)
 target_include_directories(nllb_sentencepiece PRIVATE "${SENTENCEPIECE_SOURCE_DIR}/src")
