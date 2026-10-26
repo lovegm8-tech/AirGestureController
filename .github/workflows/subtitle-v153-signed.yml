@@ -1,11 +1,11 @@
 
-name: Floating Control NLLB v1.0.55 Signed Candidate
+name: Floating Control NLLB v1.0.56 Cache Fix Signed Candidate
 
 # Build signed APK after the one-tap installer and test changes.
 on:
   push:
     branches:
-      - feature/subtitle-nllb-evaluation-v1-0-53
+      - fix/nllb-empty-cache-buffer-v1-0-54
     paths:
       - '.github/workflows/subtitle-v153-signed.yml'
   workflow_dispatch:
