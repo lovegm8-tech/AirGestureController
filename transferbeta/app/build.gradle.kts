@@ -30,7 +30,7 @@ android {
     packaging {
         resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" }
         // Prefer the sherpa-onnx AAR native runtime; verified in CI after packaging.
-        jniLibs { pickFirsts += setOf("lib/arm64-v8a/libonnxruntime.so") }
+        jniLibs { pickFirsts += setOf("lib/**/libonnxruntime.so") }
     }
     testOptions { unitTests.isReturnDefaultValues = true }
 }
