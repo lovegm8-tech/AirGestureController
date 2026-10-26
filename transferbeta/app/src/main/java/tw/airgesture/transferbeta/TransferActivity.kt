@@ -874,6 +874,51 @@ class TransferActivity : ComponentActivity() {
         })
         modePanel.addView(text("NLLB 離線翻譯測試（實驗功能；不影響現有 ML Kit）", 17f))
         modePanel.addView(Button(this).apply {
+            text = "下載 NLLB ONNX 模型（約 995 MB；暫存待驗證）"
+            isAllCaps = false
+            setOnClickListener {
+                if (SubtitleCaptureService.running) {
+                    flash("請先停止懸浮翻譯再下載 NLLB 模型")
+                } else {
+                    isEnabled = false
+                    val button = this
+                    val downloadStatus = TextView(this@TransferActivity).apply {
+                        text = "正在準備下載…"
+                        setPadding(24, 16, 24, 16)
+                    }
+                    val dialog = AlertDialog.Builder(this@TransferActivity)
+                        .setTitle("NLLB 模型下載")
+                        .setView(downloadStatus)
+                        .setPositiveButton("背景下載中", null)
+                        .create()
+                    dialog.show()
+                    io.execute {
+                        val result = try {
+                            tw.airgesture.transferbeta.subtitle.NllbQuarantineDownloader.download(
+                                applicationContext
+                            ) { name, received, total ->
+                                runOnUiThread {
+                                    downloadStatus.text = name + "\\n" +
+                                        (received * 100 / total) + "% (" +
+                                        (received / 1048576) + " / " +
+                                        (total / 1048576) + " MB)"
+                                }
+                            }
+                        } catch (error: Exception) {
+                            "下載失敗：${error.javaClass.simpleName}: ${error.message}"
+                        }
+                        runOnUiThread {
+                            button.isEnabled = true
+                            dialog.setTitle("NLLB 下載結果")
+                            downloadStatus.text = result
+                            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.text = "關閉"
+                        }
+                    }
+                }
+            }
+        })
+
+        modePanel.addView(Button(this).apply {
             text = "檢查 NLLB 模型檔案及 SHA-256"
             isAllCaps = false
             setOnClickListener {
