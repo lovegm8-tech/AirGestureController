@@ -44,7 +44,7 @@ public final class NllbOnnxRuntimeProbe {
                     options.setCPUArenaAllocator(false);
                     options.setMemoryPatternOptimization(false);
                     try (OrtSession session = env.createSession(new File(dir, REQUIRED[i]).getAbsolutePath(), options)) {
-                        report.append(REQUIRED[i]).append('\\n');
+                        report.append(REQUIRED[i]).append('\n');
                         appendNodes(report, "INPUT", session.getInputInfo());
                         appendNodes(report, "OUTPUT", session.getOutputInfo());
                     }
@@ -64,7 +64,7 @@ public final class NllbOnnxRuntimeProbe {
             } else {
                 report.append(entry.getValue().getInfo().toString());
             }
-            report.append('\\n');
+            report.append('\n');
         }
     }
     public static String validateGraphs(Context context) {
