@@ -198,6 +198,7 @@ public final class SubtitleCaptureService extends Service {
     private final java.util.concurrent.atomic.AtomicLong nllbRequestVersion =
             new java.util.concurrent.atomic.AtomicLong();
     private volatile NllbOfflineTranslationEngine nllbEngine;
+    private volatile boolean nllbLoadAttempted = false;
 
     private java.util.Map<String, String> trustedNllbHashes() {
         android.content.SharedPreferences prefs =
@@ -214,6 +215,7 @@ public final class SubtitleCaptureService extends Service {
     private void refineWithNllb(String original, String quickChinese,
                                 java.util.function.Consumer<String> apply) {
         if (!running || original == null || original.trim().isEmpty()) return;
+        if (nllbLoadAttempted && nllbEngine == null) return;
         java.util.Map<String, String> hashes = trustedNllbHashes();
         if (hashes == null) {
             lastAiStatus = "NLLB 尚未驗證完整模型；使用 ML Kit";
@@ -229,6 +231,7 @@ public final class SubtitleCaptureService extends Service {
             try {
                 NllbOfflineTranslationEngine engine = nllbEngine;
                 if (engine == null) {
+                    nllbLoadAttempted = true;
                     engine = new NllbOfflineTranslationEngine(getApplicationContext(), hashes);
                     engine.initialize();
                     nllbEngine = engine;
