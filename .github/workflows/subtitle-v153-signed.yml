@@ -50,6 +50,13 @@ jobs:
             "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar" \
             --output app/libs/sherpa-onnx-1.13.8.aar
           echo "633c24321e06b1fe79feafa03ea16cbc0f8a286641e2da3559bac91bdb13bd96  app/libs/sherpa-onnx-1.13.8.aar" | sha256sum -c -
+      - name: Pin sherpa ONNX runtime as application native library
+        run: |
+          set -euo pipefail
+          mkdir -p app/src/main/jniLibs/arm64-v8a
+          unzip -p app/libs/sherpa-onnx-1.13.8.aar jni/arm64-v8a/libonnxruntime.so > app/src/main/jniLibs/arm64-v8a/libonnxruntime.so
+          test -s app/src/main/jniLibs/arm64-v8a/libonnxruntime.so
+          echo "Pinned sherpa runtime as project native library"
       - name: Verify sherpa bundled ONNX Runtime ABI before packaging
         run: |
           set -euo pipefail
