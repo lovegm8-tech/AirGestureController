@@ -82,6 +82,44 @@ public final class NllbModelDownloader {
             throw new java.io.IOException("Model installation verification failed");
     }
 
+    /**
+     * Import the separately distributed tokenizer using Android's document picker.
+     * The calling UI obtains a content:// Uri via ACTION_OPEN_DOCUMENT.
+     * Never accept an unpinned tokenizer: the model and tokenizer must match.
+     */
+    public static void importTokenizer(Context context, android.net.Uri document,
+                                       String expectedSha256) throws Exception {
+        if (document == null || !"content".equals(document.getScheme()))
+            throw new IllegalArgumentException("Select a tokenizer document");
+        try (InputStream in = context.getContentResolver().openInputStream(document)) {
+            if (in == null) throw new java.io.FileNotFoundException("Tokenizer document inaccessible");
+            NllbModelStore.installVerified(context, "sentencepiece_bpe.model",
+                    in, expectedSha256);
+        }
+    }
+
+    /**
+     * Explicit model-file import, useful when a release asset is downloaded on
+     * another device. No network access or implicit installation occurs.
+     */
+    public static void importGraph(Context context, String filename,
+                                   android.net.Uri document, String expectedSha256)
+            throws Exception {
+        if (!NllbModelStore.RELEASE_ASSET_SIZES.containsKey(filename))
+            throw new IllegalArgumentException("Not an NLLB ONNX graph");
+        if (document == null || !"content".equals(document.getScheme()))
+            throw new IllegalArgumentException("Select a model document");
+        try (InputStream in = context.getContentResolver().openInputStream(document)) {
+            if (in == null) throw new java.io.FileNotFoundException("Model document inaccessible");
+            NllbModelStore.installVerified(context, filename, in, expectedSha256);
+        }
+        File installed = new File(NllbModelStore.directory(context), filename);
+        if (installed.length() != NllbModelStore.RELEASE_ASSET_SIZES.get(filename)) {
+            if (!installed.delete()) throw new java.io.IOException("Cannot remove unexpected graph size");
+            throw new java.io.IOException("Unexpected NLLB graph size: " + filename);
+        }
+    }
+
     private static boolean hashMatches(File file, String expected) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         try (InputStream in = new java.io.FileInputStream(file)) {
