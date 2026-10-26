@@ -1,7 +1,7 @@
 
-name: Floating Control v1.0.53 Signed Candidate
+name: Floating Control NLLB Signed Candidate
 
-# Build one signed APK for the current NLLB candidate on this branch.
+# Build signed APK after the one-tap installer and test changes.
 on:
   push:
     branches:
