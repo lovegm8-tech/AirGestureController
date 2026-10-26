@@ -1,5 +1,5 @@
 
-name: Floating Control NLLB v1.0.54 Signed Candidate
+name: Floating Control NLLB v1.0.55 Signed Candidate
 
 # Build signed APK after the one-tap installer and test changes.
 on:
@@ -48,6 +48,29 @@ jobs:
             "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar" \
             --output app/libs/sherpa-onnx-1.13.8.aar
           echo "633c24321e06b1fe79feafa03ea16cbc0f8a286641e2da3559bac91bdb13bd96  app/libs/sherpa-onnx-1.13.8.aar" | sha256sum -c -
+      - name: Keep official ONNX Runtime as the only libonnxruntime.so
+        run: |
+          python3 - <<'PY'
+          import os, zipfile, tempfile
+          path = 'app/libs/sherpa-onnx-1.13.8.aar'
+          fd, temporary = tempfile.mkstemp(suffix='.aar', dir='app/libs')
+          os.close(fd)
+          removed = []
+          try:
+              with zipfile.ZipFile(path, 'r') as source, zipfile.ZipFile(temporary, 'w') as target:
+                  for info in source.infolist():
+                      if info.filename.endswith('/libonnxruntime.so'):
+                          removed.append(info.filename)
+                          continue
+                      target.writestr(info, source.read(info.filename))
+              if not removed:
+                  raise RuntimeError('Sherpa AAR contains no runtime library to remove')
+              os.replace(temporary, path)
+              print('Removed duplicate sherpa ORT:', removed)
+          finally:
+              if os.path.exists(temporary):
+                  os.remove(temporary)
+          PY
       - name: Inspect sherpa and standalone ONNX Runtime native libraries
         run: |
           set -euo pipefail
@@ -61,6 +84,15 @@ jobs:
           fi
       - name: Run tests and assemble release APK
         run: gradle :app:testDebugUnitTest :app:assembleRelease --no-daemon
+      - name: Verify ONNX Runtime exported API in final APK
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/release/app-release-unsigned.apk
+          unzip -p "$APK" lib/arm64-v8a/libonnxruntime.so > "$RUNNER_TEMP/ort-final.so"
+          test -s "$RUNNER_TEMP/ort-final.so"
+          readelf -Ws "$RUNNER_TEMP/ort-final.so" | grep -q 'OrtGetApiBase'
+          unzip -l "$APK" | grep -F 'lib/arm64-v8a/libonnxruntime4j_jni.so'
+          echo "Verified official ONNX Runtime API and Java JNI library"
       - name: Verify SentencePiece native library packaged in APK
         run: |
           set -euo pipefail
