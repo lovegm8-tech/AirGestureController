@@ -1,5 +1,5 @@
 
-name: Floating Control NLLB Signed Candidate
+name: Floating Control NLLB v1.0.54 Signed Candidate
 
 # Build signed APK after the one-tap installer and test changes.
 on:
