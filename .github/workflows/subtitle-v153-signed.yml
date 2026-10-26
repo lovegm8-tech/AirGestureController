@@ -1,11 +1,11 @@
 
-name: Floating Control NLLB v1.0.56 Cache Fix Signed Candidate
+name: Floating Control NLLB v1.0.57 Japanese Quality Guard Signed Candidate
 
 # Build signed APK after the one-tap installer and test changes.
 on:
   push:
     branches:
-      - fix/nllb-empty-cache-buffer-v1-0-54
+      - fix/subtitle-nllb-ja-asr-diagnostics-v1-0-57
     paths:
       - '.github/workflows/subtitle-v153-signed.yml'
       - 'transferbeta/app/src/**'
