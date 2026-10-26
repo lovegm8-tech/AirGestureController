@@ -6,6 +6,9 @@ import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 import java.io.File;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.FloatBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
@@ -80,7 +83,11 @@ public final class NllbOnnxDecoder implements AutoCloseable {
         initializerInput.put("encoder_hidden_states", encoderState);
         try (OrtSession.Result cache = initializer.run(initializerInput);
              OnnxTensor mask = OnnxTensor.createTensor(env, new long[][] { attentionMask });
-             OnnxTensor emptyPast = OnnxTensor.createTensor(env, new float[1][HEADS][0][HEAD_SIZE]);
+             // Java multidimensional arrays cannot reliably encode an empty ONNX cache axis.
+             // Construct the zero-element tensor with an explicit shape instead.
+             OnnxTensor emptyPast = OnnxTensor.createTensor(env,
+                 ByteBuffer.allocateDirect(0).order(ByteOrder.nativeOrder()).asFloatBuffer(),
+                 new long[] {1, HEADS, 0, HEAD_SIZE});
              OnnxTensor zeroPreLogits = OnnxTensor.createTensor(env, new float[1][1][1024]);
              OnnxTensor zeroLmIds = OnnxTensor.createTensor(env, new long[1][2]);
              OnnxTensor embeddingMode = OnnxTensor.createTensor(env, new boolean[] { false });
