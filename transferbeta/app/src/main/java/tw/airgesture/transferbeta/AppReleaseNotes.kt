@@ -11,6 +11,7 @@ internal object AppReleaseNotes {
     internal data class Entry(val version: String, val summary: String)
 
     val entries: List<Entry> = listOf(
+        Entry("1.0.54", "NLLB 取代 Qwen 測試版：使用手機已下載模型進行 SHA-256 比對、正式安裝與英日推論測試；成功後才啟用 NLLB，失敗保留 ML Kit 翻譯。保留 NFC／Nearby／手勢功能，實機推論仍待驗證。"),
         Entry("1.0.53", "NLLB 離線翻譯開發版：加入 ONNX Runtime 模型載入檢查與 SHA-256 模型檔驗證，保留原有 NFC／Nearby／手勢及 ML Kit 翻譯。NLLB Tokenizer、實際推論與字幕整合尚未完成。"),
         Entry("1.0.52", "修正 Zipformer 長句持續累積，過濾日語孤立詞尾與標點；英日雙 AI 自動連動沿用 v1.0.51。"),
         Entry("1.0.51", "主畫面選英文自動啟用 Zipformer＋SenseVoice＋本地 Qwen；選日語自動啟用 ReazonSpeech＋SenseVoice＋本地 Qwen，保留韓語設定。未安裝模型顯示狀態，仍需 S26 Ultra 實機驗證。"),
