@@ -122,7 +122,7 @@ public final class NllbOnnxDecoder implements AutoCloseable {
                             float[][][] logits = (float[][][]) named(headResult, "logits").getValue();
                             predicted = argmax(logits[0][0]);
                         }
-                        if (predicted == 2) break;
+                        if (step > 0 && predicted == 2) break;
                         // The first decoder pass predicts a special token. Force target language
                         // as the next decoder input, matching reference NLLB cache decoding.
                         if (step == 0) {
