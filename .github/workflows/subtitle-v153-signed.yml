@@ -70,6 +70,18 @@ jobs:
           echo "Using matching sherpa-onnx bundled runtime; no AAR surgery."
       - name: Run tests and assemble release APK
         run: gradle :app:testDebugUnitTest :app:assembleRelease --no-daemon
+      - name: Replace packaged ONNX Runtime with sherpa-compatible binary
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/release/app-release-unsigned.apk
+          test -s "$APK"
+          mkdir -p "$RUNNER_TEMP/native-repack/lib/arm64-v8a"
+          cp "$RUNNER_TEMP/sherpa-native/libonnxruntime.so" "$RUNNER_TEMP/native-repack/lib/arm64-v8a/libonnxruntime.so"
+          zip -d "$APK" 'lib/arm64-v8a/libonnxruntime.so'
+          APK_ABS="$(realpath "$APK")"
+          (cd "$RUNNER_TEMP/native-repack" && zip -0 "$APK_ABS" lib/arm64-v8a/libonnxruntime.so)
+          unzip -t "$APK" | tail -n 1
+          echo "Replaced APK runtime deterministically before signing"
       - name: Verify native libraries in final APK
         run: |
           set -euo pipefail
