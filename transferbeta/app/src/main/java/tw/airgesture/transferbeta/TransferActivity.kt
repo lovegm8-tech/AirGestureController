@@ -472,8 +472,8 @@ class TransferActivity : ComponentActivity() {
                 asrModelStatus.text = "SenseVoice：" +
                     tw.airgesture.transferbeta.subtitle.SubtitleSenseVoiceModel.status(this)
             if (::aiModelStatus.isInitialized)
-                aiModelStatus.text = "本地 AI：" +
-                    tw.airgesture.transferbeta.subtitle.SubtitleLocalAi.status(this) +
+                aiModelStatus.text = "NLLB：" +
+                    tw.airgesture.transferbeta.subtitle.NllbOnnxRuntimeProbe.inspect(this) +
                     (if (SubtitleCaptureService.running) " · " + SubtitleCaptureService.lastAiStatus else "")
             modeDescription.text = modeLabel() +
                 (if (GlobalGestureService.isActive) " · 背景服務執行中" else " · 尚未啟動") +
@@ -830,48 +830,38 @@ class TransferActivity : ComponentActivity() {
             "SenseVoice 為實驗性離線 ASR，須先下載、驗證並安裝模型；辨識音訊不會上傳，未安裝時英文／日文可回退 Vosk。切換引擎需重啟翻譯。",
             voiceFallbackSwitch))
         aiLocalSwitch = Switch(this).apply {
-            isChecked = tw.airgesture.transferbeta.subtitle.SubtitleLocalAi.enabled(this@TransferActivity)
-            contentDescription = "Qwen 手機本地 AI 中文潤飾"
+            isChecked = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                .getBoolean("nllb_enabled", false)
+            contentDescription = "NLLB 本地 AI 翻譯"
             setOnCheckedChangeListener { _, enabled ->
                 if (updatingModeControls) return@setOnCheckedChangeListener
-                getSharedPreferences("floating_subtitle", MODE_PRIVATE).edit()
-                    .putBoolean("ai_local_enabled", enabled).apply()
+                val prefs = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                if (enabled) {
+                    val hashes = linkedMapOf<String, String>()
+                    for (name in tw.airgesture.transferbeta.subtitle.NllbOnnxRuntimeProbe.REQUIRED) {
+                        val hash = prefs.getString("nllb_sha256_" + name, null)
+                        if (hash != null) hashes[name] = hash
+                    }
+                    if (hashes.size != tw.airgesture.transferbeta.subtitle.NllbOnnxRuntimeProbe.REQUIRED.size ||
+                        !tw.airgesture.transferbeta.subtitle.NllbModelStore.hasCompleteReleaseGraphs(this@TransferActivity)) {
+                        updatingModeControls = true
+                        isChecked = false
+                        updatingModeControls = false
+                        flash("NLLB 尚未安裝及驗證，無法啟用；ML Kit 翻譯不受影響")
+                        return@setOnCheckedChangeListener
+                    }
+                }
+                prefs.edit().putBoolean("nllb_enabled", enabled).apply()
                 if (SubtitleCaptureService.running)
-                    flash("本地 AI 開關已修改，重新開啟懸浮翻譯後生效")
+                    flash("NLLB 設定已修改，重新開啟懸浮翻譯後生效")
                 refreshHome()
             }
         }
-        modePanel.addView(modeRow("本地 Qwen AI 中文潤飾（可關閉）",
-            "中文字幕先快速顯示，完整句由本地 Qwen 修正同一行；省電優化後最多約每 7 秒接受一次 AI 潤飾，避免影片播放時持續高負載。模型約 347 MB，可使用 Wi-Fi／手機熱點／行動數據下載，亦能從檔案匯入。",
+        modePanel.addView(modeRow("NLLB 本地 AI 翻譯（取代 Qwen）",
+            "ML Kit 先顯示中文字幕，NLLB 依英文／日文原文重新翻譯並更新同一句。模型須完整驗證後才能啟用；Qwen 已停用。",
             aiLocalSwitch))
-        aiModelStatus = text("檢查 AI 模型…", 13f)
+        aiModelStatus = text("NLLB：檢查模型…", 13f)
         modePanel.addView(aiModelStatus)
-        modePanel.addView(Button(this).apply {
-            text = "下載／重新下載本地 AI 模型（約 347 MB）"
-            isAllCaps = false
-            setOnClickListener {
-                val state = tw.airgesture.transferbeta.subtitle.SubtitleLocalAi.download(this@TransferActivity)
-                flash(state)
-                refreshHome()
-            }
-        })
-        modePanel.addView(Button(this).apply {
-            text = "從手機檔案匯入 Qwen AI 模型（離線）"
-            isAllCaps = false
-            setOnClickListener {
-                if (SubtitleCaptureService.running) {
-                    flash("先關閉懸浮翻譯，再從檔案選擇 .litertlm 模型")
-                } else aiModelImportPicker.launch("*/*")
-            }
-        })
-        modePanel.addView(Button(this).apply {
-            text = "重新檢查本地 AI 下載狀態"
-            isAllCaps = false
-            setOnClickListener {
-                flash(tw.airgesture.transferbeta.subtitle.SubtitleLocalAi.status(this@TransferActivity))
-                refreshHome()
-            }
-        })
         modePanel.addView(text("NLLB 離線翻譯測試（實驗功能；不影響現有 ML Kit）", 17f))
         modePanel.addView(Button(this).apply {
             text = "下載 NLLB ONNX 模型（約 995 MB；暫存待驗證）"
