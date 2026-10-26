@@ -18,7 +18,7 @@ android {
         // S26 Ultra / S25 are arm64-v8a. Remove unused x86/x86_64/32-bit
         // copies of MediaPipe and Vosk without stripping needed functionality.
         ndk { abiFilters += setOf("arm64-v8a") }
-        externalNativeBuild { cmake { arguments += listOf("-DSENTENCEPIECE_SOURCE_DIR=${project.rootDir}/native-deps/sentencepiece") } }
+        externalNativeBuild { cmake { arguments += listOf("-DSENTENCEPIECE_SOURCE_DIR=${project.rootDir}/native-deps/sentencepiece", "-DANDROID_STL=c++_shared"); targets += setOf("nllb_sentencepiece") } }
     }
     externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }
     buildTypes { release { isMinifyEnabled = false } }
