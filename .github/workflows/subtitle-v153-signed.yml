@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   signed-release:
-    if: github.ref == 'refs/heads/feature/subtitle-nllb-evaluation-v1-0-53' && github.event.repository.full_name == 'lovegm8-tech/AirGestureController'
+    # Branch-scoped push trigger already limits this test build.
     runs-on: ubuntu-latest
     timeout-minutes: 50
     defaults:
