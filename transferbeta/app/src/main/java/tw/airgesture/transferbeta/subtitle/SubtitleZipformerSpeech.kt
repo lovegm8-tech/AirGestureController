@@ -124,7 +124,7 @@ class SubtitleZipformerSpeech(
                 stream.release()
             }
         } catch (error: Throwable) {
-            callback.onStatus("Zipformer 無法啟動：" + error.javaClass.simpleName + "；SenseVoice 可繼續運作")
+            callback.onStatus("Zipformer 無法啟動：" + (error.javaClass.simpleName + ": " + (error.message ?: error.cause?.message ?: "no detail").take(240)) + "；SenseVoice 可繼續運作")
         } finally {
             running.set(false)
             recognizer?.release()
