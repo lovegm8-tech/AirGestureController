@@ -215,6 +215,8 @@ public final class SubtitleCaptureService extends Service {
     private void refineWithNllb(String original, String quickChinese,
                                 java.util.function.Consumer<String> apply) {
         if (!running || original == null || original.trim().isEmpty()) return;
+        if (!getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                .getBoolean("nllb_enabled", false)) return;
         if (nllbLoadAttempted && nllbEngine == null) return;
         java.util.Map<String, String> hashes = trustedNllbHashes();
         if (hashes == null) {
