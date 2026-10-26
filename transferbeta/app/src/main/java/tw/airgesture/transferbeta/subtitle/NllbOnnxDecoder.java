@@ -20,6 +20,7 @@ public final class NllbOnnxDecoder implements AutoCloseable {
     private static final int HEADS = 16;
     private static final int HEAD_SIZE = 64;
     private final OrtEnvironment env;
+    private static final int EOS = 2;
     private final OrtSession decoder;
     private final OrtSession initializer;
     private final OrtSession embeddingAndHead;
@@ -72,7 +73,7 @@ public final class NllbOnnxDecoder implements AutoCloseable {
             throws OrtException {
         if (encoderState == null || attentionMask == null || attentionMask.length == 0)
             throw new IllegalArgumentException("Missing encoder state or attention mask");
-        if (maxTokens < 1 || maxTokens > 256)
+        if (maxTokens < 2 || maxTokens > 256)
             throw new IllegalArgumentException("maxTokens must be 1..256");
 
         Map<String, OnnxTensor> initializerInput = new HashMap<>();
@@ -86,7 +87,7 @@ public final class NllbOnnxDecoder implements AutoCloseable {
              OnnxTensor lmMode = OnnxTensor.createTensor(env, new boolean[] { true })) {
             ArrayList<Integer> output = new ArrayList<>();
             OrtSession.Result previous = null;
-            int inputId = 2; // NLLB decoder start
+            int inputId = EOS; // NLLB decoder start
             try {
                 for (int step = 0; step < maxTokens; step++) {
                     try (OnnxTensor input = OnnxTensor.createTensor(env, new long[][] {{inputId}})) {
@@ -122,9 +123,9 @@ public final class NllbOnnxDecoder implements AutoCloseable {
                             float[][][] logits = (float[][][]) named(headResult, "logits").getValue();
                             predicted = argmax(logits[0][0]);
                         }
-                        if (step > 0 && predicted == 2) break;
-                        // The first decoder pass predicts a special token. Force target language
-                        // as the next decoder input, matching reference NLLB cache decoding.
+                        if (step > 0 && predicted == EOS) break;
+                        // The initial decoder-start pass is constrained to the target
+                        // language token. Its predicted logits must not be emitted.
                         if (step == 0) {
                             inputId = NllbTokenCodec.targetTraditionalChineseId();
                         } else {
