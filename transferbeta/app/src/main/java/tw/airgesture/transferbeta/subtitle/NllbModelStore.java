@@ -27,6 +27,23 @@ public final class NllbModelStore {
         sizes.put("NLLB_encoder.onnx", 266487014L);
         RELEASE_ASSET_SIZES = Collections.unmodifiableMap(sizes);
     }
+    /**
+     * Computes a downloaded file's fingerprint for display and comparison with a
+     * trusted publisher digest. A locally computed hash is NOT an authenticity proof.
+     */
+    public static String sha256(File file) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        try (FileInputStream in = new FileInputStream(file)) {
+            byte[] buffer = new byte[65536];
+            int read;
+            while ((read = in.read(buffer)) != -1) digest.update(buffer, 0, read);
+        }
+        StringBuilder hex = new StringBuilder(64);
+        for (byte b : digest.digest())
+            hex.append(String.format(java.util.Locale.ROOT, "%02x", b & 255));
+        return hex.toString();
+    }
+
     /** Completeness only; SHA-256 verification remains mandatory before use. */
     public static boolean hasCompleteReleaseGraphs(Context context) {
         File dir = directory(context);
