@@ -872,6 +872,62 @@ class TransferActivity : ComponentActivity() {
                 refreshHome()
             }
         })
+        modePanel.addView(text("NLLB 離線翻譯測試（實驗功能；不影響現有 ML Kit）", 17f))
+        modePanel.addView(Button(this).apply {
+            text = "檢查 NLLB 模型檔案及 SHA-256"
+            isAllCaps = false
+            setOnClickListener {
+                isEnabled = false
+                val button = this
+                io.execute {
+                    val report = try {
+                        tw.airgesture.transferbeta.subtitle.NllbDeviceDiagnostics.inventory(
+                            applicationContext, null)
+                    } catch (error: Exception) {
+                        "檢查失敗：${error.javaClass.simpleName}: ${error.message}"
+                    }
+                    runOnUiThread {
+                        button.isEnabled = true
+                        AlertDialog.Builder(this@TransferActivity)
+                            .setTitle("NLLB 模型檢查")
+                            .setMessage(report)
+                            .setPositiveButton("確定", null)
+                            .show()
+                    }
+                }
+            }
+        })
+        modePanel.addView(Button(this).apply {
+            text = "NLLB 英文／日文實際推論測試"
+            isAllCaps = false
+            setOnClickListener {
+                if (SubtitleCaptureService.running) {
+                    flash("請先停止懸浮翻譯，再執行大型模型推論測試")
+                } else {
+                    isEnabled = false
+                    val button = this
+                    flash("NLLB 測試開始，請稍候")
+                    io.execute {
+                        val prefs = getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                        val hashes = linkedMapOf<String, String>()
+                        for (name in tw.airgesture.transferbeta.subtitle.NllbOnnxRuntimeProbe.REQUIRED) {
+                            val hash = prefs.getString("nllb_sha256_" + name, null)
+                            if (hash != null) hashes[name] = hash
+                        }
+                        val report = tw.airgesture.transferbeta.subtitle.NllbDeviceDiagnostics
+                            .runTranslationSmokeTest(applicationContext, hashes, null)
+                        runOnUiThread {
+                            button.isEnabled = true
+                            AlertDialog.Builder(this@TransferActivity)
+                                .setTitle("NLLB 英文／日文推論結果")
+                                .setMessage(report)
+                                .setPositiveButton("確定", null)
+                                .show()
+                        }
+                    }
+                }
+            }
+        })
         modePanel.addView(text("OCR 備用：語音不支援或辨識不到時可點「譯」小球→「框選字幕位置」，手動定位畫面文字。", 13f))
         modePanel.addView(Button(this).apply {
             text = "重新框選字幕範圍"
