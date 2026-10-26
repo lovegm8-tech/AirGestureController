@@ -43,6 +43,7 @@ jobs:
           set -euo pipefail
           mkdir -p native-deps
           git clone --depth 1 --branch v0.2.0 https://github.com/google/sentencepiece.git native-deps/sentencepiece
+          test "$(git -C native-deps/sentencepiece rev-parse HEAD)" = "17d7580d6407802f85855d2cc9190634e2c95624"
           test -f native-deps/sentencepiece/src/sentencepiece_processor.h
           git -C native-deps/sentencepiece rev-parse HEAD
       - name: Download pinned sherpa-onnx AAR
