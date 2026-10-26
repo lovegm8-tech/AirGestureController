@@ -931,6 +931,50 @@ class TransferActivity : ComponentActivity() {
         modePanel.addView(aiModelStatus)
         modePanel.addView(text("NLLB 離線翻譯測試（實驗功能；不影響現有 ML Kit）", 17f))
         modePanel.addView(Button(this).apply {
+            text = "安裝已下載的 NLLB 並測試英文／日文翻譯"
+            isAllCaps = false
+            setOnClickListener {
+                if (SubtitleCaptureService.running) {
+                    flash("請先關閉懸浮翻譯，再安裝 NLLB")
+                } else {
+                    isEnabled = false
+                    val button = this
+                    val status = TextView(this@TransferActivity).apply {
+                        text = "正在檢查手機內已下載的模型…"
+                        setPadding(24, 16, 24, 16)
+                    }
+                    val dialog = AlertDialog.Builder(this@TransferActivity)
+                        .setTitle("NLLB 自動安裝與推論測試")
+                        .setView(status)
+                        .setPositiveButton("執行中", null)
+                        .create()
+                    dialog.show()
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = false
+                    io.execute {
+                        val result = try {
+                            tw.airgesture.transferbeta.subtitle.NllbDeviceInstaller
+                                .installAndTest(applicationContext) { message ->
+                                    runOnUiThread { status.text = message }
+                                }
+                        } catch (error: Throwable) {
+                            "NLLB 安裝失敗：${error.javaClass.simpleName}: ${error.message}。原本的 ML Kit 翻譯不受影響。"
+                        }
+                        runOnUiThread {
+                            button.isEnabled = true
+                            dialog.setTitle("NLLB 安裝與測試結果")
+                            status.text = result
+                            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.apply {
+                                text = "關閉"
+                                isEnabled = true
+                            }
+                            refreshHome()
+                        }
+                    }
+                }
+            }
+        })
+
+        modePanel.addView(Button(this).apply {
             text = "下載官方 NLLB Tokenizer（4.85 MB；來源已固定）"
             isAllCaps = false
             setOnClickListener {
