@@ -248,7 +248,17 @@ public final class SubtitleCaptureService extends Service {
                     apply.accept(improved);
                 });
             } catch (Exception | LinkageError error) {
-                lastAiStatus = "NLLB 尚不可用，維持 ML Kit：" + error.getClass().getSimpleName();
+                StringBuilder reason = new StringBuilder();
+                Throwable current = error;
+                for (int depth = 0; current != null && depth < 4; depth++, current = current.getCause()) {
+                    if (depth > 0) reason.append(" ← ");
+                    reason.append(current.getClass().getSimpleName());
+                    if (current.getMessage() != null && !current.getMessage().isEmpty()) {
+                        reason.append(": ").append(current.getMessage().replace('\n', ' ').replace('\r', ' '));
+                    }
+                }
+                lastAiStatus = "NLLB 尚不可用，維持 ML Kit：" + reason.toString();
+                android.util.Log.e("FloatingNLLB", "NLLB native/Java initialization failed", error);
             }
         });
     }
