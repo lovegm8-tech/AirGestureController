@@ -177,7 +177,7 @@ class SubtitleSenseVoiceSpeech(
             }
         } catch (error: Throwable) {
             failed = true
-            callback.onStatus("SenseVoice 無法啟動：" + error.javaClass.simpleName + "；使用 OCR 備援")
+            callback.onStatus("SenseVoice 無法啟動：" + (error.javaClass.simpleName + ": " + (error.message ?: error.cause?.message ?: "no detail").take(240)) + "；使用 OCR 備援")
         } finally {
             ready.countDown()
             try { asr?.release() } catch (_: Throwable) {}
@@ -227,7 +227,7 @@ class SubtitleSenseVoiceSpeech(
                 }
             }
         } catch (error: Exception) {
-            if (alive.get()) callback.onStatus("SenseVoice 無法擷取播放音訊：" + error.javaClass.simpleName)
+            if (alive.get()) callback.onStatus("SenseVoice 無法擷取播放音訊：" + (error.javaClass.simpleName + ": " + (error.message ?: error.cause?.message ?: "no detail").take(240)))
         } finally {
             capture = null
             if (record != null) {
