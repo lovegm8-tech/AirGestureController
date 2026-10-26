@@ -1,9 +1,13 @@
 
 name: Floating Control v1.0.53 Signed Candidate
 
-# Signed APK builds are manual during NLLB development.
-# Commit changes without triggering a costly release build.
+# Build one signed APK for the current NLLB candidate on this branch.
 on:
+  push:
+    branches:
+      - feature/subtitle-nllb-evaluation-v1-0-53
+    paths:
+      - '.github/workflows/subtitle-v153-signed.yml'
   workflow_dispatch:
 
 permissions:
