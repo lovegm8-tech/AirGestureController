@@ -163,6 +163,33 @@ class TransferActivity : ComponentActivity() {
             }
         }
 
+    private val nllbManifestPicker =
+        registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            if (uri != null) {
+                if (SubtitleCaptureService.running) {
+                    flash("請先關閉懸浮翻譯再安裝模型")
+                } else {
+                    flash("正在驗證並安裝 NLLB 模型，請稍候")
+                    io.execute {
+                        val result = try {
+                            tw.airgesture.transferbeta.subtitle.NllbManifestInstaller
+                                .install(applicationContext, uri)
+                        } catch (error: Exception) {
+                            "NLLB 安裝失敗：${error.javaClass.simpleName}: ${error.message}"
+                        }
+                        runOnUiThread {
+                            AlertDialog.Builder(this@TransferActivity)
+                                .setTitle("NLLB 模型安裝結果")
+                                .setMessage(result)
+                                .setPositiveButton("確定", null)
+                                .show()
+                            refreshHome()
+                        }
+                    }
+                }
+            }
+        }
+
     private val nllbTokenizerPicker =
         registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
             if (uri != null) {
@@ -903,6 +930,16 @@ class TransferActivity : ComponentActivity() {
         aiModelStatus = text("NLLB：檢查模型…", 13f)
         modePanel.addView(aiModelStatus)
         modePanel.addView(text("NLLB 離線翻譯測試（實驗功能；不影響現有 ML Kit）", 17f))
+        modePanel.addView(Button(this).apply {
+            text = "匯入可信 SHA-256 清單並安裝 NLLB"
+            isAllCaps = false
+            setOnClickListener {
+                if (SubtitleCaptureService.running) flash("請先停止懸浮翻譯")
+                else nllbManifestPicker.launch("application/json")
+            }
+        })
+        modePanel.addView(text("安全提醒：SHA-256 清單必須從可信發布者獨立取得並核對；不能直接使用 App 自己計算的雜湊值當成可信清單。", 12f))
+
         modePanel.addView(Button(this).apply {
             text = "從手機匯入 NLLB SentencePiece Tokenizer（待驗證）"
             isAllCaps = false
