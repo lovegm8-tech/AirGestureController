@@ -1,0 +1,52 @@
+name: NLLB isolated ONNX smoke test (no Android APK)
+on:
+  push:
+    branches: [fix/sherpa-ort-native-link-v1-0-58]
+    paths: [.github/workflows/nllb-isolated-smoke.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  nllb-onnx:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install isolated NLLB test runtime
+        run: python -m pip install --disable-pip-version-check 'onnxruntime==1.20.1' 'onnx==1.17.0' 'numpy<2'
+      - name: Download real NLLB encoder and decoder graphs
+        run: |
+          python - <<'PY'
+          import pathlib, urllib.request
+          base="https://github.com/niedev/RTranslator/releases/download/2.0.0/"
+          sizes={"NLLB_encoder.onnx":266487014,"NLLB_decoder.onnx":179109694}
+          pathlib.Path("models").mkdir(exist_ok=True)
+          for name,expected in sizes.items():
+              dest=pathlib.Path("models")/name
+              req=urllib.request.Request(base+name,headers={"User-Agent":"NLLB-Isolated-Smoke/1.0"})
+              with urllib.request.urlopen(req,timeout=120) as response, dest.open("wb") as output:
+                  while block:=response.read(1024*1024): output.write(block)
+              assert dest.stat().st_size==expected,(name,dest.stat().st_size,expected)
+              print("downloaded",name,dest.stat().st_size,flush=True)
+          PY
+      - name: Load actual NLLB ONNX graphs independently of sherpa
+        run: |
+          python - <<'PY'
+          import json, pathlib, onnxruntime as ort
+          result={"runtime":ort.__version__,"models":{}}
+          opts=ort.SessionOptions()
+          opts.intra_op_num_threads=2
+          for name in ("NLLB_encoder.onnx","NLLB_decoder.onnx"):
+              session=ort.InferenceSession(str(pathlib.Path("models")/name),sess_options=opts,providers=["CPUExecutionProvider"])
+              entry={"inputs":[{"name":x.name,"shape":x.shape,"type":x.type} for x in session.get_inputs()],"outputs":[{"name":x.name,"shape":x.shape,"type":x.type} for x in session.get_outputs()],"providers":session.get_providers()}
+              result["models"][name]=entry
+              print(json.dumps({name:entry},ensure_ascii=False),flush=True)
+          pathlib.Path("nllb-smoke-report.json").write_text(json.dumps(result,indent=2,ensure_ascii=False))
+          print("PASS: both real NLLB ONNX sessions loaded in clean Linux ORT 1.20.1",flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nllb-isolated-smoke-report
+          path: nllb-smoke-report.json
+          if-no-files-found: warn
