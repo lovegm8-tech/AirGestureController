@@ -75,7 +75,10 @@ jobs:
           mkdir -p "$DIR"
           # The Microsoft ORT library must retain the conventional name because
           # libonnxruntime4j_jni.so resolves OrtGetApiBase against it.
-          unzip -p "$APK" lib/arm64-v8a/libonnxruntime.so > "$DIR/libonnxruntime.so"
+          ORT_AAR="$(find "$HOME/.gradle/caches/modules-2/files-2.1/com.microsoft.onnxruntime/onnxruntime-android/1.20.0" -name '*.aar' -print -quit)"
+          test -n "$ORT_AAR" && test -s "$ORT_AAR"
+          unzip -p "$ORT_AAR" jni/arm64-v8a/libonnxruntime.so > "$DIR/libonnxruntime.so"
+          test -s "$DIR/libonnxruntime.so"
           readelf -Ws "$DIR/libonnxruntime.so" | awk '$8 == "OrtGetApiBase" && $7 != "UND" && $5 == "GLOBAL" && $6 == "DEFAULT" {found=1} END {exit !found}' || {
             echo "Gradle selected sherpa ORT instead of Microsoft ORT; cannot build dual runtime safely" >&2
             exit 1
