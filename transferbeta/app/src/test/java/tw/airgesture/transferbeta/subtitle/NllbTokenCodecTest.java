@@ -19,6 +19,7 @@ public final class NllbTokenCodecTest {
         assertEquals(256001 + 78, NllbTokenCodec.languageId("jpn_Jpan"));
         assertEquals(256001 + 200, NllbTokenCodec.languageId("zho_Hant"));
         assertEquals(NllbTokenCodec.languageId("zho_Hant"), NllbTokenCodec.targetTraditionalChineseId());
+        assertEquals(256200, NllbTokenCodec.targetSimplifiedChineseId());
     }
 
     @Test public void inputAddsLanguageEosAndAttentionMask() throws Exception {

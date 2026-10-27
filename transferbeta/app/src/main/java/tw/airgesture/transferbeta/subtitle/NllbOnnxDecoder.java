@@ -134,7 +134,7 @@ public final class NllbOnnxDecoder implements AutoCloseable {
                         // The initial decoder-start pass is constrained to the target
                         // language token. Its predicted logits must not be emitted.
                         if (step == 0) {
-                            inputId = NllbTokenCodec.targetTraditionalChineseId();
+                            inputId = NllbTokenCodec.targetSimplifiedChineseId();
                         } else {
                             output.add(predicted);
                             inputId = predicted;

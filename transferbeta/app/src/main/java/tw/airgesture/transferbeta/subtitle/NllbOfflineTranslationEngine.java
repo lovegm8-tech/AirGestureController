@@ -1,6 +1,7 @@
 package tw.airgesture.transferbeta.subtitle;
 
 import android.content.Context;
+import android.icu.text.Transliterator;
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtSession;
 import java.io.File;
@@ -70,7 +71,8 @@ public final class NllbOfflineTranslationEngine implements OfflineTranslationEng
             OnnxTensor hidden = (OnnxTensor) encoded.get("last_hidden_state")
                 .orElseThrow(() -> new IllegalStateException("Encoder missing last_hidden_state"));
             int[] outputIds = decoder.generate(hidden, input.attentionMask, limit);
-            String translated = NllbTokenCodec.decode(tokenizer, outputIds);
+            String simplified = NllbTokenCodec.decode(tokenizer, outputIds);
+            String translated = Transliterator.getInstance("Simplified-Traditional").transliterate(simplified);
             if (translated == null || translated.trim().isEmpty())
                 throw new IllegalStateException("NLLB produced empty translation");
             return new Result(sourceText, translated,
