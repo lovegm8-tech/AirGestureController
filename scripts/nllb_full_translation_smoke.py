@@ -115,6 +115,10 @@ cases = [
     ("Where are you going?", 256047),
     ("気をつけてね。", 256079),
     ("学校に行きます。", 256079),
+    ("お元気ですか？", 256079),
+    ("ジュースを飲みますか？", 256079),
+    ("ありがとうございます。", 256079),
+    ("気をつけます。", 256079),
 ]
 results = []
 # Compare prefix vs suffix source framing and Chinese target variants.
@@ -129,4 +133,27 @@ for text, language in cases:
             print("TRANSLATION", json.dumps(item, ensure_ascii=False), flush=True)
             assert item["output"].strip(), "Empty translation: " + text
 pathlib.Path("nllb-translation-report.json").write_text(json.dumps(results, ensure_ascii=False, indent=2) + chr(10))
-print("PASS: 16 NLLB decoding configurations executed; translation quality requires manual comparison", flush=True)
+# Quality regression: surface bad translations as structured failures, not just nonempty output.
+# The Japanese examples are taken from actual S26 Ultra device diagnostics.
+# Compare simplified output first: previous tests showed traditional-target
+# decoding can produce unrelated text for otherwise straightforward phrases.
+quality_cases = {
+    "学校に行きます。": ("学校", "学校"),
+    "お元気ですか？": ("好", "好"),
+    "ジュースを飲みますか？": ("果汁", "果汁"),
+    "ありがとうございます。": ("谢谢", "謝謝"),
+    "気をつけます。": ("注意", "小心"),
+}
+quality = []
+for source, (simplified_keyword, traditional_keyword) in quality_cases.items():
+    candidates = [r for r in results if r["input"] == source and r["framing"] == "suffix"]
+    hans = next(r["output"] for r in candidates if r["target_id"] == 256200)
+    hant = next(r["output"] for r in candidates if r["target_id"] == 256201)
+    quality.append({"source": source, "hans": hans, "hant": hant,
+                    "hans_keyword_pass": simplified_keyword in hans,
+                    "hant_keyword_pass": traditional_keyword in hant})
+    print("QUALITY", json.dumps(quality[-1], ensure_ascii=False), flush=True)
+pathlib.Path("nllb-quality-report.json").write_text(json.dumps(quality, ensure_ascii=False, indent=2) + "\\n")
+print(f"PASS: {len(results)} real NLLB inference configurations; quality report contains {len(quality)} Japanese device regression cases", flush=True)
+# This is a diagnostic baseline, not a claim that translations are accurate.
+
