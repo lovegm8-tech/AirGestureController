@@ -99,5 +99,6 @@ jobs:
           name: nllb-isolated-smoke-report
           path: |
             nllb-smoke-report.json
-            nllb-forward-report.json\n            nllb-translation-report.json
+            nllb-forward-report.json
+            nllb-translation-report.json
           if-no-files-found: warn
