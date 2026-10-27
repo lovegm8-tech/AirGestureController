@@ -11,6 +11,7 @@ internal object AppReleaseNotes {
     internal data class Entry(val version: String, val summary: String)
 
     val entries: List<Entry> = listOf(
+        Entry("1.0.61", "隔離 NLLB Microsoft ONNX Runtime 與 sherpa-onnx 原生核心，分別指定 ELF 相依函式庫並於 GitHub 檢查匯出符號；保留 ML Kit、語音辨識及 NFC／Nearby／手勢。待實機驗證。"),
         Entry("1.0.60", "NLLB ONNX Java JNI 新增對同包原生核心的明確動態連結，修正 OrtGetApiBase 找不到的載入問題候選；保留 SenseVoice／Zipformer／ReazonSpeech、ML Kit、NFC／Nearby／手勢。待實機驗證。"),
         Entry("1.0.59", "NLLB 啟動失敗時記錄完整 Java／JNI 例外原因與底層錯誤，保留 ML Kit 即時翻譯及已恢復的 SenseVoice／Zipformer／ReazonSpeech；NFC／Nearby／手勢維持原功能。NLLB 尚待實機診斷。"),
         Entry("1.0.58", "修正 sherpa-onnx 語音 AI 原生 ONNX Runtime 連結，新增 APK 原生函式庫一致性檢查；保留 NFC／Nearby／手勢、NLLB 日文防護與 ML Kit 備援。語音推論待實機驗證。"),
