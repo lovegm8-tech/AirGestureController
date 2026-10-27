@@ -42,13 +42,13 @@ def run(key, inputs):
     session = sessions[key]
     return dict(zip([x.name for x in session.get_outputs()], session.run(None, inputs)))
 
-def encode_ids(text, source):
+def encode_ids(text, source, framing="prefix"):
     pieces = sp.encode(text, out_type=int)
-    ids = [source]
+    ids = [source] if framing == "prefix" else []
     for piece in pieces:
         val = piece + 1
         ids.append({1: 3, 2: 0, 3: 2}.get(val, val))
-    return np.asarray([ids + [2]], dtype=np.int64)
+    if framing == "suffix":\n        ids.extend([2, source])\n    else:\n        ids.append(2)\n    return np.asarray([ids], dtype=np.int64)
 
 def detokenize(tokens):
     pieces = []
@@ -60,8 +60,8 @@ def detokenize(tokens):
         pieces.append({3: 0, 1: 3}.get(val, val - 1) if val > 0 else 0)
     return sp.decode(pieces)
 
-def translate(text, source, limit=32):
-    ids = encode_ids(text, source)
+def translate(text, source, limit=32, target=256201, framing="prefix", start_token=2):
+    ids = encode_ids(text, source, framing)
     mask = np.ones_like(ids)
     emb = run("embed", {
         "input_ids": ids,
@@ -71,7 +71,7 @@ def translate(text, source, limit=32):
     hidden = run("encoder", {"input_ids": ids, "attention_mask": mask, "embed_matrix": emb})["last_hidden_state"]
     cache = run("cache", {"encoder_hidden_states": hidden})
     previous = None
-    current_id = 2
+    current_id = start_token
     output = []
     for step in range(limit):
         token = np.asarray([[current_id]], dtype=np.int64)
@@ -96,7 +96,7 @@ def translate(text, source, limit=32):
         })["logits"]
         predicted = int(np.argmax(logits[0, -1]))
         if step == 0:
-            current_id = 256201  # zho_Hant from Android NllbTokenCodec
+            current_id = target  # forced target-language token
         elif predicted == 2:
             break
         else:
@@ -104,7 +104,7 @@ def translate(text, source, limit=32):
             current_id = predicted
         if step < 3:
             print("generation step", step, "predicted", predicted, flush=True)
-    return {"input": text, "source_id": source, "output": detokenize(output), "token_ids": output, "steps": step + 1}
+    return {"input": text, "source_id": source, "target_id": target, "framing": framing, "start_token": start_token, "output": detokenize(output), "token_ids": output, "steps": step + 1}
 
 cases = [
     ("You have to suffer.", 256047),
@@ -113,12 +113,16 @@ cases = [
     ("学校に行きます。", 256079),
 ]
 results = []
+# Compare prefix vs suffix source framing and Chinese target variants.
+# Do not silently count a nonempty mistranslation as quality success.
 for text, language in cases:
-    start = time.monotonic()
-    item = translate(text, language)
-    item["seconds"] = round(time.monotonic() - start, 2)
-    results.append(item)
-    print("TRANSLATION", json.dumps(item, ensure_ascii=False), flush=True)
-    assert item["output"].strip(), "Empty translation: " + text
-pathlib.Path("nllb-translation-report.json").write_text(json.dumps(results, ensure_ascii=False, indent=2) + "\n")
-print("PASS: NLLB end-to-end generated nonempty outputs for English and Japanese", flush=True)
+    for framing in ("prefix", "suffix"):
+        for target in (256201, 256200):
+            start = time.monotonic()
+            item = translate(text, language, target=target, framing=framing)
+            item["seconds"] = round(time.monotonic() - start, 2)
+            results.append(item)
+            print("TRANSLATION", json.dumps(item, ensure_ascii=False), flush=True)
+            assert item["output"].strip(), "Empty translation: " + text
+pathlib.Path("nllb-translation-report.json").write_text(json.dumps(results, ensure_ascii=False, indent=2) + "\\n")
+print("PASS: 16 NLLB decoding configurations executed; translation quality requires manual comparison", flush=True)
