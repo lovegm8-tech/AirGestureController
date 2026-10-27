@@ -65,7 +65,12 @@ jobs:
           unzip -p app/libs/sherpa-onnx-1.13.8.aar jni/arm64-v8a/libsherpa-onnx-jni.so > "$RUNNER_TEMP/sherpa-native/libsherpa-onnx-jni.so"
           test -s "$RUNNER_TEMP/sherpa-native/libonnxruntime.so"
           test -s "$RUNNER_TEMP/sherpa-native/libsherpa-onnx-jni.so"
-          readelf -Ws "$RUNNER_TEMP/sherpa-native/libonnxruntime.so" | grep -q 'OrtGetApiBase'
+          # An UND symbol is only a reference, not an exported implementation.
+          # Require a defined, globally visible API entry point.
+          readelf -Ws "$RUNNER_TEMP/sherpa-native/libonnxruntime.so" | awk '$8 == "OrtGetApiBase" && $7 != "UND" && $5 == "GLOBAL" && $6 == "DEFAULT" { found=1 } END { exit !found }' || {
+            echo "Sherpa runtime does NOT export a defined OrtGetApiBase; Java ONNX JNI cannot link against it." >&2
+            exit 1
+          }
           readelf -d "$RUNNER_TEMP/sherpa-native/libsherpa-onnx-jni.so" | grep -E 'NEEDED|onnxruntime'
           echo "Using matching sherpa-onnx bundled runtime; no AAR surgery."
       - name: Run tests and assemble release APK
@@ -107,7 +112,10 @@ jobs:
           unzip -p "$APK" lib/arm64-v8a/libonnxruntime.so > "$RUNNER_TEMP/ort-final.so"
           test -s "$RUNNER_TEMP/ort-final.so"
           cmp "$RUNNER_TEMP/ort-final.so" "$RUNNER_TEMP/sherpa-native/libonnxruntime.so" || { echo "Wrong runtime selected by Gradle packaging"; exit 1; }
-          readelf -Ws "$RUNNER_TEMP/ort-final.so" | grep -q 'OrtGetApiBase'
+          readelf -Ws "$RUNNER_TEMP/ort-final.so" | awk '$8 == "OrtGetApiBase" && $7 != "UND" && $5 == "GLOBAL" && $6 == "DEFAULT" { found=1 } END { exit !found }' || {
+            echo "Packaged ONNX runtime does not export OrtGetApiBase" >&2
+            exit 1
+          }
           unzip -l "$APK" | grep -F 'lib/arm64-v8a/libsherpa-onnx-jni.so'
           unzip -l "$APK" | grep -F 'lib/arm64-v8a/libonnxruntime4j_jni.so'
           echo "Verified ONNX API, sherpa JNI, and Java ONNX JNI are packaged"
