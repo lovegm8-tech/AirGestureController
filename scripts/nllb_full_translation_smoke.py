@@ -128,6 +128,5 @@ for text, language in cases:
             results.append(item)
             print("TRANSLATION", json.dumps(item, ensure_ascii=False), flush=True)
             assert item["output"].strip(), "Empty translation: " + text
-pathlib.Path("nllb-translation-report.json").write_text(json.dumps(results, ensure_ascii=False, indent=2) + "
-")
+pathlib.Path("nllb-translation-report.json").write_text(json.dumps(results, ensure_ascii=False, indent=2) + chr(10))
 print("PASS: 16 NLLB decoding configurations executed; translation quality requires manual comparison", flush=True)
