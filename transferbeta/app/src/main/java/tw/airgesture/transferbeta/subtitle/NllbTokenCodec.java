@@ -91,5 +91,7 @@ public final class NllbTokenCodec {
         return processor.decode(Arrays.copyOf(pieces, count));
     }
 
+    public static int targetSimplifiedChineseId() { return languageId("zho_Hans"); }
+
     public static int targetTraditionalChineseId() { return languageId("zho_Hant"); }
 }
