@@ -23,7 +23,7 @@ public final class NllbTokenCodecTest {
 
     @Test public void inputAddsLanguageEosAndAttentionMask() throws Exception {
         NllbTokenCodec.Input input = NllbTokenCodec.encode(FAKE, "eng_Latn", "hello");
-        assertArrayEquals(new long[] { NllbTokenCodec.languageId("eng_Latn"), 5, 11, 3, 0, 2, 2 }, input.ids);
+        assertArrayEquals(new long[] { 5, 11, 3, 0, 2, 2, NllbTokenCodec.languageId("eng_Latn") }, input.ids);
         assertArrayEquals(new long[] { 1, 1, 1, 1, 1, 1, 1 }, input.attentionMask);
     }
 
