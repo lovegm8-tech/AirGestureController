@@ -93,5 +93,7 @@ jobs:
         if: always()
         with:
           name: nllb-isolated-smoke-report
-          path: |\n            nllb-smoke-report.json\n            nllb-forward-report.json
+          path: |
+            nllb-smoke-report.json
+            nllb-forward-report.json
           if-no-files-found: warn
