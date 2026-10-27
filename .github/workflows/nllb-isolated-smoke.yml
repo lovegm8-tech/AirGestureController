@@ -9,7 +9,7 @@ permissions:
 jobs:
   nllb-onnx:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
       - name: Install isolated NLLB test runtime
@@ -19,7 +19,7 @@ jobs:
           python - <<'PY'
           import pathlib, urllib.request
           base="https://github.com/niedev/RTranslator/releases/download/2.0.0/"
-          sizes={"NLLB_encoder.onnx":266487014,"NLLB_decoder.onnx":179109694}
+          sizes={"NLLB_encoder.onnx":266487014,"NLLB_decoder.onnx":179109694,"NLLB_embed_and_lm_head.onnx":524712277,"NLLB_cache_initializer.onnx":25368443}
           pathlib.Path("models").mkdir(exist_ok=True)
           for name,expected in sizes.items():
               dest=pathlib.Path("models")/name
@@ -44,9 +44,54 @@ jobs:
           pathlib.Path("nllb-smoke-report.json").write_text(json.dumps(result,indent=2,ensure_ascii=False))
           print("PASS: both real NLLB ONNX sessions loaded in clean Linux ORT 1.20.1",flush=True)
           PY
+      - name: Execute NLLB embedding encoder and decoder cache with synthetic tokens
+        run: |
+          python - <<'PY'
+          import json, pathlib, time
+          import numpy as np
+          import onnxruntime as ort
+          opts=ort.SessionOptions()
+          opts.intra_op_num_threads=2
+          opts.graph_optimization_level=ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+          base=pathlib.Path("models")
+          sessions={}
+          for key,filename in (("embed","NLLB_embed_and_lm_head.onnx"),("encoder","NLLB_encoder.onnx"),("cache","NLLB_cache_initializer.onnx"),("decoder","NLLB_decoder.onnx")):
+              t=time.monotonic()
+              sessions[key]=ort.InferenceSession(str(base/filename),sess_options=opts,providers=["CPUExecutionProvider"])
+              print("session",key,"loaded in",round(time.monotonic()-t,2),"seconds",flush=True)
+          ids=np.array([[2,3]],dtype=np.int64)
+          mask=np.ones_like(ids)
+          t=time.monotonic()
+          embed=sessions["embed"].run(None,{"input_ids":ids,"pre_logits":np.zeros((1,1,1024),dtype=np.float32),"use_lm_head":np.array([False],dtype=np.bool_)})
+          embed_names=[x.name for x in sessions["embed"].get_outputs()]
+          em=dict(zip(embed_names,embed))
+          print("embedding outputs",[(k,v.shape) for k,v in em.items()],flush=True)
+          enc=sessions["encoder"].run(None,{"input_ids":ids,"attention_mask":mask,"embed_matrix":em["embed_matrix"]})
+          hidden=dict(zip([x.name for x in sessions["encoder"].get_outputs()],enc))["last_hidden_state"]
+          print("encoder hidden state",hidden.shape,"elapsed",round(time.monotonic()-t,2),flush=True)
+          assert hidden.shape[0]==1 and hidden.shape[-1]==1024
+          cache_input={x.name:hidden for x in sessions["cache"].get_inputs() if x.name=="encoder_hidden_states"}
+          assert len(cache_input)==1,[(x.name,x.shape) for x in sessions["cache"].get_inputs()]
+          cache=dict(zip([x.name for x in sessions["cache"].get_outputs()],sessions["cache"].run(None,cache_input)))
+          print("cache output count",len(cache),flush=True)
+          dec_inputs={}
+          for x in sessions["decoder"].get_inputs():
+              if x.name=="input_ids": dec_inputs[x.name]=np.array([[2]],dtype=np.int64)
+              elif x.name=="encoder_attention_mask": dec_inputs[x.name]=mask
+              elif x.name=="embed_matrix": dec_inputs[x.name]=em["embed_matrix"]
+              elif x.name.startswith("past_key_values.") and x.name.endswith((".encoder.key",".encoder.value")):
+                  dec_inputs[x.name]=cache[x.name.replace("past_key_values.","present.")]
+              elif x.name.startswith("past_key_values.") and x.name.endswith((".decoder.key",".decoder.value")):
+                  dec_inputs[x.name]=np.empty((1,16,0,64),dtype=np.float32)
+              else: raise ValueError("Unexpected decoder input "+x.name)
+          result=dict(zip([x.name for x in sessions["decoder"].get_outputs()],sessions["decoder"].run(None,dec_inputs)))
+          assert "pre_logits" in result and np.isfinite(result["pre_logits"]).all()
+          print("PASS: actual embedding, encoder, cache initializer, and decoder forward inference",result["pre_logits"].shape,flush=True)
+          pathlib.Path("nllb-forward-report.json").write_text(json.dumps({"status":"PASS","test":"synthetic token forward pass; NOT a translation","pre_logits_shape":list(result["pre_logits"].shape)},indent=2))
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: nllb-isolated-smoke-report
-          path: nllb-smoke-report.json
+          path: |\n            nllb-smoke-report.json\n            nllb-forward-report.json
           if-no-files-found: warn
