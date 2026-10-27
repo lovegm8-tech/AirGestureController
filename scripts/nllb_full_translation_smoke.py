@@ -48,7 +48,11 @@ def encode_ids(text, source, framing="prefix"):
     for piece in pieces:
         val = piece + 1
         ids.append({1: 3, 2: 0, 3: 2}.get(val, val))
-    if framing == "suffix":\n        ids.extend([2, source])\n    else:\n        ids.append(2)\n    return np.asarray([ids], dtype=np.int64)
+    if framing == "suffix":
+        ids.extend([2, source])
+    else:
+        ids.append(2)
+    return np.asarray([ids], dtype=np.int64)
 
 def detokenize(tokens):
     pieces = []
@@ -124,5 +128,6 @@ for text, language in cases:
             results.append(item)
             print("TRANSLATION", json.dumps(item, ensure_ascii=False), flush=True)
             assert item["output"].strip(), "Empty translation: " + text
-pathlib.Path("nllb-translation-report.json").write_text(json.dumps(results, ensure_ascii=False, indent=2) + "\n")
+pathlib.Path("nllb-translation-report.json").write_text(json.dumps(results, ensure_ascii=False, indent=2) + "
+")
 print("PASS: 16 NLLB decoding configurations executed; translation quality requires manual comparison", flush=True)
