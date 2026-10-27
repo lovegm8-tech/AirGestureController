@@ -84,7 +84,7 @@ jobs:
           sha256sum "$DIR/libonnxruntime.so"
           readelf -Ws "$DIR/libonnxruntime.so" | grep -F OrtGetApiBase || true
           readelf -d "$DIR/libonnxruntime.so" | grep -E 'SONAME|NEEDED' || true
-          readelf -Ws "$DIR/libonnxruntime.so" | awk '$8 == "OrtGetApiBase" && $7 != "UND" && $5 == "GLOBAL" && $6 == "DEFAULT" {found=1} END {exit !found}' || {
+          readelf -Ws "$DIR/libonnxruntime.so" | awk '$8 ~ /^OrtGetApiBase(@@.*)?$/ && $7 != "UND" && $5 == "GLOBAL" && $6 == "DEFAULT" {found=1} END {exit !found}' || {
             echo "Microsoft ONNX Runtime AAR library lacks globally exported OrtGetApiBase; inspect diagnostics" >&2
             exit 1
           }
@@ -114,7 +114,7 @@ jobs:
           APK=app/build/outputs/apk/release/app-release-unsigned.apk
           DIR="$RUNNER_TEMP/dual-ort/lib/arm64-v8a"
           unzip -p "$APK" lib/arm64-v8a/libonnxruntime.so > "$RUNNER_TEMP/ort-final.so"
-          readelf -Ws "$RUNNER_TEMP/ort-final.so" | awk '$8 == "OrtGetApiBase" && $7 != "UND" && $5 == "GLOBAL" && $6 == "DEFAULT" {found=1} END {exit !found}'
+          readelf -Ws "$RUNNER_TEMP/ort-final.so" | awk '$8 ~ /^OrtGetApiBase(@@.*)?$/ && $7 != "UND" && $5 == "GLOBAL" && $6 == "DEFAULT" {found=1} END {exit !found}'
           unzip -p "$APK" lib/arm64-v8a/libsherpa_onnxruntime.so > "$RUNNER_TEMP/sherpa-final.so"
           cmp "$RUNNER_TEMP/sherpa-final.so" "$DIR/libsherpa_onnxruntime.so"
           unzip -p "$APK" lib/arm64-v8a/libsherpa-onnx-jni.so > "$RUNNER_TEMP/sherpa-jni-final.so"
