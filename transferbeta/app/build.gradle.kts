@@ -13,8 +13,8 @@ android {
         applicationId = "tw.airgesture.transferbeta"
         minSdk = 29
         targetSdk = 35
-        versionCode = 73
-        versionName = "1.0.60"
+        versionCode = 74
+        versionName = "1.0.61"
         // S26 Ultra / S25 are arm64-v8a. Remove unused x86/x86_64/32-bit
         // copies of MediaPipe and Vosk without stripping needed functionality.
         ndk { abiFilters += setOf("arm64-v8a") }
