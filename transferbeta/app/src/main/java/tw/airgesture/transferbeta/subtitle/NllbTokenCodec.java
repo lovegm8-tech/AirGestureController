@@ -65,15 +65,15 @@ public final class NllbTokenCodec {
         int[] pieces = processor.encode(text);
         if (pieces == null || pieces.length == 0) throw new IllegalStateException("Tokenizer returned no tokens");
         long[] ids = new long[pieces.length + 2];
-        ids[0] = languageId(source);
         for (int i = 0; i < pieces.length; i++) {
             int id = pieces[i] + 1;
             if (id == 1) id = 3;
             else if (id == 2) id = 0;
             else if (id == 3) id = 2;
-            ids[i + 1] = id;
+            ids[i] = id;
         }
-        ids[ids.length - 1] = 2; // NLLB EOS
+        ids[ids.length - 2] = 2; // NLLB EOS precedes the source language tag
+        ids[ids.length - 1] = languageId(source);
         return new Input(ids);
     }
 
