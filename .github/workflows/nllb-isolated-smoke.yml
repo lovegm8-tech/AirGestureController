@@ -9,7 +9,7 @@ permissions:
 jobs:
   nllb-onnx:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
       - name: Install isolated NLLB test runtime
@@ -89,11 +89,15 @@ jobs:
           print("PASS: actual embedding, encoder, cache initializer, and decoder forward inference",result["pre_logits"].shape,flush=True)
           pathlib.Path("nllb-forward-report.json").write_text(json.dumps({"status":"PASS","test":"synthetic token forward pass; NOT a translation","pre_logits_shape":list(result["pre_logits"].shape)},indent=2))
           PY
+      - name: Download official tokenizer and run complete English Japanese translation
+        run: |
+          python -m pip install --disable-pip-version-check 'sentencepiece==0.2.0'
+          python scripts/nllb_full_translation_smoke.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: nllb-isolated-smoke-report
           path: |
             nllb-smoke-report.json
-            nllb-forward-report.json
+            nllb-forward-report.json\n            nllb-translation-report.json
           if-no-files-found: warn
