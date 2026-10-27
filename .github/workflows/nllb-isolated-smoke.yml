@@ -101,4 +101,5 @@ jobs:
             nllb-smoke-report.json
             nllb-forward-report.json
             nllb-translation-report.json
+            nllb-quality-report.json
           if-no-files-found: warn
