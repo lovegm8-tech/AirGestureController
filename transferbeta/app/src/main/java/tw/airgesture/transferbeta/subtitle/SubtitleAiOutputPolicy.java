@@ -15,6 +15,32 @@ public final class SubtitleAiOutputPolicy {
         return text;
     }
 
+    /** Conservative offline gate: do not replace a plausible fast subtitle with
+     * a short, malformed or obviously unrelated NLLB completion. */
+    public static boolean acceptRevision(String source, String candidate, String quick) {
+        String result = normalize(candidate);
+        if (!accept(result, quick)) return false;
+        if (result.contains("⁇") || result.contains("�") || result.contains("??")) return false;
+        if (source == null || source.trim().length() < 8) return false;
+        // Short ASR fragments have no reliable context for a second-pass rewrite.
+        if (source.trim().split("\\s+").length <= 2
+                && source.matches("(?s).*\\p{IsLatin}.*")) return false;
+        if (quick != null && quick.length() >= 3) {
+            int quickHan = countHan(quick);
+            int resultHan = countHan(result);
+            if (quickHan >= 3 && resultHan < Math.max(2, quickHan / 2)) return false;
+            if (quickHan >= 3 && resultHan > quickHan * 2 + 5) return false;
+        }
+        return true;
+    }
+
+    private static int countHan(String s) {
+        int n = 0;
+        for (int i = 0; i < s.length(); i++)
+            if (s.charAt(i) >= 0x4e00 && s.charAt(i) <= 0x9fff) n++;
+        return n;
+    }
+
     public static boolean accept(String text, String quickTranslation) {
         if (text == null || text.length() < 2 || text.length() > 110) return false;
         if (text.contains("原文：") || text.contains("解釋：")

@@ -16,6 +16,13 @@ public class SubtitleAiOutputPolicyTest {
         assertFalse(SubtitleAiOutputPolicy.accept("原文：Hello", "你好"));
         assertFalse(SubtitleAiOutputPolicy.accept("我是很長很長很長很長很長很長很長的廢話", "你來了。"));
     }
+    @Test public void malformedOrFragmentaryNllbNeverOverwritesQuickCaption() {
+        assertFalse(SubtitleAiOutputPolicy.acceptRevision("はい、元気です。どこに？", "⁇ ,我很好.", "是的，我很好。在哪裡？"));
+        assertFalse(SubtitleAiOutputPolicy.acceptRevision("Have to.", "我必須.", "必須。"));
+        assertFalse(SubtitleAiOutputPolicy.acceptRevision("I would say therefore.", "我認為這是一個問題.", "因此，我會說。"));
+        assertTrue(SubtitleAiOutputPolicy.acceptRevision("お元気ですか？", "你好嗎?", "你做得很好嗎？"));
+    }
+
     @Test public void modelOutputNeverAddsNewCaptionRow() {
         SubtitleTwoLineBuffer captions = new SubtitleTwoLineBuffer();
         assertTrue(captions.putVoice(1, "原翻譯第一句"));

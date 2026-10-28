@@ -245,7 +245,12 @@ public final class SubtitleCaptureService extends Service {
                     if (version != nllbRequestVersion.get() || !running || pausedByUser
                             || calibrating || improved == null || improved.trim().isEmpty()
                             || improved.equals(quickChinese)) return;
-                    apply.accept(improved);
+                    if (!SubtitleAiOutputPolicy.acceptRevision(original, improved, quickChinese)) {
+                        trace("NLLB 拒絕覆蓋", original + " → " + improved);
+                        lastAiStatus = "NLLB 品質檢查未通過，保留 ML Kit";
+                        return;
+                    }
+                    apply.accept(SubtitleAiOutputPolicy.normalize(improved));
                 });
             } catch (Exception | LinkageError error) {
                 StringBuilder reason = new StringBuilder();
