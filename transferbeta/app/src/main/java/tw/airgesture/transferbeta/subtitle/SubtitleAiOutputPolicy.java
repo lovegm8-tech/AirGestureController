@@ -21,7 +21,7 @@ public final class SubtitleAiOutputPolicy {
         String result = normalize(candidate);
         if (!accept(result, quick)) return false;
         if (result.contains("⁇") || result.contains("�") || result.contains("??")) return false;
-        if (source == null || source.trim().length() < 8) return false;
+        if (source == null || source.trim().length() < 5) return false;
         // Short ASR fragments have no reliable context for a second-pass rewrite.
         if (source.trim().split("\\s+").length <= 2
                 && source.matches("(?s).*\\p{IsLatin}.*")) return false;
