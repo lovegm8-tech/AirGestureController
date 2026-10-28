@@ -6,6 +6,7 @@ on:
   push:
     branches:
       - fix/sherpa-ort-native-link-v1-0-58
+      - develop
     paths:
       - '.github/workflows/subtitle-v153-signed.yml'
       - 'transferbeta/app/src/**'
