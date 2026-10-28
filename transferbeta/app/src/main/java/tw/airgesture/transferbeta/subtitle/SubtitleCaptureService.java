@@ -1037,7 +1037,7 @@ public final class SubtitleCaptureService extends Service {
         final String combined = previous + " " + current;
         // Do not exceed the translation model's useful input length.
         if (combined.length() > 240) return;
-        final long version = nllbRequestVersion.incrementAndGet();
+        final long version = nllbRequestVersion.get();
         nllbExecutor.execute(() -> {
             if (!running || version != nllbRequestVersion.get()) return;
             try {
