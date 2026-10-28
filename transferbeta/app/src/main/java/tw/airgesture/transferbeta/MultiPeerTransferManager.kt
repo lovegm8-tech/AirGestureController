@@ -374,8 +374,10 @@ class MultiPeerTransferManager(private val app: Context) {
         }
         main.postDelayed({
             if (!started || cycle != scanEpoch) return@postDelayed
+            // Keep advertising while the receiver is awake and transfer is enabled.
+            // Otherwise two idle devices can miss each other's short scan windows,
+            // forcing the receiver to press Search manually.
             client.stopDiscovery()
-            client.stopAdvertising()
             scanning = false
             main.postDelayed({
                 if (started && discoveryEnabled && cycle == scanEpoch) search()
