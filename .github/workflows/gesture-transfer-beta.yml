@@ -4,7 +4,7 @@ concurrency:
   cancel-in-progress: true
 on:
   push:
-    branches: [ "experiment/gesture-transfer-beta", "develop" ]
+    branches: [ "experiment/gesture-transfer-beta" ]
     paths:
       - "transferbeta/**"
       - ".github/workflows/gesture-transfer-beta.yml"
@@ -13,7 +13,7 @@ permissions:
   contents: read
 jobs:
   build:
-    if: github.ref == 'refs/heads/experiment/gesture-transfer-beta' || github.ref == 'refs/heads/develop'
+    if: github.ref == 'refs/heads/experiment/gesture-transfer-beta'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     defaults:
