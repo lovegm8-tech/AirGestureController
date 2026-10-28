@@ -1018,11 +1018,62 @@ public final class SubtitleCaptureService extends Service {
                 });
     }
 
+    // The most recent confirmed ASR sentence provides optional local context.
+    // Context translations are diagnostic only: NLLB does not expose reliable
+    // word alignment, so a combined translation must never overwrite one row.
+    private String previousNllbVoiceSentence = "";
+    private long previousNllbVoiceAtMs = 0L;
+    private long previousNllbVoiceId = Long.MIN_VALUE;
+    private String previousNllbVoiceLanguage = "";
+
+    private void diagnoseNllbContext(long id, String current, String previous) {
+        if (!running || previous.isEmpty()) return;
+        if (!getSharedPreferences("floating_subtitle", MODE_PRIVATE)
+                .getBoolean("nllb_enabled", false)) return;
+        final OfflineTranslationEngine.SourceLanguage language =
+                "ja".equals(sourceLanguage) ? OfflineTranslationEngine.SourceLanguage.JAPANESE
+                : "en".equals(sourceLanguage) ? OfflineTranslationEngine.SourceLanguage.ENGLISH : null;
+        if (language == null) return;
+        final String combined = previous + " " + current;
+        // Do not exceed the translation model's useful input length.
+        if (combined.length() > 240) return;
+        final long version = nllbRequestVersion.incrementAndGet();
+        nllbExecutor.execute(() -> {
+            if (!running || version != nllbRequestVersion.get()) return;
+            try {
+                NllbOfflineTranslationEngine engine = nllbEngine;
+                if (engine == null) return;
+                long started = SystemClock.elapsedRealtime();
+                String result = engine.translate(combined, language).translatedTraditionalChinese;
+                long elapsed = SystemClock.elapsedRealtime() - started;
+                main.post(() -> {
+                    if (!running || version != nllbRequestVersion.get()) return;
+                    trace("NLLB 上下文試譯 #" + id + "（" + elapsed + "ms）",
+                            combined + " → " + result + "（僅診斷，不覆蓋字幕）");
+                });
+            } catch (Exception | LinkageError error) {
+                android.util.Log.w("FloatingNLLB", "Context diagnostic failed", error);
+            }
+        });
+    }
+
     private void requestVoiceAiRefinement(long id, String original, String quickChinese) {
         if (id == lastVoiceAiRequestedId &&
                 original.equalsIgnoreCase(lastVoiceAiRequestedSource)) return;
         lastVoiceAiRequestedId = id;
         lastVoiceAiRequestedSource = original;
+        long now = SystemClock.elapsedRealtime();
+        String previous = "";
+        if (previousNllbVoiceId != id && now - previousNllbVoiceAtMs < 8000L
+                && sourceLanguage.equals(previousNllbVoiceLanguage)) {
+            previous = previousNllbVoiceSentence;
+        }
+        if (previousNllbVoiceId != id) {
+            previousNllbVoiceSentence = original;
+            previousNllbVoiceAtMs = now;
+            previousNllbVoiceId = id;
+            previousNllbVoiceLanguage = sourceLanguage;
+        }
         refineWithNllb(original, quickChinese, improved -> {
             if (id == lastVoiceTranslatedId
                     && twoLineCaptions.reviseVoiceIfUnchanged(id, quickChinese, improved)) {
@@ -1032,6 +1083,12 @@ public final class SubtitleCaptureService extends Service {
                 lastAiStatus = "NLLB 已修正語音字幕第 " + id + " 句";
             }
         });
+        // Run after the fast-caption correction request; use the same
+        // serialized NLLB executor to avoid concurrent ONNX sessions.
+        if (!previous.isEmpty()) {
+            trace("NLLB 上下文來源 #" + id, previous + " + " + original);
+            diagnoseNllbContext(id, original, previous);
+        }
     }
 
     private void requestOcrAiRefinement(String original, String quickChinese) {
