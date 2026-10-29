@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   signed-release:
@@ -213,3 +213,30 @@ jobs:
           name: FloatingControl-v${{ steps.app_version.outputs.name }}-test-signed
           path: transferbeta/app/build/outputs/apk/release/app-release.apk
           retention-days: 30
+
+      - name: Publish signed APK as a downloadable prerelease
+        if: github.ref == 'refs/heads/develop'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.app_version.outputs.name }}
+          VERSION_CODE: ${{ steps.app_version.outputs.code }}
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/release/app-release.apk
+          test -s "$APK"
+          TAG="floating-control-v${VERSION}-test"
+          ASSET="FloatingControl-v${VERSION}-code${VERSION_CODE}-signed.apk"
+          cp "$APK" "$RUNNER_TEMP/$ASSET"
+          sha256sum "$RUNNER_TEMP/$ASSET"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$RUNNER_TEMP/$ASSET" --clobber
+          else
+            gh release create "$TAG" "$RUNNER_TEMP/$ASSET" \
+              --target "$GITHUB_SHA" \
+              --title "Floating Control v${VERSION} (test signed APK)" \
+              --notes "Test build from develop. Package tw.airgesture.transferbeta, versionCode ${VERSION_CODE}. GitHub Actions verified the APK package and permanent signing certificate. Device testing is still required." \
+              --prerelease
+          fi
+          echo "Download: https://github.com/$GH_REPO/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
