@@ -721,6 +721,15 @@ class TransferActivity : ComponentActivity() {
         }
         modePanel.addView(modeRow("附近裝置傳檔",
             "亮屏搜尋、傳送和接收；熄屏暫停搜尋", transferSwitch))
+        modePanel.addView(Button(this).apply {
+            text = "搜尋裝置／重新連線"
+            isAllCaps = false
+            setOnClickListener {
+                val manager = GlobalGestureService.transfer
+                if (manager == null) flash("請先開啟附近裝置傳檔並啟動懸浮操作")
+                else { manager.refresh(); flash("正在搜尋附近的信任裝置") }
+            }
+        })
         subtitleSwitch = Switch(this).apply {
             isChecked = SubtitleCaptureService.running
             contentDescription = "懸浮翻譯開關"
@@ -731,7 +740,7 @@ class TransferActivity : ComponentActivity() {
             }
         }
         modePanel.addView(modeRow("懸浮翻譯",
-            "語音優先＋OCR 備用；安裝 Qwen 後會於手機本地修正完整中文字幕，固定兩行",
+            "語音優先＋OCR 備用；NLLB 本地翻譯，固定兩行；模型設定可展開",
             subtitleSwitch))
         modePanel.addView(text("字幕來源語言（切換語言需先關閉翻譯）", 13f))
         subtitleLanguage = Spinner(this).apply {
@@ -780,7 +789,22 @@ class TransferActivity : ComponentActivity() {
             }
         }
         modePanel.addView(subtitleLanguage)
-        modePanel.addView(text("播放語音辨識引擎（需先停止翻譯再切換）", 13f))
+        // Keep the homepage concise; move all ASR/model diagnostics below a fold.
+        val subtitleAdvanced = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        modePanel.addView(Button(this).apply {
+            text = "翻譯進階設定與模型管理  ▾"
+            isAllCaps = false
+            setOnClickListener {
+                subtitleAdvanced.visibility = if (subtitleAdvanced.visibility == View.VISIBLE)
+                    View.GONE else View.VISIBLE
+                text = if (subtitleAdvanced.visibility == View.VISIBLE)
+                    "收起翻譯進階設定  ▴" else "翻譯進階設定與模型管理  ▾"
+            }
+        })
+        subtitleAdvanced.addView(text("播放語音辨識引擎（需先停止翻譯再切換）", 13f))
         asrEngineSpinner = Spinner(this).apply {
             adapter = ArrayAdapter(this@TransferActivity,
                 android.R.layout.simple_spinner_dropdown_item,
@@ -816,10 +840,10 @@ class TransferActivity : ComponentActivity() {
                 }
             }
         }
-        modePanel.addView(asrEngineSpinner)
+        subtitleAdvanced.addView(asrEngineSpinner)
         asrModelStatus = text("SenseVoice：檢查模型…", 13f)
-        modePanel.addView(asrModelStatus)
-        modePanel.addView(Button(this).apply {
+        subtitleAdvanced.addView(asrModelStatus)
+        subtitleAdvanced.addView(Button(this).apply {
             text = "下載 SenseVoice INT8 模型（約 163 MB）"
             isAllCaps = false
             setOnClickListener {
@@ -836,7 +860,7 @@ class TransferActivity : ComponentActivity() {
                 }
             }
         })
-        modePanel.addView(Button(this).apply {
+        subtitleAdvanced.addView(Button(this).apply {
             text = "驗證並安裝已下載的 SenseVoice 模型"
             isAllCaps = false
             setOnClickListener {
@@ -850,7 +874,7 @@ class TransferActivity : ComponentActivity() {
                 refreshHome()
             }
         })
-        modePanel.addView(Button(this).apply {
+        subtitleAdvanced.addView(Button(this).apply {
             text = "檢查 SenseVoice 模型狀態"
             isAllCaps = false
             setOnClickListener {
@@ -892,7 +916,7 @@ class TransferActivity : ComponentActivity() {
                     flash("請先關閉再重新開啟翻譯，套用語音補位設定")
             }
         }
-        modePanel.addView(modeRow(
+        subtitleAdvanced.addView(modeRow(
             "播放語音優先翻譯（Vosk 英日／SenseVoice 英日韓）",
             "SenseVoice 為實驗性離線 ASR，須先下載、驗證並安裝模型；辨識音訊不會上傳，未安裝時英文／日文可回退 Vosk。切換引擎需重啟翻譯。",
             voiceFallbackSwitch))
@@ -924,13 +948,13 @@ class TransferActivity : ComponentActivity() {
                 refreshHome()
             }
         }
-        modePanel.addView(modeRow("NLLB 本地 AI 翻譯（取代 Qwen）",
+        subtitleAdvanced.addView(modeRow("NLLB 本地 AI 翻譯（取代 Qwen）",
             "ML Kit 先顯示中文字幕，NLLB 依英文／日文原文重新翻譯並更新同一句。模型須完整驗證後才能啟用；Qwen 已停用。",
             aiLocalSwitch))
         aiModelStatus = text("NLLB：檢查模型…", 13f)
-        modePanel.addView(aiModelStatus)
-        modePanel.addView(text("NLLB 離線翻譯測試（實驗功能；不影響現有 ML Kit）", 17f))
-        modePanel.addView(Button(this).apply {
+        subtitleAdvanced.addView(aiModelStatus)
+        subtitleAdvanced.addView(text("NLLB 離線翻譯測試（實驗功能；不影響現有 ML Kit）", 17f))
+        subtitleAdvanced.addView(Button(this).apply {
             text = "安裝已下載的 NLLB 並測試英文／日文翻譯"
             isAllCaps = false
             setOnClickListener {
@@ -974,7 +998,7 @@ class TransferActivity : ComponentActivity() {
             }
         })
 
-        modePanel.addView(Button(this).apply {
+        subtitleAdvanced.addView(Button(this).apply {
             text = "下載官方 NLLB Tokenizer（4.85 MB；來源已固定）"
             isAllCaps = false
             setOnClickListener {
@@ -1003,7 +1027,7 @@ class TransferActivity : ComponentActivity() {
             }
         })
 
-        modePanel.addView(Button(this).apply {
+        subtitleAdvanced.addView(Button(this).apply {
             text = "匯入可信 SHA-256 清單並安裝 NLLB"
             isAllCaps = false
             setOnClickListener {
@@ -1011,9 +1035,9 @@ class TransferActivity : ComponentActivity() {
                 else nllbManifestPicker.launch("application/json")
             }
         })
-        modePanel.addView(text("安全提醒：SHA-256 清單必須從可信發布者獨立取得並核對；不能直接使用 App 自己計算的雜湊值當成可信清單。", 12f))
+        subtitleAdvanced.addView(text("安全提醒：SHA-256 清單必須從可信發布者獨立取得並核對；不能直接使用 App 自己計算的雜湊值當成可信清單。", 12f))
 
-        modePanel.addView(Button(this).apply {
+        subtitleAdvanced.addView(Button(this).apply {
             text = "從手機匯入 NLLB SentencePiece Tokenizer（待驗證）"
             isAllCaps = false
             setOnClickListener {
@@ -1022,7 +1046,7 @@ class TransferActivity : ComponentActivity() {
             }
         })
 
-        modePanel.addView(Button(this).apply {
+        subtitleAdvanced.addView(Button(this).apply {
             text = "下載 NLLB ONNX 模型（約 995 MB；暫存待驗證）"
             isAllCaps = false
             setOnClickListener {
@@ -1067,7 +1091,7 @@ class TransferActivity : ComponentActivity() {
             }
         })
 
-        modePanel.addView(Button(this).apply {
+        subtitleAdvanced.addView(Button(this).apply {
             text = "檢查 NLLB 模型檔案及 SHA-256"
             isAllCaps = false
             setOnClickListener {
@@ -1091,7 +1115,7 @@ class TransferActivity : ComponentActivity() {
                 }
             }
         })
-        modePanel.addView(Button(this).apply {
+        subtitleAdvanced.addView(Button(this).apply {
             text = "NLLB 英文／日文實際推論測試"
             isAllCaps = false
             setOnClickListener {
@@ -1122,8 +1146,8 @@ class TransferActivity : ComponentActivity() {
                 }
             }
         })
-        modePanel.addView(text("OCR 備用：語音不支援或辨識不到時可點「譯」小球→「框選字幕位置」，手動定位畫面文字。", 13f))
-        modePanel.addView(Button(this).apply {
+        subtitleAdvanced.addView(text("OCR 備用：語音不支援或辨識不到時可點「譯」小球→「框選字幕位置」，手動定位畫面文字。", 13f))
+        subtitleAdvanced.addView(Button(this).apply {
             text = "重新框選字幕範圍"
             isAllCaps = false
             setOnClickListener {
@@ -1137,7 +1161,7 @@ class TransferActivity : ComponentActivity() {
                 }
             }
         })
-        modePanel.addView(Button(this).apply {
+        subtitleAdvanced.addView(Button(this).apply {
             text = "查看字幕辨識診斷（原文／翻譯）"
             isAllCaps = false
             setOnClickListener {
@@ -1165,7 +1189,8 @@ class TransferActivity : ComponentActivity() {
             }
         })
         modeDescription = text(modeLabel(), 14f)
-        modePanel.addView(modeDescription)
+        subtitleAdvanced.addView(modeDescription)
+        modePanel.addView(subtitleAdvanced)
         root.addView(modePanel)
         val aiPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1509,7 +1534,7 @@ class TransferActivity : ComponentActivity() {
             GlobalGestureService.transfer?.confirmReceive()
                 ?: flash("請先啟動隔空抓取服務")
         }
-        extraButton("重新搜尋裝置") { GlobalGestureService.transfer?.refresh() }
+        // Search is now on the main screen next to Nearby transfer.
         extraButton("已配對裝置與多台連線") {
             val current = GlobalGestureService.transfer
             if (current == null) {
