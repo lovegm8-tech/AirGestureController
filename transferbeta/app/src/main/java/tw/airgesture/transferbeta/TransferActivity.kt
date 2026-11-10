@@ -494,6 +494,8 @@ class TransferActivity : ComponentActivity() {
                 else { manager.refresh(); flash("正在搜尋附近的信任裝置") }
             }
         })
+        modeDescription = text(modeLabel(), 14f)
+        modePanel.addView(modeDescription)
         root.addView(modePanel)
         setupGuide = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
