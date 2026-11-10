@@ -15,7 +15,7 @@ android {
         targetSdk = 35
         versionCode = 77
         versionName = "1.0.64"
-        // S26 Ultra / S25 are arm64-v8a. Remove unused x86/x86_64/32-bit
+        // Keep only arm64-v8a for the supported Android devices.
         ndk { abiFilters += setOf("arm64-v8a") }
     }
     buildTypes { release { isMinifyEnabled = false } }
@@ -44,7 +44,6 @@ dependencies {
     implementation("androidx.media3:media3-common:1.8.1")
     // One upgrade-cycle only: cancels WorkManager jobs scheduled by the retired updater.
     implementation("androidx.work:work-runtime-ktx:2.10.5")
-    implementation("com.google.mlkit:translate:17.0.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     testImplementation("junit:junit:4.13.2")
 }
