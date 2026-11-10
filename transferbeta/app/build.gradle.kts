@@ -13,14 +13,11 @@ android {
         applicationId = "tw.airgesture.transferbeta"
         minSdk = 29
         targetSdk = 35
-        versionCode = 76
-        versionName = "1.0.63"
+        versionCode = 77
+        versionName = "1.0.64"
         // S26 Ultra / S25 are arm64-v8a. Remove unused x86/x86_64/32-bit
-        // copies of MediaPipe and Vosk without stripping needed functionality.
         ndk { abiFilters += setOf("arm64-v8a") }
-        externalNativeBuild { cmake { arguments += listOf("-DSENTENCEPIECE_SOURCE_DIR=${project.rootDir}/native-deps/sentencepiece", "-DANDROID_STL=c++_shared"); targets += setOf("nllb_sentencepiece") } }
     }
-    externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }
     buildTypes { release { isMinifyEnabled = false } }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -29,8 +26,6 @@ android {
     kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
     packaging {
         resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" }
-        // Prefer the sherpa-onnx AAR native runtime; verified in CI after packaging.
-        jniLibs { pickFirsts += setOf("lib/**/libonnxruntime.so") }
     }
     testOptions { unitTests.isReturnDefaultValues = true }
 }
@@ -49,19 +44,7 @@ dependencies {
     implementation("androidx.media3:media3-common:1.8.1")
     // One upgrade-cycle only: cancels WorkManager jobs scheduled by the retired updater.
     implementation("androidx.work:work-runtime-ktx:2.10.5")
-    implementation("com.google.mlkit:text-recognition:16.0.1")
-    implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
-    implementation("com.google.mlkit:text-recognition-korean:16.0.1")
     implementation("com.google.mlkit:translate:17.0.3")
-    // Android CPU ONNX Runtime for dedicated offline NLLB graph evaluation.
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
-    implementation("com.alphacephei:vosk-android:0.3.75")
-    // Official k2-fsa sherpa-onnx v1.13.8 AAR; pinned and SHA-256 checked by CI.
-    // Stored under app/libs at CI build time; not committed to public GitHub.
-    implementation(files("libs/sherpa-onnx-1.13.8.aar"))
-    implementation("org.apache.commons:commons-compress:1.27.1")
-    // Official Google LiteRT-LM Android runtime. Model weights are NOT in APK.
-    implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     testImplementation("junit:junit:4.13.2")
 }
