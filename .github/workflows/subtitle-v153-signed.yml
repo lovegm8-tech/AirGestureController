@@ -1,26 +1,19 @@
-
-name: Floating Control NLLB v1.0.58 Sherpa Native Runtime Signed Candidate
-
-# Build signed APK after the one-tap installer and test changes.
+name: Floating Control signed release (gesture and Nearby)
 on:
   push:
     branches:
-      - fix/sherpa-ort-native-link-v1-0-58
       - develop
     paths:
       - '.github/workflows/subtitle-v153-signed.yml'
       - 'transferbeta/app/src/**'
       - 'transferbeta/app/build.gradle.kts'
   workflow_dispatch:
-
 permissions:
   contents: write
-
 jobs:
   signed-release:
-    # Branch-scoped push trigger already limits this test build.
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: transferbeta
@@ -35,101 +28,9 @@ jobs:
           gradle-version: '8.9'
       - name: Install Android SDK
         run: |
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
-      - name: Checkout pinned SentencePiece v0.2.0 sources
-        run: |
-          set -euo pipefail
-          mkdir -p native-deps
-          git clone --depth 1 --branch v0.2.0 https://github.com/google/sentencepiece.git native-deps/sentencepiece
-          test "$(git -C native-deps/sentencepiece rev-parse HEAD)" = "17d7580d6407802f85855d2cc9190634e2c95624"
-          test -f native-deps/sentencepiece/src/sentencepiece_processor.h
-          git -C native-deps/sentencepiece rev-parse HEAD
-      - name: Download pinned sherpa-onnx AAR
-        run: |
-          mkdir -p app/libs
-          curl --fail --location --retry 4 --connect-timeout 30 --max-time 240 \
-            "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar" \
-            --output app/libs/sherpa-onnx-1.13.8.aar
-          echo "633c24321e06b1fe79feafa03ea16cbc0f8a286641e2da3559bac91bdb13bd96  app/libs/sherpa-onnx-1.13.8.aar" | sha256sum -c -
-      - name: Extract sherpa native dependencies for independent runtime
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/sherpa-native"
-          unzip -p app/libs/sherpa-onnx-1.13.8.aar jni/arm64-v8a/libonnxruntime.so > "$RUNNER_TEMP/sherpa-native/libonnxruntime.so"
-          unzip -p app/libs/sherpa-onnx-1.13.8.aar jni/arm64-v8a/libsherpa-onnx-jni.so > "$RUNNER_TEMP/sherpa-native/libsherpa-onnx-jni.so"
-          test -s "$RUNNER_TEMP/sherpa-native/libonnxruntime.so"
-          test -s "$RUNNER_TEMP/sherpa-native/libsherpa-onnx-jni.so"
-          echo "Sherpa dependency graph:"
-          readelf -d "$RUNNER_TEMP/sherpa-native/libsherpa-onnx-jni.so" | grep NEEDED
-          echo "Sherpa runtime exported OrtGetApiBase (may be absent):"
-          readelf -Ws "$RUNNER_TEMP/sherpa-native/libonnxruntime.so" | grep OrtGetApiBase || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
       - name: Run tests and assemble release APK
         run: gradle :app:testDebugUnitTest :app:assembleRelease --no-daemon
-      - name: Package independent ONNX runtimes and patch sherpa JNI dependency
-        run: |
-          set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq patchelf
-          APK=app/build/outputs/apk/release/app-release-unsigned.apk
-          test -s "$APK"
-          DIR="$RUNNER_TEMP/dual-ort/lib/arm64-v8a"
-          mkdir -p "$DIR"
-          # The Microsoft ORT library must retain the conventional name because
-          # libonnxruntime4j_jni.so resolves OrtGetApiBase against it.
-          ORT_AAR="$(find "$HOME/.gradle/caches/modules-2/files-2.1/com.microsoft.onnxruntime/onnxruntime-android/1.20.0" -name '*.aar' -print -quit)"
-          test -n "$ORT_AAR" && test -s "$ORT_AAR"
-          echo "Microsoft AAR: $ORT_AAR"
-          unzip -Z1 "$ORT_AAR" | grep -E 'arm64-v8a/.*[.]so$' || true
-          unzip -p "$ORT_AAR" jni/arm64-v8a/libonnxruntime.so > "$DIR/libonnxruntime.so"
-          test -s "$DIR/libonnxruntime.so"
-          sha256sum "$DIR/libonnxruntime.so"
-          readelf -Ws "$DIR/libonnxruntime.so" | grep -F OrtGetApiBase || true
-          readelf -d "$DIR/libonnxruntime.so" | grep -E 'SONAME|NEEDED' || true
-          readelf -Ws "$DIR/libonnxruntime.so" | awk '$8 ~ /^OrtGetApiBase(@@.*)?$/ && $7 != "UND" && $5 == "GLOBAL" && $6 == "DEFAULT" {found=1} END {exit !found}' || {
-            echo "Microsoft ONNX Runtime AAR library lacks globally exported OrtGetApiBase; inspect diagnostics" >&2
-            exit 1
-          }
-          # Keep sherpa's bundled ORT private to sherpa JNI.
-          cp "$RUNNER_TEMP/sherpa-native/libonnxruntime.so" "$DIR/libsherpa_onnxruntime.so"
-          patchelf --set-soname libsherpa_onnxruntime.so "$DIR/libsherpa_onnxruntime.so"
-          unzip -p "$APK" lib/arm64-v8a/libsherpa-onnx-jni.so > "$DIR/libsherpa-onnx-jni.so"
-          if readelf -d "$DIR/libsherpa-onnx-jni.so" | grep -Fq 'libonnxruntime.so'; then
-            patchelf --replace-needed libonnxruntime.so libsherpa_onnxruntime.so "$DIR/libsherpa-onnx-jni.so"
-          else
-            echo "Sherpa JNI has no DT_NEEDED dependency on libonnxruntime.so; refusing unsafe repack" >&2
-            exit 1
-          fi
-          unzip -p "$APK" lib/arm64-v8a/libonnxruntime4j_jni.so > "$DIR/libonnxruntime4j_jni.so"
-          if ! readelf -d "$DIR/libonnxruntime4j_jni.so" | grep -Fq 'libonnxruntime.so'; then
-            patchelf --add-needed libonnxruntime.so "$DIR/libonnxruntime4j_jni.so"
-          fi
-          for LIB in libonnxruntime.so libsherpa-onnx-jni.so libonnxruntime4j_jni.so; do
-            zip -d "$APK" "lib/arm64-v8a/$LIB"
-          done
-          APK_ABS="$(realpath "$APK")"
-          (cd "$RUNNER_TEMP/dual-ort" && zip -0 "$APK_ABS" lib/arm64-v8a/*.so)
-          unzip -t "$APK" | tail -n 1
-      - name: Verify dual ONNX runtime symbols and ELF dependencies
-        run: |
-          set -euo pipefail
-          APK=app/build/outputs/apk/release/app-release-unsigned.apk
-          DIR="$RUNNER_TEMP/dual-ort/lib/arm64-v8a"
-          unzip -p "$APK" lib/arm64-v8a/libonnxruntime.so > "$RUNNER_TEMP/ort-final.so"
-          readelf -Ws "$RUNNER_TEMP/ort-final.so" | awk '$8 ~ /^OrtGetApiBase(@@.*)?$/ && $7 != "UND" && $5 == "GLOBAL" && $6 == "DEFAULT" {found=1} END {exit !found}'
-          unzip -p "$APK" lib/arm64-v8a/libsherpa_onnxruntime.so > "$RUNNER_TEMP/sherpa-final.so"
-          cmp "$RUNNER_TEMP/sherpa-final.so" "$DIR/libsherpa_onnxruntime.so"
-          unzip -p "$APK" lib/arm64-v8a/libsherpa-onnx-jni.so > "$RUNNER_TEMP/sherpa-jni-final.so"
-          readelf -d "$RUNNER_TEMP/sherpa-jni-final.so" | grep -F 'libsherpa_onnxruntime.so'
-          unzip -p "$APK" lib/arm64-v8a/libonnxruntime4j_jni.so > "$RUNNER_TEMP/ort-jni-final.so"
-          readelf -d "$RUNNER_TEMP/ort-jni-final.so" | grep -F 'libonnxruntime.so'
-          echo "Both ONNX runtimes packaged with separate ELF dependencies"
-      - name: Verify SentencePiece native library packaged in APK
-        run: |
-          set -euo pipefail
-          APK=app/build/outputs/apk/release/app-release-unsigned.apk
-          test -s "$APK"
-          unzip -l "$APK" | grep -F 'lib/arm64-v8a/libnllb_sentencepiece.so'
-          echo "NLLB SentencePiece native library present in ARM64 APK"
       - name: Read app version automatically
         id: app_version
         shell: bash
