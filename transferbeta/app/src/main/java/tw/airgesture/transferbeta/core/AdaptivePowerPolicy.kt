@@ -11,7 +11,7 @@ class AdaptivePowerPolicy(
     private val deepIdleAfterMs: Long = 60_000L,
     private val activeIntervalMs: Long = 165L,
     private val activeKeepAliveMs: Long = 2200L,
-    private val firstHandBurstMs: Long = 1200L,
+    private val firstHandBurstMs: Long = 900L,
     private val returningHandGapMs: Long = 650L
 ) {
     enum class Mode { STOPPED, ECO, ACTIVE }
@@ -95,8 +95,8 @@ class AdaptivePowerPolicy(
                 nowMs - lastInference >= 240L)) {
             lastInference = nowMs
             // No landmarks at the exact wake frame is common for a hand
-            // emerging from the bottom. Grant a bounded 1000 ms probe window.
-            if (policy != 0) motionProbeUntil = nowMs + 1000L
+            // emerging from the bottom. Grant only a 520 ms probe window.
+            if (policy != 0) motionProbeUntil = nowMs + 520L
             return true
         }
         val interval = when (mode(nowMs)) {
