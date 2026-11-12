@@ -327,6 +327,7 @@ class TransferActivity : ComponentActivity() {
             transferSwitch.isChecked = FloatingSettings.nearby(this)
             modeDescription.text = modeLabel() +
                 (if (GlobalGestureService.isActive) " · 背景服務執行中" else " · 尚未啟動")
+            updatingModeControls = false
         }
         refreshSetupGuide()
         val d = tw.airgesture.transferbeta.core.HomeScreenPolicy.decide(
