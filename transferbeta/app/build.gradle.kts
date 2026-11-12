@@ -13,8 +13,8 @@ android {
         applicationId = "tw.airgesture.transferbeta"
         minSdk = 29
         targetSdk = 35
-        versionCode = 77
-        versionName = "1.0.64"
+        versionCode = 78
+        versionName = "1.0.65"
         // Keep only arm64-v8a for the supported Android devices.
         ndk { abiFilters += setOf("arm64-v8a") }
     }
