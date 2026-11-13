@@ -67,8 +67,10 @@ class AdaptivePowerPolicyTest {
         assertTrue(p.shouldInfer(630L))
         assertTrue(p.shouldInfer(795L))
         // A non-hand motion hint is not a permanent ACTIVE state.
-        assertEquals(AdaptivePowerPolicy.Mode.ECO, p.mode(821L))
+        assertEquals(AdaptivePowerPolicy.Mode.ACTIVE, p.mode(821L))
         assertFalse(p.shouldInfer(821L))
+        assertTrue(p.shouldInfer(960L))
+        assertEquals(AdaptivePowerPolicy.Mode.ECO, p.mode(1051L))
         p.screenChanged(false)
         assertEquals(AdaptivePowerPolicy.Mode.STOPPED, p.mode(822L))
     }
