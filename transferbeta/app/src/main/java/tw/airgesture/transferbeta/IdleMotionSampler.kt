@@ -4,7 +4,7 @@ import androidx.camera.core.ImageProxy
 import tw.airgesture.transferbeta.core.IdleMotionDetector
 
 /**
- * Reads 192 small RGBA samples every 180ms in screen-on ECO, without converting
+ * Reads 192 small RGBA samples every 100ms in screen-on ECO, without converting
  * a Bitmap or invoking MediaPipe. No camera frames are kept or uploaded.
  *
  * Only triggers a fresh AI verification; it can never trigger a touch action.
@@ -23,7 +23,7 @@ internal class IdleMotionSampler {
 
     fun observe(proxy: ImageProxy, nowMs: Long): Boolean {
         if (previousSampleTime != Long.MIN_VALUE &&
-            nowMs >= previousSampleTime && nowMs - previousSampleTime < 180L) return false
+            nowMs >= previousSampleTime && nowMs - previousSampleTime < 100L) return false
         if (previousSampleTime != Long.MIN_VALUE && nowMs < previousSampleTime) reset()
         previousSampleTime = nowMs
         if (proxy.planes.isEmpty() || proxy.width < 16 || proxy.height < 12) return false
