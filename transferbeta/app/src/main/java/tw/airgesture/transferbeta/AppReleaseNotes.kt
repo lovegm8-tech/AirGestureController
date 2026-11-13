@@ -11,6 +11,7 @@ internal object AppReleaseNotes {
     internal data class Entry(val version: String, val summary: String)
 
     val entries: List<Entry> = listOf(
+        Entry("1.0.66", "調整省電待命的輕量影像動態採樣為每 100 毫秒，動態喚醒 AI 驗證窗口延長至 750 毫秒；保留原手勢判定、NFC 與 Nearby 邏輯。"),
         Entry("1.0.65", "修正前鏡頭手勢與附近傳檔開關在首頁刷新後無法切換；延後未驗證的省電喚醒調整，NFC 邏輯不變。"),
         Entry("1.0.64", "依使用者決定移除懸浮翻譯、OCR／ASR／NLLB 模型管理與相關權限及依賴；保留手勢操作、NFC 碰一碰、Nearby 傳檔與原有簽章更新機制。"),
         Entry("1.0.63", "首頁保留三個獨立開關，附近傳檔新增顯眼的搜尋裝置／重新連線按鈕；翻譯 ASR 與模型診斷收進可展開的進階區。保留雙向 Nearby 待命廣播修正、NFC、NLLB 與原有手勢，待雙機實測。"),
